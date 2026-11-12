@@ -87,6 +87,8 @@ Apply on any non-trivial task. This is how to think, decide, build, and communic
 
 - **Keep `docs/` as a curated library, not an attic.** Transient artifacts, such as subagent reports, captured diffs and repro scripts, go to a gitignored `.kit/` scratch path. The `curating-docs` skill owns the taxonomy and mechanics.
 
+- **Every finished plan whose change a user can see adds one changelog entry, and a plan with no such change records why in its final Chapter.** Work lands faster than a person can follow by watching, and the people who use or check the product read no plan document. A visible change made with no plan takes a short entry in the commit that carries it, held by the session's judgment alone. `prose-register` owns the entry's form, `curating-docs` its folder, and `finishing-work` the draft, the finalize and the check.
+
 - **Root-cause from the real state before you write a line.** The `systematic-debugging` skill owns root-causing. When two surfaces disagree, query the data to tell a real bug from two intended semantics. When one consumer of shared data is degenerate and another healthy, suspect the boundary contract, not the data. Retire a backlog item a scout finds stale, with receipts.
 
 - **Close each section with a Chapter.** `skills/executing-work/SKILL.md` under the kit plugin root owns its format, the lanes and exit code it records, and the compaction boundary it declares, so load it if it is not loaded. Durable codebase learnings go to memory, not the Chapter. A Chapter states current and terminal fact, such as "delivered in this changeset", never an anticipatory note.

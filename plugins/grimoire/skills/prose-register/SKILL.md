@@ -5,7 +5,7 @@ description: "The register every piece of prose takes, with its scaling by piece
 
 # Prose Register
 
-This skill holds the recipe, the scaling, the voice layer, the tells catalog and the plan brief. The rule is the doctrine's, the sentence bars are `writing-skills`' "What a Sentence Must Earn" section, and the review procedure is the `prose-reviewer` charter's.
+This skill holds the recipe, the scaling, the voice layer, the tells catalog, the plan brief and the changelog entry. The rule is the doctrine's, the sentence bars are `writing-skills`' "What a Sentence Must Earn" section, and the review procedure is the `prose-reviewer` charter's.
 
 ## Recipe
 
@@ -51,3 +51,25 @@ A plan brief is a projection of its plan document into seven labelled parts, nev
 A part whose source is empty or absent says so in its own sentence rather than borrowing from another part's source.
 
 The first line is `# Brief: <plan title>`. The brief takes the doctrine's client-briefing register, addressed to the operator, with no `Voice:` layer, so every internal identifier is resolved to what it does. It is bounded to about 1,500 bytes by `wc -c`, since the operator reads it on a phone in place of the plan document. It lives at `docs/briefs/<plan stem>.md`, the stem being the plan file's name without `.md`, and moves to `docs/archive/briefs/` with its plan, as `curating-docs` states. `brainstorming` step 9 writes it at plan open, and `finishing-work` step 6 refreshes it from the closed plan. The decision brief, the dispatch brief and the kaizen brief are different artifacts: a question put to the operator, a subagent's instructions and the kaizen skill's note, none of them a plan brief.
+
+## Changelog Entry
+
+A changelog entry is a projection of a finished plan into a header and five one-line parts, as the plan brief is. It is addressed to a person who uses or checks the product and has read neither the plan nor the repository. Its first line is `# Change: <what changed, in a user's words>`. Four header lines follow, in this order, and a correcting entry adds a fifth, `Corrects:`:
+
+- `Date:` the day the entry is drafted, as `YYYY-MM-DD`.
+- `Product:` one of the product names the changelog folder's README lists.
+- `Kind:` one of `new`, `changed`, `fixed`, `removed` and `withdrawn`.
+- `Plan:` the plan's archived path, `docs/archive/<plan file name>`, or `none`.
+- `Corrects:` the entry this one corrects, on a correcting entry only.
+
+A `Corrected by:` line, where an entry gains one, is its last header line. Each part is one line that opens with a bold label ending in a period. The parts, in order, with the plan section each is drawn from:
+
+- **What changed.** What a user now sees or can do, from `## Goal` and the `Completed:` and `Decisions / Surprises:` lines of the Chapters the plan's sections closed.
+- **Why.** One sentence, from the frame in `## Intent`.
+- **By design.** Behavior that may look like a defect and is intended, from what `## Intent` says done does not need, `## Out of Scope`, `## Assumptions`, and the Chapters' `Decisions / Surprises:` and `Assumptions:` lines.
+- **What to check.** Where to look and what to test again, from the Chapters the plan's sections closed.
+- **Not included.** What the plan left out, from `## Out of Scope`.
+
+Where the plan document records no such behavior, By design reads `None recorded.` and nothing is invented. An oddity the writer knows only from the code stays out, since the code does not say what was intended. An `## Out of Scope` item goes to one part. One that leaves behavior a user will meet looking broken or odd goes to By design, and one that is a feature the plan did not build goes to Not included.
+
+The entry takes the doctrine's client-briefing register with no `Voice:` layer, and is bounded to about 1,500 bytes. It names no customer, no person, no credential or internal host, and no detail of a security weakness beyond that one was fixed. No check measures the bound or this disclosure rule, so the writer holds both. An entry for work with no plan holds the header and the What changed and What to check parts. The one-line part shape is the plan brief's own. `curating-docs` states the folder an entry lives in, and `finishing-work` writes it at a plan's close.

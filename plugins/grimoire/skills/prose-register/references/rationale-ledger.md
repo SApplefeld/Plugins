@@ -1585,16 +1585,17 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 
 This document is the `prose-register` skill body: the recipe for applying the doctrine's structure bullets and checking them, the scaling that decides how much of the register a piece takes, the routing of a `Voice:` value to its reference, and the pointer at the tells catalog. It owns the moments of writing or reviewing any prose for a reader beyond a single passage and of any piece that names a voice, and it keeps out the rule (the doctrine's), the sentence bars (writing-skills') and the review procedure (the prose-reviewer charter's). Load class: named-trigger, per its description.
 
-Written on 2026-09-22 by section 2 of `docs/plans/claude-kit_prose-register_spec_v1.md` (`P` entries below). Redrafted on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `41e70e7b` with its fix round at `5288cfb5`, so every live entry's `passage:` line quotes the text at `5288cfb5` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 3 on 2026-10-25, which added the Plan Brief section: P001 rewritten to its passage as it now reads, and DB001 to DB004 added under the plan's letters DB for the brief as a projection with its seven parts, its register and bound, its path and the steps that write and refresh it, and the sentence separating it from the other briefs. Its round 1 fix added DB005, for a part whose source is empty, and moved DB002 to DB004 to the line the Plan Brief paragraph now sits on.
+Written on 2026-09-22 by section 2 of `docs/plans/claude-kit_prose-register_spec_v1.md` (`P` entries below). Redrafted on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `41e70e7b` with its fix round at `5288cfb5`, so every live entry's `passage:` line quotes the text at `5288cfb5` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 3 on 2026-10-25, which added the Plan Brief section: P001 rewritten to its passage as it now reads, and DB001 to DB004 added under the plan's letters DB for the brief as a projection with its seven parts, its register and bound, its path and the steps that write and refresh it, and the sentence separating it from the other briefs. Its round 1 fix added DB005, for a part whose source is empty, and moved DB002 to DB004 to the line the Plan Brief paragraph now sits on. Amended by `docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md` section 1 on 2026-11-11, which added the Changelog Entry section: P001 rewritten to its passage as it now reads, and BK001 to BK008 added under the plan's letters BK for the entry as a projection, its header, its five parts and their sources, the `None recorded.` rule, the Out of Scope routing, the register, bound and disclosure rule, the no-plan form, and the shared part shape with the owners of the folder and the write.
 
 ### P001
-- key: Hold the recipe, the scaling, the voice references and the tells catalog in this skill, and keep out the rule, the sentence bars and the review procedure, each owned elsewhere.
+- key: Hold the recipe, the scaling, the voice references, the tells catalog, the plan brief and the changelog entry in this skill, and keep out the rule, the sentence bars and the review procedure, each owned elsewhere.
 - class: rule
 - source: plugins/grimoire/skills/prose-register/SKILL.md:8
-- provenance: docs/plans/claude-kit_prose-register_spec_v1.md section 2, on the operator's decision of 2026-09-18 recorded in that plan's Approach: the register supersedes the operator's voice skill, its voice rules moving into a reference, its structure rules replaced by the register, and its prohibitions that are machine-prose tells moving into the catalog.
-- verdict: keep
-- reason: The scope statement is a gating definition written against its exclusions, so a sentence that states a rule, a bar or a review step is routable to its owner on sight. Without the exclusions the skill would drift into restating the doctrine, which is the one-owner defect the plan's Approach names.
-- passage: This skill holds the recipe, the scaling, the voice layer, the tells catalog and the plan brief. The rule is the doctrine's, the sentence bars are `writing-skills`' "What a Sentence Must Earn" section, and the review procedure is the `prose-reviewer` charter's.
+- provenance: docs/plans/claude-kit_prose-register_spec_v1.md section 2, on the operator's decision of 2026-09-18 recorded in that plan's Approach: the register supersedes the operator's voice skill, its voice rules moving into a reference, its structure rules replaced by the register, and its prohibitions that are machine-prose tells moving into the catalog. Amended by `docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md` section 1 2026-11-11, which names the changelog entry among what the skill holds.
+- verdict: rewrite
+- reason: The scope statement is a gating definition written against its exclusions, so a sentence that states a rule, a bar or a review step is routable to its owner on sight. Without the exclusions the skill would drift into restating the doctrine, which is the one-owner defect the plan's Approach names. The list names each form the skill states, so a reader looking for the changelog entry's form learns from the first paragraph that it is here.
+- passage: This skill holds the recipe, the scaling, the voice layer, the tells catalog, the plan brief and the changelog entry. The rule is the doctrine's, the sentence bars are `writing-skills`' "What a Sentence Must Earn" section, and the review procedure is the `prose-reviewer` charter's.
+- landed: c2ea420f0 section 1
 
 ### P002
 - key: Apply the answer-first bullet by moving each unit's arrived-at point to its front, check it by reading first sentences alone, and take the marketing override only from a declaration on the piece, withholding that bullet alone.
@@ -1735,6 +1736,97 @@ Written on 2026-09-22 by section 2 of `docs/plans/claude-kit_prose-register_spec
 - verdict: keep
 - reason: A writer facing an empty slot borrows from the nearest full one, and the brief then says one thing twice while hiding that the plan never stated the other, which is the gap the operator most needs to see. Saying so in the part keeps every part a projection of its own source and makes the absence visible on the page.
 - passage: A part whose source is empty or absent says so in its own sentence rather than borrowing from another part's source.
+
+### BK001
+- key: Write a changelog entry as a projection of its finished plan into a header and five one-line parts, addressed to a person who uses or checks the product and has read neither the plan nor the repository.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/SKILL.md:57
+- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 1 2026-11-11, on the operator's ask of 2026-11-11 recorded in that plan's Intent, after a tester checking a product met changes no document he reads had told him of.
+- verdict: keep
+- reason: The readers are a tester, the team and the operator scrolling back, none of whom opens the plan, so the entry must say what the plan says in their terms. A projection keeps it checkable against its plan, as the plan brief's DB001 argues, and the form sits beside the brief because both are projections of one document.
+- passage: A changelog entry is a projection of a finished plan into a header and five one-line parts, as the plan brief is. It is addressed to a person who uses or checks the product and has read neither the plan nor the repository.
+- landed: c2ea420f0 section 1
+
+### BK002
+- key: Open the entry with `# Change: <what changed, in a user's words>`, then the header lines `Date:`, `Product:`, `Kind:` (one of `new`, `changed`, `fixed`, `removed` and `withdrawn`), `Plan:` (the archived plan path or `none`) and, on a correcting entry only, `Corrects:`, with a `Corrected by:` line, where one is gained, as the last header line.
+- class: mechanic
+- source: plugins/grimoire/skills/prose-register/SKILL.md:57
+- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 1 2026-11-11; the plan's Established Practice Weighed names Keep a Changelog's fixed change kinds as the model for `Kind:`.
+- verdict: keep
+- reason: A fixed kind lets a reader scan for what was removed or fixed without reading every entry. The `Plan:` line names the archived path because that is the path the plan keeps once the entry is read, and it is known before the archive. `Corrects:` and `Corrected by:` exist because the folder is append-only (BK002 under the curating-docs ledger's SKILL.md heading), so a correction is a new entry and the pair links the two. The `Corrected by:` line sits last so the header lines an entry is written with keep their order when it gains one.
+- passage: Its first line is `# Change: <what changed, in a user's words>`. Four header lines follow, in this order, and a correcting entry adds a fifth, `Corrects:`:
+- passage: - `Date:` the day the entry is drafted, as `YYYY-MM-DD`.
+- passage: - `Product:` one of the product names the changelog folder's README lists.
+- passage: - `Kind:` one of `new`, `changed`, `fixed`, `removed` and `withdrawn`.
+- passage: - `Plan:` the plan's archived path, `docs/archive/<plan file name>`, or `none`.
+- passage: - `Corrects:` the entry this one corrects, on a correcting entry only.
+- passage: A `Corrected by:` line, where an entry gains one, is its last header line.
+- landed: 4a913c619 section 1
+
+### BK003
+- key: Write the five parts in order, each one line opening with a bold label ending in a period, drawn from the named plan sections: What changed, Why, By design, What to check and Not included.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/SKILL.md:65
+- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 1 2026-11-11; the plan's Intent records that the tester's questions were what to test again and whether a behavior was intended. Amended by the finishing pass of docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md 2026-11-12, which has What changed draw on the section Chapters' `Completed:` and `Decisions / Surprises:` lines, since `Recap:` is a finishing Chapter field and the entry is drafted before that Chapter exists.
+- verdict: keep
+- reason: Each part answers one question the tester asked or the operator scrolling back asks, and naming its source makes the writer fill slots from the plan rather than summarize, the positive-recipe form writing-skills gives a wrong-shaped output. By design draws on every place a plan records an intended limit, since an intended oddity is what a tester otherwise files as a defect.
+- passage: Each part is one line that opens with a bold label ending in a period. The parts, in order, with the plan section each is drawn from:
+- passage: - **What changed.** What a user now sees or can do, from `## Goal` and the `Completed:` and `Decisions / Surprises:` lines of the Chapters the plan's sections closed.
+- passage: - **Why.** One sentence, from the frame in `## Intent`.
+- passage: - **By design.** Behavior that may look like a defect and is intended, from what `## Intent` says done does not need, `## Out of Scope`, `## Assumptions`, and the Chapters' `Decisions / Surprises:` and `Assumptions:` lines.
+- passage: - **What to check.** Where to look and what to test again, from the Chapters the plan's sections closed.
+- passage: - **Not included.** What the plan left out, from `## Out of Scope`.
+- landed: c2ea420f0 section 1
+
+### BK004
+- key: Where the plan document records no intended oddity, write By design as `None recorded.`, and leave out an oddity known only from the code.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/SKILL.md:73
+- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 1 2026-11-11; the plan's Assumptions record that plans often name no intended oddity, read from the call transcript behind its Intent.
+- verdict: keep
+- reason: The tester's questions were about behavior no plan had specified, so the part cannot promise an answer for every surprise. A guess dressed as intent would tell a tester to stop reporting a real defect, and the code shows what a product does, never what was meant.
+- passage: Where the plan document records no such behavior, By design reads `None recorded.` and nothing is invented. An oddity the writer knows only from the code stays out, since the code does not say what was intended.
+- landed: c2ea420f0 section 1
+
+### BK005
+- key: Route each `## Out of Scope` item to one part: to By design where it leaves behavior a user will meet looking broken or odd, and to Not included where it is a feature the plan did not build.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/SKILL.md:73
+- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 1 2026-11-11.
+- verdict: keep
+- reason: Out of Scope feeds both parts, so without a rule one item would land in both or in whichever the writer reached first. The test is what the reader meets: an odd behavior needs the word that it is intended, and an absent feature only needs naming.
+- passage: An `## Out of Scope` item goes to one part. One that leaves behavior a user will meet looking broken or odd goes to By design, and one that is a feature the plan did not build goes to Not included.
+- landed: c2ea420f0 section 1
+
+### BK006
+- key: Write the entry in the client-briefing register with no `Voice:` layer, bound it to about 1,500 bytes, and name no customer, person, credential or internal host, nor any detail of a security weakness beyond that one was fixed, the writer holding both since no check measures them.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/SKILL.md:75
+- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 1 2026-11-11; the bound is a default that plan's Assumptions record, the one the plan brief already takes (DB002).
+- verdict: keep
+- reason: The reader stands outside the session and the code, which is the client-briefing register's reader, and the entry carries no one's name, so no voice applies. The bound keeps an entry readable on a phone in a list of many. The entry lands in the repository and may later be published, so it carries nothing a stranger reading it should not see. The writer holds both because no script can judge either.
+- passage: The entry takes the doctrine's client-briefing register with no `Voice:` layer, and is bounded to about 1,500 bytes. It names no customer, no person, no credential or internal host, and no detail of a security weakness beyond that one was fixed. No check measures the bound or this disclosure rule, so the writer holds both.
+- landed: c2ea420f0 section 1
+
+### BK007
+- key: Write an entry for work with no plan as the header and the What changed and What to check parts alone.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/SKILL.md:75
+- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 1 2026-11-11.
+- verdict: keep
+- reason: Work with no plan has no Intent, Out of Scope or Assumptions to draw Why, By design and Not included from, and BK004's rule bars inventing them. What changed and What to check are the two a tester needs and the session that made the change can state.
+- passage: An entry for work with no plan holds the header and the What changed and What to check parts.
+- landed: c2ea420f0 section 1
+
+### BK008
+- key: Give the entry's parts the plan brief's one-line shape, and read the folder from `curating-docs` and the write from `finishing-work`.
+- class: pointer
+- source: plugins/grimoire/skills/prose-register/SKILL.md:75
+- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 1 2026-11-11.
+- verdict: keep
+- reason: One shape for both projections lets one parser read a brief's parts and an entry's. The folder and the write each have one owner under the doctrine's one-owner bullet, so this section names them rather than restating the path or the step.
+- passage: The one-line part shape is the plan brief's own. `curating-docs` states the folder an entry lives in, and `finishing-work` writes it at a plan's close.
+- landed: c2ea420f0 section 1
 
 ## plugins/grimoire/skills/prose-register/references/voice-scott.md
 

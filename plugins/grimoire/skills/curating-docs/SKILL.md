@@ -9,13 +9,14 @@ A plan is finished when it has moved to the archive, the backlog is pruned, and 
 
 ## Docs Taxonomy
 
-Three zones, each with one job, plus the briefs folder, the living backlog and the operator's direction ledger.
+Three zones, each with one job, plus the briefs folder, the changelog folder, the living backlog and the operator's direction ledger.
 
 | Location | Holds | Discipline |
 |---|---|---|
 | `docs/` root | Stable about-the-solution docs (architecture, security model) and the README, the index of the stable documents rather than of plans | Updated in place as the solution changes |
 | `docs/plans/` | Active plans only (open or in progress) | A plan leaves the moment it is Complete or abandoned |
 | `docs/briefs/` | The plan brief of each active plan that has one, named `<plan stem>.md` after its plan, in the form the `prose-register` skill's Plan Brief section states. A plan written before briefs gains one at its finishing pass | Moves to `docs/archive/briefs/` with its plan at the close path |
+| `docs/changelog/` | One entry per finished plan whose change a user can see, at `docs/changelog/<YYYY-MM>/<YYYY-MM-DD>_<plan stem>.md` dated the day it is drafted, in the form the `prose-register` skill's Changelog Entry section states. A second close of one plan on the same day adds `_2` before `.md`, and work with no plan takes a short slug for the stem. The folder's `README.md` is seeded from the templates with a new or retrofitted library, or, where it is missing, when the first entry is written | Append-only history: an entry is never rewritten, moved, archived or pruned. A wrong entry is answered by a new one carrying `Corrects:`, and the wrong one gains a single `Corrected by:` line. A reverted change writes an entry of kind `withdrawn` |
 | `docs/archive/` | Finished and abandoned plans (Chapters intact), their briefs under `briefs/`, and dated backlog snapshots | Immutable history; nothing here is live |
 | `docs/backlog.md` | The handoff doc for cross-effort next-steps, active items only, never a wait on the operator | Pruned-live: completed items move to a dated snapshot |
 | `docs/direction.md` | The operator's direction ledger for this repository, in the operator's own words, in the line shape the role skill's coordinator-directory contract states | Operator-owned: sessions read it and never write it |
