@@ -55,7 +55,7 @@ name under `wiki/`, by `-Path`, by a folder given as `-Path` and by
 `-Reconcile`, while a sibling page in the same folder commits. It drives the
 move helper's refusal of an inbox file named `CLAUDE.md`, `claude.local.md` or
 `CLAUDE~1.MD`, by `-Name` and by `-Handle`, and of `CLAUDE.md` typed with a
-trailing dot or space, while `CLAUDE-notes.md` moves. It drives `-Rename`: a listed name renamed in place with `sources/` left empty and `CLAUDE-notes.md` left under its own name, a hidden file found and its hidden attribute cleared, a `.claude` folder renamed whole, an existing `renamed-<name>` refusing the sweep with nothing renamed, `-WhatIf` renaming nothing, a junction named `.claude` refused as a reparse point, a hidden `CLAUDE.md.` written through a `\\?\` path left alone since the list does not keep it, `CLAUDE~1.md.` beside a plain `CLAUDE.md` refused for its trailing dot, and again with a trailing space, with the listing unchanged, and `CLAUDE~1.md.` beside a plain `CLAUDE~1.md`, the path Windows resolves it to, refused with both names still listed and no `renamed-` item.
+trailing dot or space, while `CLAUDE-notes.md` moves. It drives `-Rename`: a listed name renamed in place with `sources/` left empty and `CLAUDE-notes.md` left under its own name, a hidden file found and its hidden attribute cleared, a `.claude` folder renamed whole, an existing `renamed-<name>` refusing the sweep with nothing renamed, `-WhatIf` renaming nothing, a junction named `.claude` refused as a reparse point, a hidden `CLAUDE.md.` written through a `\\?\` path left alone since the list does not keep it, `CLAUDE~1.md.` beside a plain `CLAUDE.md` refused for its trailing dot, and again with a trailing space, with the listing unchanged, and `CLAUDE~1.md.` beside a plain `CLAUDE~1.md`, the path Windows resolves it to, refused with both names still listed and no `renamed-` item. It holds the sweep through the test seam: two kept items, one of them hidden and system, held so a delete of each by path throws while an unkept file deletes, then renamed with both attributes cleared; an `inbox/renamed-CLAUDE.md` created during the hold refusing the rename with nothing overwritten; and a hidden `.claude` folder renamed with its hidden attribute cleared and its file intact.
 It also drives the move helper's refusals of a symbolic link, of an entry
 another process holds open, its hold on the entry while it runs, its move of
 a hard link into a fresh file the outside name does not reach, and its
@@ -451,10 +451,16 @@ in place to `inbox/renamed-<name>`, clearing the hidden and system
 attributes and printing `renamed: inbox/renamed-<name>` per item. It reads
 no byte of any item. It refuses a kept name that ends in a dot or a space
 before it builds any path from it, since Windows drops either when it
-resolves a path and the rename would then act on another item. Every kept
-item is checked before any is renamed, so a
-refusal by a check renames nothing, while a clear or rename that throws on
-a later item leaves the earlier renames made. The ingest skill runs it once,
+resolves a path and the rename would then act on another item. It opens
+each kept item once through a handle that does not follow a link,
+reads its attributes, and clears and renames it through that handle. Every
+kept item is opened and checked before any is renamed and stays held until
+it is renamed, so no other program can delete, move or replace it in
+between. The hold does not fix the item's attributes, which another
+program can still change in between, as the threat model's residual 15
+states. An open that fails refuses the sweep with nothing renamed, as a
+refusal by any check does, while a clear or rename that fails on a later
+item leaves the earlier renames made. The ingest skill runs it once,
 before its snapshot.
 `kb-commit.ps1` is the only path
 that commits: it accepts only

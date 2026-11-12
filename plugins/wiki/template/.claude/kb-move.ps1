@@ -63,22 +63,36 @@ hidden and system items and folders included, keeps each item whose name is
 on the instruction-name list above, and renames each in place to
 inbox/renamed-<name>. A renamed file reaches the ingest as a document under a
 name Claude Code does not load. A renamed folder stays in inbox/ as a folder,
-which the snapshot does not list and the ingest does not read. Every kept
-item is checked before any is renamed, so a refusal by a check leaves inbox/
-as it was: a kept name that ends in a dot or a space is refused before any
-path is built from it, since Windows drops either when it resolves a path and
-the rename would then act on another path, and a person removes the item; a
-reparse point is refused as on the move route; an inbox/renamed-<name> that
-already exists as a file or a folder is refused naming it; and each origin
-and destination must resolve inside the repo and clear of .git/ and
-.claude/. The rename reads no byte of any item. It clears
+which the snapshot does not list and the ingest does not read. Each kept
+item is opened once, through a native handle that does not follow a link, and
+the attribute read, the attribute clear and the rename all act on that
+handle, so the item renamed is the item whose attributes were checked. The
+handle asks delete access and the rights to read and write attributes, shares
+reads alone, and asks no data access. Every kept item is opened and checked
+before any is renamed and is held until it is renamed, so no other process
+can delete, rename or replace a kept item between its check and its rename,
+and a refusal by a check leaves inbox/ as it was: a kept name that ends in a
+dot or a space is refused before any path is built from it, since Windows
+drops either when it resolves a path and the rename would then act on another
+path, and a person removes the item; each origin and destination must resolve
+inside the repo and clear of .git/ and .claude/; an item that cannot be
+opened, one another process holds open without sharing delete among the
+causes, is refused before anything is renamed; a reparse point is refused on
+the handle's attributes as on the move route; and an inbox/renamed-<name>
+that already exists as a file or a folder is refused naming it. The rename
+reads no byte of any item. It clears
 the hidden and system attributes, so a renamed file reaches
 `kb-status.ps1 -What Pending`, sets no time, and writes
 `renamed: inbox/renamed-<name>` to stdout, one line per item. Where no item
-is on the list it writes nothing and exits 0. A clear or rename that throws
-is refused with its one-line reason. That refusal comes after the checks, so
-the items renamed before it stay renamed and their renamed: lines are already
-written. Under -WhatIf nothing is renamed and no attribute changes.
+is on the list it writes nothing and exits 0. A clear or rename that fails
+is refused with its one-line reason, and a destination that appeared after
+the checks fails the rename and is never overwritten. That refusal comes
+after the checks, so the items renamed before it stay renamed and their
+renamed: lines are already written. Under -WhatIf every kept item is opened,
+checked and held the same way, and nothing is renamed and no attribute
+changes. The test seam holds the sweep too: where KB_MOVE_TEST_HOLD_SECONDS
+is an integer from 1 to 300, the sweep sleeps that many seconds after its
+checks and before the first rename, with every kept item held.
 
 .PARAMETER Name
 The bare file name of the item in inbox/ to move. It must be a plain leaf
@@ -203,7 +217,8 @@ function Get-StreamDigest {
     return -join ($digest | ForEach-Object { $_.ToString('x2') })
 }
 
-# Define the native handle type the move route acts through.
+# Define the native handle type the move route and the rename sweep act
+# through.
 # Each call returns a Win32 error code, 0 on success, so a failure is reported
 # and never thrown. Open asks GENERIC_READ (0x80000000) with DELETE (0x10000),
 # shares FILE_SHARE_READ (1) alone, and takes OPEN_EXISTING (3) and
@@ -224,12 +239,30 @@ function Get-StreamDigest {
 # path. The read-only bit is cleared through FileBasicInfo on that handle, and
 # FileDispositionInfo (class 4) marks the delete on the first. The main open
 # asks no write-attributes right, so a file whose write-attributes right is
-# denied still moves wherever the extended class works. The type is compiled
-# once per session and carries its own namespace, so it loads beside the other
+# denied still moves wherever the extended class works. OpenForRename is the
+# sweep's open: it asks DELETE (0x10000), FILE_READ_ATTRIBUTES (0x80),
+# FILE_WRITE_ATTRIBUTES (0x100) and SYNCHRONIZE (0x100000), shares
+# FILE_SHARE_READ (1) alone, and takes OPEN_EXISTING (3) with
+# FILE_FLAG_OPEN_REPARSE_POINT (0x200000) and FILE_FLAG_BACKUP_SEMANTICS
+# (0x02000000), which lets a folder open. It asks no data access. The
+# write-attributes right is asked at this open because a handle reopened for
+# it fails on a folder. ClearHiddenAndSystem sets FileBasicInfo (class 0) on
+# that handle: the four times stay zero, which leaves them unchanged, and the
+# attributes are the value read with FILE_ATTRIBUTE_HIDDEN (0x2) and
+# FILE_ATTRIBUTE_SYSTEM (0x4) removed, FILE_ATTRIBUTE_NORMAL (0x80) standing
+# in where none remain. Rename sets FileRenameInfo (class 3) on that handle
+# with a FILE_RENAME_INFO buffer: the replace flag 0, so an existing
+# destination is refused with ERROR_ALREADY_EXISTS (183) and never
+# overwritten, the root directory handle null, the name's length in bytes,
+# then the name. The length sits at offset 16 and the name at offset 20 in a
+# 64-bit process, and at 8 and 12 in a 32-bit one. The name is the
+# destination's full path. The type is compiled once per session and
+# carries its own namespace, so it loads beside the other
 # helpers' types in one session.
 $script:inboxEntrySource = @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace KbMove
@@ -281,6 +314,9 @@ namespace KbMove
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool SetFileInformationByHandle(SafeFileHandle file, int infoClass, ref DispositionInfo info, uint size);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetFileInformationByHandle(SafeFileHandle file, int infoClass, byte[] info, uint size);
 
         #endregion
 
@@ -359,6 +395,43 @@ namespace KbMove
             return SetFileInformationByHandle(handle, 4, ref plain, (uint)Marshal.SizeOf(typeof(DispositionInfo))) ? 0 : Marshal.GetLastWin32Error();
         }
 
+        public static SafeFileHandle OpenForRename(string path, out int error)
+        {
+            // Open the item with delete access and the rights to read and write attributes.
+            // The open never follows a link, asks no data access, and opens a folder as it opens a file.
+            SafeFileHandle handle = CreateFileW(path, 0x10000 | 0x80 | 0x100 | 0x100000, 1, IntPtr.Zero, 3, 0x200000 | 0x02000000, IntPtr.Zero);
+            error = handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
+            return handle;
+        }
+
+        public static int ClearHiddenAndSystem(SafeFileHandle handle, uint attributes)
+        {
+            // Keep every other attribute.
+            // The times stay zero, which leaves them unchanged, and FILE_ATTRIBUTE_NORMAL (0x80) stands in where no attribute remains.
+            BasicInfo basic = new BasicInfo();
+            basic.FileAttributes = attributes & ~(0x2u | 0x4u);
+            if (basic.FileAttributes == 0)
+            {
+                basic.FileAttributes = 0x80;
+            }
+            return SetFileInformationByHandle(handle, 0, ref basic, (uint)Marshal.SizeOf(typeof(BasicInfo))) ? 0 : Marshal.GetLastWin32Error();
+        }
+
+        public static int Rename(SafeFileHandle handle, string destinationFullPath)
+        {
+            // Lay out the FILE_RENAME_INFO buffer.
+            // The replace flag at offset 0 and the root directory handle after it stay zero, so an existing destination is never overwritten.
+            byte[] name = Encoding.Unicode.GetBytes(destinationFullPath);
+            int lengthOffset = IntPtr.Size == 8 ? 16 : 8;
+            int nameOffset = lengthOffset + 4;
+            byte[] buffer = new byte[nameOffset + name.Length + 2];
+            BitConverter.GetBytes(name.Length).CopyTo(buffer, lengthOffset);
+            name.CopyTo(buffer, nameOffset);
+
+            // Rename the item through the handle.
+            return SetFileInformationByHandle(handle, 3, buffer, (uint)buffer.Length) ? 0 : Marshal.GetLastWin32Error();
+        }
+
         #endregion
 
         #region Private Methods
@@ -412,6 +485,17 @@ function Get-Win32Message {
     return ((New-Object System.ComponentModel.Win32Exception($ErrorCode)).Message -replace '\s+', ' ').Trim()
 }
 
+# The test seam both routes share: where KB_MOVE_TEST_HOLD_SECONDS is an
+# integer from 1 to 300 the run sleeps that many seconds, and any other value
+# is ignored. Each route calls it after its checks, with its handles held, so
+# a test can act on a held item from outside.
+function Wait-TestHold {
+    $holdSeconds = 0
+    if ([int]::TryParse([string]$env:KB_MOVE_TEST_HOLD_SECONDS, [System.Globalization.NumberStyles]::None, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$holdSeconds) -and $holdSeconds -gt 0 -and $holdSeconds -le 300) {
+        Start-Sleep -Seconds $holdSeconds
+    }
+}
+
 # Defence in depth: confirms each fully resolved path stays inside the repo
 # and clear of .git/ and .claude/, comparing the normalized full path rather
 # than the raw input, and refuses the run on the first that does not. Both
@@ -450,14 +534,26 @@ $claudePrefix = (Join-Path $repoRoot '.claude') + $sep
 # the snapshot does not list and the ingest does not read. The listing takes
 # -Force, since a hidden or system item is loaded as a plain one and would
 # otherwise be left in place, and takes folders, since a .claude folder is
-# loaded as one. The sweep follows no link at an item it checks or renames and
-# reads no byte of any item: a rename is not a read. Every kept item is
-# checked before any is renamed, so a refusal by a check leaves inbox/ as it
-# was. A kept name that ends in a dot or a space is refused before any path is
-# built from it, since Windows drops either when it resolves a path, so the
-# path the later acts would use is another item's, or nobody's. A clear or
-# rename that throws on a later item refuses with the earlier renames made and
-# their renamed: lines written. The new name is renamed- and the old name,
+# loaded as one. Each kept item is opened once, through a native handle that
+# does not follow a link, and the attribute read, the attribute clear and the
+# rename all act on that handle, so the item renamed is the item whose
+# attributes were checked, whatever is swapped in at the path meanwhile. The
+# sweep reads no byte of any item: the handle asks no data access. Every kept
+# item is opened and checked before any is renamed and is held until it is
+# renamed, so no other process can delete, rename or replace a kept item
+# between its check and its rename, and a refusal by a check leaves inbox/ as
+# it was. A kept name that ends in a dot or a space is refused before any path
+# is built from it, since Windows drops either when it resolves a path, so the
+# path the later acts would use is another item's, or nobody's. An item that
+# cannot be opened, one another process holds open without sharing delete
+# among the causes, is refused before anything is renamed. The test seam
+# follows the checks: where KB_MOVE_TEST_HOLD_SECONDS is an integer from 1 to
+# 300 the sweep sleeps with every kept item held. A clear or rename that fails
+# on a later item refuses with the earlier renames made and their renamed:
+# lines written, and a destination that appeared after the checks fails the
+# rename and is never overwritten. Every handle closes in the finally on every
+# path, a refusal included, since Stop-WithReason's exit runs the finally
+# before the process ends. The new name is renamed- and the old name,
 # which no entry on the list matches, since the list is anchored at the start
 # of the name.
 if ($PSCmdlet.ParameterSetName -eq 'Rename') {
@@ -467,63 +563,87 @@ if ($PSCmdlet.ParameterSetName -eq 'Rename') {
     }
     $kept = @(Get-ChildItem -LiteralPath $inboxDir -Force | Where-Object { $_.Name -match $instructionName })
     $planned = @()
-    foreach ($item in $kept) {
-        $oldName  = $item.Name
-        # Windows drops a trailing dot or space when it resolves a path, so
-        # for a kept name such as CLAUDE~1.md. the paths built below end in
-        # CLAUDE~1.md, which is another item's name, long or short, where one
-        # exists, and nobody's otherwise, so the later acts would read, clear
-        # and rename that item or throw. The test is on the name the listing
-        # returned and builds no path, and this loop runs whole before any
-        # rename, so the refusal leaves inbox/ as it was.
-        if ($oldName.EndsWith('.', [StringComparison]::Ordinal) -or $oldName.EndsWith(' ', [StringComparison]::Ordinal)) {
-            Stop-WithReason "inbox/$oldName ends in a dot or a space, which Windows drops from a path, so it is not renamed and stays in inbox/; a person removes it."
-        }
-        $newName  = "renamed-$oldName"
-        $srcFull  = [System.IO.Path]::GetFullPath((Join-Path $inboxDir $oldName))
-        $destFull = [System.IO.Path]::GetFullPath((Join-Path $inboxDir $newName))
-        Assert-InsideRepo @($srcFull, $destFull)
-        # The item's own attributes are read, never a link target's, so a
-        # reparse point is refused on the path and a rename through it never
-        # reaches the target. The read also finds the hidden and system bits
-        # the rename clears below.
-        try {
-            $attributes = [System.IO.File]::GetAttributes($srcFull)
-        } catch {
-            Stop-WithReason ("could not read the attributes of inbox/$oldName, so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
-        }
-        if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-            Stop-WithReason "inbox/$oldName is a reparse point, such as a symbolic link; only a plain file is moved."
-        }
-        # The destination is never overwritten, a hidden one included, and
-        # NTFS compares names ignoring case, so a File or Directory exists
-        # read, each of which sees hidden items, is the check.
-        if ([System.IO.File]::Exists($destFull) -or [System.IO.Directory]::Exists($destFull)) {
-            Stop-WithReason "inbox/$newName already exists, so inbox/$oldName stays as it is and nothing is renamed."
-        }
-        $planned += [pscustomobject]@{ OldName = $oldName; NewName = $newName; Source = $srcFull; Attributes = $attributes }
-    }
-    # Each rename sits inside its own gate, so -WhatIf names every item it
-    # would rename and renames none. The hidden and system bits are cleared
-    # first, so a renamed file reaches the snapshot.
-    # No time is set: the item stays in inbox/, where no staleness reading
-    # applies, and the move route sets none either.
-    foreach ($plan in $planned) {
-        if (-not $PSCmdlet.ShouldProcess("inbox/$($plan.OldName)", "Rename in place to inbox/$($plan.NewName)")) { continue }
-        $cleared = [System.IO.FileAttributes]($plan.Attributes -band (-bnot ([System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System)))
-        try {
-            if ($cleared -ne $plan.Attributes) {
-                [System.IO.File]::SetAttributes($plan.Source, $cleared)
+    try {
+        foreach ($item in $kept) {
+            $oldName  = $item.Name
+            # Windows drops a trailing dot or space when it resolves a path, so
+            # for a kept name such as CLAUDE~1.md. the paths built below end in
+            # CLAUDE~1.md, which is another item's name, long or short, where
+            # one exists, and nobody's otherwise, so the later acts would open,
+            # clear and rename that item or fail. The test is on the name the
+            # listing returned and builds no path, and this loop runs whole
+            # before any rename, so the refusal leaves inbox/ as it was.
+            if ($oldName.EndsWith('.', [StringComparison]::Ordinal) -or $oldName.EndsWith(' ', [StringComparison]::Ordinal)) {
+                Stop-WithReason "inbox/$oldName ends in a dot or a space, which Windows drops from a path, so it is not renamed and stays in inbox/; a person removes it."
             }
-        } catch {
-            Stop-WithReason ("could not clear the attributes of inbox/$($plan.OldName), so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+            $newName  = "renamed-$oldName"
+            $srcFull  = [System.IO.Path]::GetFullPath((Join-Path $inboxDir $oldName))
+            $destFull = [System.IO.Path]::GetFullPath((Join-Path $inboxDir $newName))
+            Assert-InsideRepo @($srcFull, $destFull)
+            # The item is opened once, through a handle that does not follow a
+            # link, and stays open until it is renamed or the run ends. The
+            # handle asks delete access and shares reads alone, so an item
+            # another process holds open without sharing delete is refused
+            # here, before anything is renamed, and the run holds the item
+            # against a delete, a rename or a swap from here on.
+            Initialize-InboxEntryType
+            $openError = 0
+            $entry = [KbMove.InboxEntry]::OpenForRename($srcFull, [ref]$openError)
+            if ($openError -ne 0) {
+                Stop-WithReason ("could not open inbox/$oldName, so it stays in inbox/: " + (Get-Win32Message $openError))
+            }
+            $plan = [pscustomobject]@{ OldName = $oldName; NewName = $newName; Destination = $destFull; Entry = $entry; Attributes = [uint32]0 }
+            $planned += $plan
+            # The item's own attributes are read on the handle, never a link
+            # target's, so a reparse point is refused on the handle and a
+            # rename through it never reaches the target. The read also finds
+            # the hidden and system bits the rename clears below.
+            $attributeValue = [uint32]0
+            $attributeError = [KbMove.InboxEntry]::GetAttributes($entry, [ref]$attributeValue)
+            if ($attributeError -ne 0) {
+                Stop-WithReason ("could not read the attributes of inbox/$oldName, so it stays in inbox/: " + (Get-Win32Message $attributeError))
+            }
+            if (($attributeValue -band 0x400) -ne 0) {
+                Stop-WithReason "inbox/$oldName is a reparse point, such as a symbolic link; only a plain file is moved."
+            }
+            $plan.Attributes = $attributeValue
+            # The destination is never overwritten, a hidden one included, and
+            # NTFS compares names ignoring case, so a File or Directory exists
+            # read, each of which sees hidden items, is the check.
+            if ([System.IO.File]::Exists($destFull) -or [System.IO.Directory]::Exists($destFull)) {
+                Stop-WithReason "inbox/$newName already exists, so inbox/$oldName stays as it is and nothing is renamed."
+            }
         }
-        try {
-            Rename-Item -LiteralPath $plan.Source -NewName $plan.NewName -ErrorAction Stop
-        } catch {
-            Stop-WithReason ("could not rename inbox/$($plan.OldName) to inbox/$($plan.NewName), so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+        # A test seam: the run sleeps here, after every check and before the
+        # first rename, with every kept item held, so a test can act on the
+        # items from outside while the run holds them.
+        Wait-TestHold
+        # Each rename sits inside its own gate, so -WhatIf names every item it
+        # would rename and renames none. The hidden and system bits are
+        # cleared first, through the handle and only where one is set, so a
+        # renamed file reaches the snapshot. The rename goes through the
+        # handle with the destination's full path and never replaces: a
+        # destination that appeared since the check above fails it, and the
+        # item stays under its own name.
+        # No time is set: the item stays in inbox/, where no staleness reading
+        # applies, and the move route sets none either.
+        foreach ($plan in $planned) {
+            if (-not $PSCmdlet.ShouldProcess("inbox/$($plan.OldName)", "Rename in place to inbox/$($plan.NewName)")) { continue }
+            if (($plan.Attributes -band 0x6) -ne 0) {
+                $clearError = [KbMove.InboxEntry]::ClearHiddenAndSystem($plan.Entry, $plan.Attributes)
+                if ($clearError -ne 0) {
+                    Stop-WithReason ("could not clear the attributes of inbox/$($plan.OldName), so it stays in inbox/: " + (Get-Win32Message $clearError))
+                }
+            }
+            $renameError = [KbMove.InboxEntry]::Rename($plan.Entry, $plan.Destination)
+            if ($renameError -ne 0) {
+                Stop-WithReason ("could not rename inbox/$($plan.OldName) to inbox/$($plan.NewName), so it stays in inbox/: " + (Get-Win32Message $renameError))
+            }
+            $plan.Entry.Dispose()
+            Write-Output "renamed: inbox/$($plan.NewName)"
         }
-        Write-Output "renamed: inbox/$($plan.NewName)"
+    } finally {
+        foreach ($plan in $planned) { $plan.Entry.Dispose() }
     }
     exit 0
 }
@@ -643,10 +763,7 @@ try {
     # the run sleeps here, after the attribute read and before the gate, with
     # the handle held, so a test can act on the entry from outside while the
     # run holds it. Any other value is ignored.
-    $holdSeconds = 0
-    if ([int]::TryParse([string]$env:KB_MOVE_TEST_HOLD_SECONDS, [System.Globalization.NumberStyles]::None, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$holdSeconds) -and $holdSeconds -gt 0 -and $holdSeconds -le 300) {
-        Start-Sleep -Seconds $holdSeconds
-    }
+    Wait-TestHold
 
     # The entry's bytes are read over a stream on the handle, with the read
     # access the open granted and no share mode of its own, since sharing was
