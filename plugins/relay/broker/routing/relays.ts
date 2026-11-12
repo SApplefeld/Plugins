@@ -80,6 +80,15 @@ export type RelayConnection = {
   close: () => void;
 };
 
+/**
+ * What a relay said of its session when it opened its stream: the `CHANNEL_SESSION` name and the
+ * `CHANNEL_LINEAGE` its process inherited, each null where the stream named none. Kept for a late
+ * registration alone, which has no SessionStart to read them from. They authorize nothing: whoever
+ * holds the pipe already holds the token, and a token holder can claim any name and lineage on a
+ * SessionStart of its own.
+ */
+export type StreamIdentity = { sessionName: string | null; lineage: string | null };
+
 export type AttachResult =
   | { attached: true; detach: () => void }
   | { attached: false; reason: "already attached" | "too many relays" };
@@ -88,10 +97,25 @@ export type RelayHub = {
   /**
    * Registers a pipe for a process token. Returns a detach function that is safe to call more than
    * once, or a refusal when this token already holds a live pipe or the broker is at its ceiling.
+   * `identity` is what the stream named for its session, kept on the attachment; left off, the
+   * stream named nothing.
    */
-  attach: (processToken: string, connection: RelayConnection) => AttachResult;
+  attach: (processToken: string, connection: RelayConnection, identity?: StreamIdentity) => AttachResult;
   /** True when a live pipe is held for this process token. */
   attached: (processToken: string) => boolean;
+  /**
+   * What the pipe held for this process token named for its session at attach, and null when no
+   * pipe is held. A held pipe that named nothing answers with both fields null, so the answer also
+   * says whether a stream is attached.
+   */
+  identity: (processToken: string) => StreamIdentity | null;
+  /**
+   * Runs the spooled announcement's take-in for a process token, under the guard the attach and
+   * the heartbeat run it under: a throw is logged and goes no further, and a record the take-in
+   * created has its relay liveness stamped. For the late registration, which runs it for a token
+   * it has already found a pipe attached under. Does nothing where no take-in is wired.
+   */
+  takeIn: (processToken: string) => void;
   /** True when this key is the one issued to the pipe currently held for this token. */
   holdsPipe: (processToken: string, replyKey: string) => boolean;
   /** Writes to the pipe held for a process token. False when there is none, or it would not take it. */
@@ -150,6 +174,8 @@ export type RelayHubOptions = {
    * hook renames its spool into place only after its last failed post, and a pipe that attaches
    * inside that gap finds nothing at the attach. The retry stops when a record lands under the
    * token, whatever wrote it, or when `warnUnannounced` says the hook never reached the broker.
+   * The late registration tells it once more at any later time, for a hook or mirror post under
+   * an unannounced pipe's token, before it registers the session from that post.
    * A throw out of it is logged, undoes no attach and stops no heartbeat.
    */
   takeIn?: (processToken: string) => void;
@@ -171,6 +197,8 @@ type Attachment = {
   attachedAt: number;
   /** True once the warning was written for this attachment, so it is written once. */
   warned: boolean;
+  /** What the stream named for its session, for a late registration alone. */
+  identity: StreamIdentity;
 };
 
 /**
@@ -268,7 +296,7 @@ export function createRelayHub(options: RelayHubOptions): RelayHub {
   }
 
   return {
-    attach(processToken, connection) {
+    attach(processToken, connection, identity) {
       if (connections.has(processToken)) {
         // Refused, not promoted. Every tool subprocess a session spawns can read this token, and
         // promoting a newcomer would hand it the operator's messages and let it answer as Claude.
@@ -281,7 +309,16 @@ export function createRelayHub(options: RelayHubOptions): RelayHub {
       }
 
       const replyKey = randomUUID();
-      connections.set(processToken, { connection, replyKey, attachedAt: now(), warned: false });
+      connections.set(processToken, {
+        connection,
+        replyKey,
+        attachedAt: now(),
+        warned: false,
+        identity: {
+          sessionName: identity?.sessionName ?? null,
+          lineage: identity?.lineage ?? null,
+        },
+      });
       // The relay is back before its grace window closed, so its session was never dead.
       pending.delete(processToken);
       // Liveness is recorded straight away: the pipe existing is the signal. A relay that connects
@@ -308,6 +345,10 @@ export function createRelayHub(options: RelayHubOptions): RelayHub {
     },
 
     attached: (processToken) => connections.has(processToken),
+
+    identity: (processToken) => connections.get(processToken)?.identity ?? null,
+
+    takeIn,
 
     holdsPipe: (processToken, replyKey) => {
       const attachment = connections.get(processToken);

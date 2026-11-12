@@ -2,6 +2,12 @@
 //
 //   GET /relay/stream
 //     X-Channel-Process-Token: the CHANNEL_PROCESS_TOKEN the launch wrapper minted
+//     X-Channel-Session-Name:  the CHANNEL_SESSION human name (optional)
+//     X-Channel-Lineage:       the CHANNEL_LINEAGE stable name (optional)
+//        The two optional headers are the ones a SessionStart post carries, read through the hook
+//        intake's own reader and kept on the attachment. They are used only where the session's
+//        SessionStart never reached the broker and it is registered from a later post, and they
+//        authorize nothing: a pipe holder already holds the token.
 //     -> 200, newline-delimited JSON, held open for the life of the Claude Code process.
 //        The first line is a `hello` carrying the reply key. Each later line is a RelayEvent.
 //        The response closing, and staying closed, is the session's death signal.
@@ -69,7 +75,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RestartAnswer } from "../index.ts";
 import { isMentionList } from "../../relay/protocol.ts";
-import { isAllowedHost, isLoopback } from "../intake.ts";
+import { isAllowedHost, isLoopback, requestHeaders, sessionIdentity } from "../intake.ts";
 import type { PermissionDesk } from "../security/permission.ts";
 import type { OutboundRouter } from "./outbound.ts";
 import type { RelayConnection, RelayEvent, RelayHub } from "./relays.ts";
@@ -216,7 +222,13 @@ export function createRelayRoutes(
       request.socket.setNoDelay(true);
       response.flushHeaders();
 
-      const attached = options.relays.attach(processToken, connectionOver(response));
+      // What the relay named for its session, through the reader the hook route reads the same two
+      // headers with, so a name is cleaned and bounded once whichever request carried it.
+      const attached = options.relays.attach(
+        processToken,
+        connectionOver(response),
+        sessionIdentity(requestHeaders(request)),
+      );
       if (!attached.attached) {
         // Reported over a 200 that then closes, because the headers are already on the wire: the
         // stream had to be opened before the hub could be asked, or a refused attach would leave

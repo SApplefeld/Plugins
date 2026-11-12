@@ -3,12 +3,15 @@
 //
 // hooks/session-start.ps1 posts a session's identity to /hook at startup and, by design, retries
 // nothing but a timeout. While the broker is down every attempt is refused, and nothing re-sends
-// the announcement later: the relay never learns its session id, and a session is created from a
-// SessionStart alone. So the hook, the one process holding every field of the announcement, writes
-// it to `announce\<hash>.announce` under the state root, where <hash> is the SHA-256 hex of the
-// process token's UTF-8 bytes. The broker reads that file at the moment the relay hub tells it a
-// pipe attached under a token with no current record, which is the moment it learns a live session
-// holds that token and the moment a late announcement can still bind the session to its thread.
+// the announcement later: the relay never learns its session id, and only a SessionStart carries
+// the session's launch directory. So the hook, the one process holding every field of the
+// announcement, writes it to `announce\<hash>.announce` under the state root, where <hash> is the
+// SHA-256 hex of the process token's UTF-8 bytes. The broker reads that file at the moment the
+// relay hub tells it a pipe attached under a token with no current record, which is the moment it
+// learns a live session holds that token and the moment a late announcement can still bind the
+// session to its thread. It reads it again when a tool, stop or prompt post arrives under such a
+// token, ahead of the late registration (intake.ts), which would otherwise create the session's
+// record from that post with no launch directory.
 //
 // The file is untrusted input on the surface docs/security-model.md guards most closely, since any
 // local process able to write the state root can write it, so it is read as the route reads a

@@ -39,11 +39,28 @@ export const MENTIONS_SHAPE_SENTENCE =
   `mentions must be a list of at most ${String(MAX_REPLY_MENTIONS)} display names, each a ` +
   `non-empty name of at most ${String(MAX_MENTION_LENGTH)} characters.`;
 
+/**
+ * The answer for a call the broker refused because it holds no session for this process, under the
+ * opening its table uses. The broker holds none, for example, where the SessionStart hook never
+ * reached it, or where the session it announced has ended. In the first case the broker may register the session
+ * from a later hook post, under the late registration rule `docs/security-model.md` states. The
+ * model can check none of that rule's conditions, so the answer offers one bounded try and says
+ * what to expect if it fails, rather than restating the rule. A broker restart registers no
+ * session, so the answer says not to call the restart tool or ask for a restart.
+ */
+function noSessionSentence(opening: string): string {
+  return (
+    `${opening}: the broker holds no session for this process, so there is no thread. The broker ` +
+    "may register this session from its next hook post, where this host's hooks post to the " +
+    "broker, so this call is worth one more try after the next tool call. If that try gets the " +
+    "same answer, do not keep retrying: the session may stay without a thread until it restarts. " +
+    `A broker restart registers no session, so do not call ${RESTART_TOOL_NAME} or ask for a restart.`
+  );
+}
+
 /** What the model is told when a reply had nowhere to land. */
 const REPLY_FAILURES: Record<string, string> = {
-  // Either the SessionStart hook has not announced this process yet, or the session it announced
-  // has already ended. Both mean the broker holds no session for this relay to speak for.
-  "no-session": "Not sent: the broker holds no live session for this process, so there is no thread.",
+  "no-session": noSessionSentence("Not sent"),
   "no-thread": "Not sent: this session's Discord thread has not been opened yet.",
   failed: "Not sent: the broker could not post the message.",
 };
@@ -126,7 +143,7 @@ export const NOTED_WORDS_SENTENCE =
  * knows the mark did not land and can still answer in words.
  */
 export const NOTED_FAILURES: Record<string, string> = {
-  "no-session": "Not marked: the broker holds no live session for this process, so there is no thread.",
+  "no-session": noSessionSentence("Not marked"),
   "no-thread": "Not marked: this session's Discord thread has not been opened yet.",
   failed: "Not marked: the broker could not mark the messages.",
 };
@@ -343,6 +360,10 @@ export async function startRelay(env: NodeJS.ProcessEnv = process.env): Promise<
   const broker = createBrokerClient({
     port: port(env),
     processToken: processToken ?? "",
+    // Inherited from the launcher beside the token, as the SessionStart hook inherits them. The
+    // client sends each on its stream request where it is printable ASCII.
+    sessionName: env.CHANNEL_SESSION,
+    lineage: env.CHANNEL_LINEAGE,
     onMessage: (text, chatId, attribution) => {
       // Fire and forget: an inbound message is not something the broker waits on, and a failed
       // write must not take the pipe down.

@@ -14,7 +14,7 @@
           {
             "type": "command",
             "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\<checkout>\\hooks\\session-start.ps1\"",
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }

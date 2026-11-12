@@ -1256,6 +1256,10 @@ export async function startBroker(
     // passes, so the window spans several poll intervals, floored for a fast poll setting.
     fallbackAttachMs: Math.max(60_000, config.interimPollMs * 3),
     sessions: loadSessions(config.stateFile),
+    // The prune keeps an ended record whose relay is still attached, so the session's next post
+    // does not register it late. The hub is built below, after this, and is reached through the
+    // closure, which only the sweep calls, and the sweep starts once the hub exists.
+    relayAttached: (processToken) => relays.attached(processToken),
     // Persisted on every mutation rather than on a timer: a debounce window is a window in which
     // a crash loses a session announcement. A failed write is logged and survived, because the
     // sweep runs on an interval, where a throw would be an uncaught exception and end the daemon.
@@ -1815,6 +1819,10 @@ export async function startBroker(
     log: logger,
     // A SessionStart that lands live makes any spool under its token stale.
     announceSpool,
+    // A session whose SessionStart never arrived is registered from its next post, once the hub
+    // holds its relay's stream. The hub answers what that stream named, and runs the spool's
+    // take-in ahead of the registration under the guard its own attach runs it under.
+    lateRegistration: relays,
     // The question seam rides beside the other three: both question paths, this hook-fed one and
     // the tailer's own transcript yield, end in the one deliverQuestion closure below, so they
     // share one rendering, one alert tier, and one volume window, and a double path cannot

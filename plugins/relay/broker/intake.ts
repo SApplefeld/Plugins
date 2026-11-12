@@ -42,7 +42,8 @@
 //     switch. This is the one content-bearing route: a token-authenticated post has its prompt or
 //     last_assistant_message extracted and handed to the routing layer for the session's bound
 //     thread, and every drop path (no token, unknown token, mirroring off host-wide or for this
-//     session, body over its own ceiling, field absent) answers 202, because the installed hooks
+//     session, body over its own ceiling, field absent) answers 202, save a body run past the
+//     drain limit, whose connection is cut with no answer, because the installed hooks
 //     post here from every session on the machine and a non-2xx is a visible error inside that
 //     session. The content itself never appears in the broker log at any level; see handleMirror.
 //
@@ -61,6 +62,7 @@ import type {
   SessionRecord,
 } from "./registry.ts";
 import type { MirrorKind } from "./routing/outbound.ts";
+import type { StreamIdentity } from "./routing/relays.ts";
 import { clean } from "./sanitize.ts";
 import { askedQuestions } from "./tail.ts";
 
@@ -210,6 +212,32 @@ function headerFrom(headers: HeaderLookup, name: string): string | null {
 
 function header(request: IncomingMessage, name: string): string | null {
   return headerFrom(requestHeaders(request), name);
+}
+
+/**
+ * The session name and the lineage a request names for its session, from `X-Channel-Session-Name`
+ * and `X-Channel-Lineage`. The one reading of the two headers: a hook post's, a spooled
+ * announcement's and a relay's stream request all come through it, so the name a late registration
+ * takes from a stream is cleaned and bounded exactly as the name a SessionStart carries is. A
+ * missing header, or one empty once cleaned, is no value.
+ */
+export function sessionIdentity(headers: HeaderLookup): StreamIdentity {
+  return {
+    sessionName: headerFrom(headers, "x-channel-session-name"),
+    // Opt-in only: absent for every launch that never set CHANNEL_LINEAGE, which the registry
+    // reads as a session with no restart continuity to keep.
+    lineage: headerFrom(headers, "x-channel-lineage"),
+  };
+}
+
+/**
+ * True when a hook payload is a subagent's: it arrives under the parent's session id, with the
+ * subagent's own identity in `agent_id`. Presence only. Any present, non-null value counts,
+ * whatever its shape, so a value of an unexpected type fails toward a subagent's post, which opens
+ * no turn and registers no session. The value itself is never logged or stored.
+ */
+function fromSubagent(payload: Record<string, unknown>): boolean {
+  return payload["agent_id"] !== undefined && payload["agent_id"] !== null;
 }
 
 /** Reads a payload string field, tolerating absence and rejecting anything that is not a string. */
@@ -453,10 +481,7 @@ export function parseIntakeHeaders(headers: HeaderLookup, body: string): ParsedI
     intake: {
       event: event as HookEvent,
       processToken,
-      sessionName: headerFrom(headers, "x-channel-session-name"),
-      // Opt-in only: absent for every launch that never set CHANNEL_LINEAGE, which the registry
-      // reads as "behaves exactly as today" (this plan's item 1 proof).
-      lineage: headerFrom(headers, "x-channel-lineage"),
+      ...sessionIdentity(headers),
       sessionId,
       // Recorded verbatim rather than checked against the known trigger names, so a value Claude
       // Code adds later lands in the registry instead of being refused.
@@ -478,12 +503,9 @@ export function parseIntakeHeaders(headers: HeaderLookup, body: string): ParsedI
       // other event says nothing about the roster and leaves it exactly as the last turn reported
       // it, which is what null means here.
       backgroundTasks: event === "Stop" ? backgroundTasks(fields) : null,
-      // Presence only: a subagent's hook event carries the parent's session id with its own
-      // identity in `agent_id`, and the registry needs to know which of the two spoke, never who
-      // the subagent is. Any present, non-null value counts, whatever its shape, so a value of an
-      // unexpected type fails toward no typing rather than toward opening a turn. The value itself
-      // is dropped here, never logged or stored.
-      fromSubagent: fields["agent_id"] !== undefined && fields["agent_id"] !== null,
+      // Presence only: the registry needs to know which of the session and its subagent spoke,
+      // never who the subagent is.
+      fromSubagent: fromSubagent(fields),
     },
   };
 }
@@ -500,11 +522,17 @@ export function parseIntakeHeaders(headers: HeaderLookup, body: string): ParsedI
  * run of the ordinary drops cannot be what turns a rarer line into a suppressed count. The process
  * token is logged on no path: it is the key a hook post is authenticated by, and a refused takeover
  * is exactly the traffic a stolen one produces.
+ *
+ * `late` is the route's alone, and the spool's take-in passes none. With it, a post the registry
+ * credited to no session is put to the late registration test before the drop line is written, and
+ * is then applied again the ordinary way, so a post whose session was just registered, from its
+ * spool or from the post itself, is credited to that record like any other.
  */
 export function applyIntake(
   registry: Registry,
   intake: HookIntake,
   refusals: RefusalLog,
+  late?: LateContext,
 ): SessionRecord | null {
   const record = registry.apply(intake);
   if (record !== null) return record;
@@ -535,13 +563,35 @@ export function applyIntake(
     );
     return null;
   }
-  // A tool or stop event from a process token with no announced session, or one whose session ID
-  // and process token disagree (registry.route's session keying). Accepted off the wire and
-  // dropped, so a replayed or misrouted post cannot conjure or corrupt a session. Two very
-  // different things land here: a forged or replayed post, and the ordinary tool and turn traffic
-  // of a subprocess whose SessionStart was declined above, which names a session no record holds
-  // for as long as that subprocess runs. So the line reports the cause and calls what it caught
-  // neither.
+  // A tool or stop event the registry credited to no session. Where its token is an unannounced
+  // pipe's, this is the post a stranded session is registered from: the test below creates the
+  // record, or takes the session's spool in, and the post is then applied as any post is. A
+  // SessionStart never reaches here, since each of its refusals returned above.
+  if (late !== undefined) {
+    const stream = unannouncedPipe(registry, late, intake.processToken);
+    if (stream !== null) {
+      const tested = registerLate(registry, late, refusals, stream, {
+        processToken: intake.processToken,
+        start: intake.event === "SessionStart",
+        sessionId: intake.sessionId,
+        sessionName: intake.sessionName,
+        transcriptPath: intake.transcriptPath,
+        fromSubagent: intake.fromSubagent === true,
+      });
+      // Refused as naming a session another token holds: its own line is written, and the drop
+      // line below would only bury it under the commonest reason in the log.
+      if (tested === "refused") return null;
+      const credited = registry.apply(intake);
+      if (credited !== null) return credited;
+    }
+  }
+  // A tool or stop event from a process token with no session and no attached relay to register
+  // one from, or one whose session ID and process token disagree (registry.route's session
+  // keying). Accepted off the wire and dropped, so a replayed or misrouted post cannot conjure or
+  // corrupt a session. Two very different things land here: a forged or replayed post, and the
+  // ordinary tool and turn traffic of a subprocess whose SessionStart was declined above, which
+  // names a session no record holds for as long as that subprocess runs. So the line reports the
+  // cause and calls what it caught neither.
   refusals.warn(
     "hook dropped",
     `event=${intake.event} session=${intake.sessionId ?? "none"} ` +
@@ -573,6 +623,105 @@ export function learnTranscript(seams: TranscriptSeams, sessionId: string, trans
   if (transcriptPath === null) return;
   seams.tail?.learn(sessionId, transcriptPath);
   seams.status?.learn(sessionId, transcriptPath);
+}
+
+/**
+ * The relay hub's two answers a late registration is decided on, as `RelayHub` names them: what
+ * the stream attached under a token said of its session, and the spooled announcement's take-in.
+ */
+export type LateRegistration = {
+  identity: (processToken: string) => StreamIdentity | null;
+  takeIn: (processToken: string) => void;
+};
+
+/** A late registration's inputs with the handler's own logger and learn seams beside them. */
+export type LateContext = LateRegistration & { log?: Logger; seams: TranscriptSeams };
+
+/**
+ * What a post says that a late registration reads, whichever route it arrived on. `/hook` fills it
+ * from the parsed intake and `/mirror` from the three body fields it reads for this alone.
+ */
+type LatePostFields = {
+  processToken: string;
+  /** True for a SessionStart, which keeps its own path and never registers late. */
+  start: boolean;
+  sessionId: string | null;
+  sessionName: string | null;
+  transcriptPath: string | null;
+  fromSubagent: boolean;
+};
+
+/**
+ * The first two conditions of the late registration docs/security-model.md states, which need
+ * nothing of the post but its token, so the mirror route decides on them whether a body is read at
+ * all. The stream's identity where both hold, and null otherwise.
+ *
+ *   1. A relay stream is attached under the token. The pipe is the broker's proof that a live
+ *      session holds the token, and without it a post is a stray, replayed or forged one.
+ *   2. The token holds no record at all, an ended one included. Read before any file is touched, so
+ *      a token that holds a record costs this lookup and nothing more.
+ */
+function unannouncedPipe(
+  registry: Registry,
+  late: LateRegistration,
+  processToken: string,
+): StreamIdentity | null {
+  const stream = late.identity(processToken);
+  if (stream === null) return null;
+  if (registry.list().some((record) => record.processToken === processToken)) return null;
+  return stream;
+}
+
+/**
+ * The rest of the late registration test, for a post under a token `unannouncedPipe` answered for.
+ * In order, and the first that fails ends it:
+ *
+ *   3. The post is not a SessionStart, names a session, and is not a subagent's. A SessionStart
+ *      keeps its own path. A subagent speaks for itself, and the session's own next post follows
+ *      within the turn.
+ *   4. The spooled announcement's take-in runs, and the token still holds no record after it. A
+ *      spool is the hook's real announcement and carries the launch directory, so it is preferred.
+ *   5. No record that is not ended holds the session id under another token, which the registry
+ *      decides and which is refused with a line of its own.
+ *
+ * `refused` is condition 5 alone, so the caller writes no drop line over it. `tested` is every
+ * other outcome, a registration included: the caller applies the post the ordinary way and finds
+ * whatever record now holds the token. The line a registration writes carries the session id the
+ * route logs for any post, and neither the token nor any other part of a body.
+ */
+function registerLate(
+  registry: Registry,
+  late: LateContext,
+  refusals: RefusalLog,
+  stream: StreamIdentity,
+  post: LatePostFields,
+): "refused" | "tested" {
+  if (post.start || post.sessionId === null || post.fromSubagent) return "tested";
+  late.takeIn(post.processToken);
+  if (registry.current(post.processToken) !== null) return "tested";
+  const sessionName = post.sessionName ?? stream.sessionName;
+  const outcome = registry.registerLate({
+    processToken: post.processToken,
+    sessionId: post.sessionId,
+    sessionName,
+    lineage: stream.lineage,
+  });
+  if ("refused" in outcome) {
+    if (outcome.refused !== "impostor") return "tested";
+    refusals.warn(
+      "late registration naming a session another process token holds",
+      `session=${post.sessionId} name=${sessionName ?? "none"} ` +
+        "(refused; the session stays with the token that announced it)",
+    );
+    return "refused";
+  }
+  learnTranscript(late.seams, outcome.record.sessionId, post.transcriptPath);
+  late.log?.info(
+    `relay: session ${outcome.record.sessionId} registered from a hook post, since its SessionStart ` +
+      "never reached the broker; it holds no launch directory, so a reply cannot attach a file " +
+      "until the session restarts",
+  );
+  return "tested";
 }
 
 function send(response: ServerResponse, status: number, body: unknown): void {
@@ -648,20 +797,35 @@ async function creditedSessionId(
   request: IncomingMessage,
   maxBytes: number,
 ): Promise<{ sessionId: string | null; destroyed: boolean }> {
-  const read = await readCappedBody(request, maxBytes);
-  if (!("body" in read)) return { sessionId: null, destroyed: read.destroyed };
+  return creditedIn(await readCappedBody(request, maxBytes));
+}
+
+/** What `readCappedBody` came to: the body, or the count of a body past the ceiling. */
+type CappedRead = Awaited<ReturnType<typeof readCappedBody>>;
+
+/**
+ * The payload object a mirror body read holds, and null on anything else: an over-cap body, a
+ * parse failure, or JSON that is not an object. The parse error is discarded unread, since it can
+ * quote the text that produced it.
+ */
+function payloadIn(read: CappedRead): Record<string, unknown> | null {
+  if (!("body" in read)) return null;
   let payload: unknown;
   try {
     payload = JSON.parse(read.body);
   } catch {
-    return { sessionId: null, destroyed: false };
+    return null;
   }
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-    return { sessionId: null, destroyed: false };
-  }
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  return payload as Record<string, unknown>;
+}
+
+/** `creditedSessionId`'s answer from a body read already made, for a post read once for two uses. */
+function creditedIn(read: CappedRead): { sessionId: string | null; destroyed: boolean } {
+  const payload = payloadIn(read);
   return {
-    sessionId: payloadString(payload as Record<string, unknown>, "session_id"),
-    destroyed: false,
+    sessionId: payload === null ? null : payloadString(payload, "session_id"),
+    destroyed: !("body" in read) && read.destroyed,
   };
 }
 
@@ -674,6 +838,13 @@ export type HandlerOptions = {
    * unread rather than taken in behind it. Optional on the terms the logger is.
    */
   announceSpool?: { discard: (processToken: string) => void };
+  /**
+   * The relay hub, for the late registration: a session whose SessionStart never reached the
+   * broker is registered from the first tool, stop or prompt post under its token, once its relay
+   * has attached. Optional on the terms the logger is: with none wired no post but a SessionStart
+   * creates a record, and a mirror post under a token no session holds is dropped unread.
+   */
+  lateRegistration?: LateRegistration;
   /**
    * Where a refused, malformed, or silently-dropped hook post becomes visible. Optional so every
    * existing caller and test that does not pass one keeps working; a request is still served with
@@ -864,6 +1035,53 @@ export function createHandler(
 ): (request: IncomingMessage, response: ServerResponse) => void {
   const now = options.now ?? Date.now;
   const refusals = createRefusalLog(options.log, now);
+  const late: LateContext | undefined =
+    options.lateRegistration === undefined
+      ? undefined
+      : {
+          identity: options.lateRegistration.identity,
+          takeIn: options.lateRegistration.takeIn,
+          log: options.log,
+          seams: options,
+        };
+
+  /**
+   * The late registration test for a mirror post whose token holds no current record. Null where
+   * the token is not an unannounced pipe's holding no record at all, and then the body is
+   * untouched, so a forged, replayed or subprocess post stays unread as it always was. Otherwise
+   * the body is read once, under the mirror route's own cap, and three fields are taken from it for
+   * the test alone: `session_id`, `transcript_path`, and whether an `agent_id` is present. The
+   * read is handed back for the caller to go on with, since a body is read once. Nothing is logged
+   * of a body that does not parse.
+   *
+   * The first two conditions are asked again once the read ends, since the read awaits the client.
+   * A pipe that closed during it leaves a token no relay holds, and its detach opened no grace
+   * window, since the token held no record then. A record created now would be a live session with
+   * no pipe that nothing would end. So the post registers nothing and goes on with its read, as
+   * any post under such a token does.
+   */
+  async function mirrorLate(
+    request: IncomingMessage,
+    processToken: string,
+  ): Promise<{ read: CappedRead; refused: boolean } | null> {
+    if (late === undefined) return null;
+    if (unannouncedPipe(options.registry, late, processToken) === null) return null;
+    const read = await readCappedBody(request, options.mirror.maxBytes);
+    const stream = unannouncedPipe(options.registry, late, processToken);
+    if (stream === null) return { read, refused: false };
+    const payload = payloadIn(read);
+    if (payload === null) return { read, refused: false };
+    const tested = registerLate(options.registry, late, refusals, stream, {
+      processToken,
+      // The mirror's vocabulary holds no SessionStart.
+      start: false,
+      sessionId: payloadString(payload, "session_id"),
+      sessionName: sessionIdentity(requestHeaders(request)).sessionName,
+      transcriptPath: pathField(payload, "transcript_path"),
+      fromSubagent: fromSubagent(payload),
+    });
+    return { read, refused: tested === "refused" };
+  }
 
   // The content-bearing intake. This function is the one place broker code holds mirror content,
   // and the invariant every branch of it upholds is that the content never appears in the broker
@@ -900,26 +1118,38 @@ export function createHandler(
     // turns seam is wired and this is the turn-opening event, and credit only when the payload
     // names the very session the token holds, the same evidence bar the mirror-on path below uses.
     // No log lines on this path: it is deliberately quiet at the socket, on or off.
+    //
+    // The one other read on this half is the late registration's, which depends on neither seam and
+    // on neither event: a post of either kind under an unannounced pipe's token has three fields
+    // read from its body, so a session whose SessionStart was lost is registered on a host that
+    // mirrors nothing. A post with no token, and one under a token that holds a record or no
+    // attached relay, is still drained unread. The one line this half can write is that test's own:
+    // its registration, or its refusal of a session another token holds.
     if (!options.mirror.enabled) {
+      const processToken = header(request, "x-channel-process-token");
+      let holder = processToken !== null ? options.registry.current(processToken) : null;
+      const early =
+        processToken !== null && holder === null ? await mirrorLate(request, processToken) : null;
+      if (processToken !== null && early !== null) {
+        // The connection is already gone: there is no response to write.
+        if (!("body" in early.read) && early.read.destroyed) return;
+        holder = options.registry.current(processToken);
+      }
       if (
+        holder !== null &&
         mapping.kind === "prompt" &&
         (options.receipts !== undefined || options.turns !== undefined)
       ) {
-        const processToken = header(request, "x-channel-process-token");
-        const holder = processToken !== null ? options.registry.current(processToken) : null;
-        if (holder !== null) {
-          const credited = await creditedSessionId(request, options.mirror.maxBytes);
-          // The connection is already gone: there is no response to write, mirroring the
-          // mirror-on path's own drain-cut handling below.
-          if (credited.destroyed) return;
-          if (credited.sessionId !== null && credited.sessionId === holder.sessionId) {
-            options.receipts?.pickedUp(holder.sessionId, now());
-            options.turns?.opened(holder.sessionId);
-          }
-        } else {
-          request.resume();
+        const credited =
+          early !== null ? creditedIn(early.read) : await creditedSessionId(request, options.mirror.maxBytes);
+        // The connection is already gone: there is no response to write, mirroring the
+        // mirror-on path's own drain-cut handling below.
+        if (credited.destroyed) return;
+        if (credited.sessionId !== null && credited.sessionId === holder.sessionId) {
+          options.receipts?.pickedUp(holder.sessionId, now());
+          options.turns?.opened(holder.sessionId);
         }
-      } else {
+      } else if (early === null) {
         request.resume();
       }
       send(response, 202, { ignored: true });
@@ -938,14 +1168,31 @@ export function createHandler(
       return;
     }
 
-    // A token no live session holds, also decided before the body is read. Accepted off the wire
-    // and dropped, exactly as /hook drops the same traffic, so a replayed or forged post learns
+    // A token no live session holds. Where it is an unannounced pipe's, this is the post a stranded
+    // session is registered from, ahead of the per-session switch below, so a session running
+    // with its own mirror off registers from its prompt too: the late registration test reads the
+    // body for its three fields, and the post then goes on as any post under the record it found.
+    // Every other such post is decided before the body is read. It is accepted off the wire and
+    // dropped, exactly as /hook drops the same traffic, so a replayed or forged post learns
     // nothing from the response. The process token itself is never logged; it is the forgery key,
     // and this is exactly the traffic a forged one would produce.
-    const holder = options.registry.current(processToken);
+    let holder = options.registry.current(processToken);
+    const early = holder === null ? await mirrorLate(request, processToken) : null;
+    if (early !== null) holder = options.registry.current(processToken);
     if (holder === null) {
-      request.resume();
-      refusals.warn("mirror post dropped", "no live session holds this process token");
+      if (early === null) request.resume();
+      // A body cut off at the drain limit left no connection to answer, and its line names that.
+      if (early !== null && "droppedBytes" in early.read && early.read.destroyed) {
+        refusals.warn(
+          "mirror drain cut off",
+          `${early.read.droppedBytes} bytes in; the connection was destroyed`,
+        );
+        return;
+      }
+      // A post refused as naming a session another token holds wrote its own line.
+      if (early?.refused !== true) {
+        refusals.warn("mirror post dropped", "no live session holds this process token");
+      }
       send(response, 202, { ignored: true });
       return;
     }
@@ -991,7 +1238,9 @@ export function createHandler(
         mapping.kind === "prompt" &&
         (options.receipts !== undefined || options.turns !== undefined)
       ) {
-        const credited = await creditedSessionId(request, options.mirror.maxBytes);
+        // A post the late registration test already read is credited from that read.
+        const credited =
+          early !== null ? creditedIn(early.read) : await creditedSessionId(request, options.mirror.maxBytes);
         // The connection is already gone: there is no response to write, mirroring the
         // mirror-on path's own drain-cut handling below.
         if (credited.destroyed) return;
@@ -999,14 +1248,14 @@ export function createHandler(
           options.receipts?.pickedUp(holder.sessionId, now());
           options.turns?.opened(holder.sessionId);
         }
-      } else {
+      } else if (early === null) {
         request.resume();
       }
       send(response, 202, { ignored: true });
       return;
     }
 
-    const read = await readCappedBody(request, options.mirror.maxBytes);
+    const read = early !== null ? early.read : await readCappedBody(request, options.mirror.maxBytes);
     if ("droppedBytes" in read) {
       if (read.destroyed) {
         // The connection is already gone, so there is no response to write; the log line is the
@@ -1191,7 +1440,7 @@ export function createHandler(
         return;
       }
 
-      const record = applyIntake(options.registry, parsed.intake, refusals);
+      const record = applyIntake(options.registry, parsed.intake, refusals, late);
       if (record === null) {
         // Every refusal is answered with the same quiet 2xx: the line naming why is already
         // written, and a non-2xx would surface inside the session as a visible error.

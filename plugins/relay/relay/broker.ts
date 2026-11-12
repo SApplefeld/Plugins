@@ -94,6 +94,14 @@ export type BrokerClientOptions = {
   port: number;
   /** Identifies which Claude Code process this pipe belongs to. It authorizes nothing. */
   processToken: string;
+  /**
+   * The session's human name, as `CHANNEL_SESSION` holds it, and its restart lineage, as
+   * `CHANNEL_LINEAGE` does. Each is sent on the stream request alone, and only where it passes
+   * `PRINTABLE_ASCII`. The broker uses them to register a session whose SessionStart hook never
+   * reached it, and they authorize nothing.
+   */
+  sessionName?: string;
+  lineage?: string;
   onMessage: InboundHandler;
   /** Left unset by a relay that declares no permission capability, which then hears no verdicts. */
   onVerdict?: VerdictHandler;
@@ -258,6 +266,30 @@ export function holdsControlCharacter(value: string): boolean {
   return /[\u0000-\u001f\u007f]/.test(value);
 }
 
+/**
+ * One or more printable ASCII characters and nothing else, the gate hooks/session-start.ps1 holds
+ * `CHANNEL_SESSION` and `CHANNEL_LINEAGE` to before it sends either as a header. Node refuses a
+ * header value holding a control character when the request is built, and that throw would take the
+ * stream with it, so a value outside the gate is left off and the pipe still attaches. With no `m`
+ * flag, `$` matches only at the end of the value, never before a final newline.
+ */
+const PRINTABLE_ASCII = /^[\x20-\x7E]+$/;
+
+/**
+ * The stream request's headers: the process token, and the session's name and lineage where each
+ * passes the gate above.
+ */
+function streamHeaders(options: BrokerClientOptions): Record<string, string> {
+  const headers: Record<string, string> = { "x-channel-process-token": options.processToken };
+  if (options.sessionName !== undefined && PRINTABLE_ASCII.test(options.sessionName)) {
+    headers["x-channel-session-name"] = options.sessionName;
+  }
+  if (options.lineage !== undefined && PRINTABLE_ASCII.test(options.lineage)) {
+    headers["x-channel-lineage"] = options.lineage;
+  }
+  return headers;
+}
+
 export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
   const log = options.log ?? ((): void => {});
   const baseDelay = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
@@ -375,7 +407,7 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
         host: "127.0.0.1",
         port: options.port,
         path: "/relay/stream",
-        headers: { "x-channel-process-token": options.processToken },
+        headers: streamHeaders(options),
       },
       (response) => {
         if (response.statusCode !== 200) {

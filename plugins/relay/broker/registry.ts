@@ -358,6 +358,26 @@ export type HookIntake = {
   fromSubagent?: boolean;
 };
 
+/**
+ * A post a late registration is asked of: the fields of a tool, stop or prompt post that name its
+ * session, with the lineage and the fallback name the session's relay gave when it attached.
+ */
+export type LatePost = {
+  processToken: string;
+  sessionId: string;
+  /** The post's own `X-Channel-Session-Name`, or the name the relay's stream gave where it has none. */
+  sessionName: string | null;
+  /** The lineage the relay's stream gave. A post that is not a SessionStart carries none of its own. */
+  lineage: string | null;
+};
+
+/**
+ * What a late registration came to: the record it created, or which of its two rules refused it.
+ * `token-held` is a process token that already holds a record, an ended one included. `impostor`
+ * is a session id a record that is not ended holds under another process token.
+ */
+export type LateOutcome = { record: SessionRecord } | { refused: "token-held" | "impostor" };
+
 export type RegistryOptions = {
   host: string;
   staleAfterMs: number;
@@ -365,6 +385,13 @@ export type RegistryOptions = {
   retainTerminalMs?: number;
   /** Ceiling on total records, held by evicting terminal records oldest first. */
   maxSessions?: number;
+  /**
+   * True when a relay pipe is attached under a process token. The relay hub's answer, which
+   * `prune` reads so it keeps an ended record whose relay is still attached: that record is why a
+   * post under its token registers no session late, and without it the session's next post would
+   * register it anew. Left off, no pipe is attached anywhere.
+   */
+  relayAttached?: (processToken: string) => boolean;
   /** Injected so a test can drive the stale transition without sleeping. */
   now?: () => number;
   /**
@@ -382,6 +409,25 @@ export type RegistryOptions = {
 export type Registry = {
   /** Applies a hook event. Returns the touched record, or null when the event was ignored. */
   apply: (intake: HookIntake) => SessionRecord | null;
+  /**
+   * Creates the record of a session whose SessionStart never reached the broker, from a later post
+   * under its process token. This is the late registration docs/security-model.md states, and the
+   * one way besides a SessionStart that a record is created. The caller has already established
+   * that a relay stream is attached under the token, which is the proof a live session holds it,
+   * that the post is a main-thread post naming a session, and that no spooled announcement was
+   * there to take in instead. Two rules are held here, because they are the registry's to read:
+   *
+   *   - The token holds no record at all, an ended one included. A token whose only record is ended
+   *     belongs to a session that did announce and was ended, and it stays ended.
+   *   - No record that is not ended holds the session id under another token, the impostor rule a
+   *     SessionStart is held to, so a post cannot take a running session over by naming it.
+   *
+   * The record is the one a SessionStart would create, with no source and no launch directory, since
+   * a later post's `cwd` is wherever a tool call moved the shell, and with its relay liveness
+   * stamped, since the attached stream is why it exists. A later SessionStart from the same session
+   * refreshes it through `apply` and fills both.
+   */
+  registerLate: (post: LatePost) => LateOutcome;
   /**
    * True when this SessionStart is a subprocess announcing itself under a token a relayed session
    * already holds, which `apply` declines to register.
@@ -576,7 +622,7 @@ export function createRegistry(options: RegistryOptions): Registry {
   //
   // Only a record still holding the ID is protected. An ended one is a tombstone, and a session ID
   // that is genuinely reused is a case the supersession path handles.
-  function impostor(intake: HookIntake, sessionId: string): boolean {
+  function impostor(intake: Pick<HookIntake, "processToken">, sessionId: string): boolean {
     const held = sessions.get(sessionId);
     return held !== undefined && held.state !== "ended" && held.processToken !== intake.processToken;
   }
@@ -777,9 +823,10 @@ export function createRegistry(options: RegistryOptions): Registry {
   function apply(intake: HookIntake): SessionRecord | null {
     if (intake.event === "SessionStart") {
       // An unknown process token is the normal case here: SessionStart is the first announce.
-      // It is also the only event that creates a record, whether it was posted to /hook or taken
-      // in from the file the hook spooled while the broker was down (announce-spool.ts): the spool
-      // is that same announcement applied late through this function, under the same checks.
+      // It is also the one event that creates a record through this function, whether it was
+      // posted to /hook or taken in from the file the hook spooled while the broker was down
+      // (announce-spool.ts): the spool is that same announcement applied late through this
+      // function, under the same checks. The one other way a record is created is `registerLate`.
       if (intake.sessionId === null) return null;
       const record = start(intake, intake.sessionId);
       if (record === null) return null;
@@ -787,8 +834,9 @@ export function createRegistry(options: RegistryOptions): Registry {
       return record;
     }
 
-    // Every other event needs a session that already announced itself. Without this a stray or
-    // replayed post would conjure a session record for a process that may not exist.
+    // Every other event needs a session that already holds a record. Without this a stray or
+    // replayed post would conjure a session record for a process that may not exist. A post under
+    // an attached relay's token is the caller's to take to `registerLate`, never this function's.
     const record = route(intake);
     if (!record) return null;
 
@@ -847,6 +895,54 @@ export function createRegistry(options: RegistryOptions): Registry {
     }
     mutated();
     return record;
+  }
+
+  function registerLate(post: LatePost): LateOutcome {
+    for (const held of sessions.values()) {
+      if (held.processToken === post.processToken) return { refused: "token-held" };
+    }
+    if (impostor(post, post.sessionId)) return { refused: "impostor" };
+
+    const at = now();
+    const record: SessionRecord = {
+      sessionId: post.sessionId,
+      processToken: post.processToken,
+      name: post.sessionName,
+      lineage: post.lineage,
+      host: options.host,
+      // No SessionStart was heard, so no trigger is known.
+      source: null,
+      state: "live",
+      lastTool: null,
+      lastToolInput: null,
+      toolCount: 0,
+      turnCount: 0,
+      startedAt: at,
+      // The token holds no other record, so this one opens its launch.
+      launchedAt: at,
+      lastHookAt: at,
+      lastEngagementAt: at,
+      // The attached stream is the caller's proof the session is alive, so the record is born
+      // with a relay rather than waiting a heartbeat for one.
+      lastRelayAt: at,
+      endedAt: null,
+      openingModel: null,
+      model: null,
+      contextTokens: null,
+      downgrade: null,
+      backgroundTasks: [],
+      goal: null,
+      turnActiveAt: null,
+      harnessNotice: null,
+      title: null,
+      // A later post's directory vouches for no launch, as a compaction's does not.
+      workdir: null,
+    };
+    sessions.set(post.sessionId, record);
+    // A fresh record starts fresh announcement bookkeeping, as one a SessionStart opens does.
+    modelSides.delete(post.sessionId);
+    mutated();
+    return { record };
   }
 
   /** The session a transcript reading belongs to, or null when nothing unended holds that ID. */
@@ -1059,6 +1155,24 @@ export function createRegistry(options: RegistryOptions): Registry {
     return record.endedAt ?? Math.max(record.lastHookAt, record.lastRelayAt ?? 0);
   }
 
+  /**
+   * True for an ended record that is the newest record under its process token, while that token
+   * still holds an attached relay pipe. Neither of prune's paths removes one: the record is what
+   * keeps a session the broker ended while its relay was away from being registered late by its
+   * next post. Only the newest needs keeping, since any record under the token holds it, so the
+   * records a `/clear` ends under a still-attached relay age out as before. Where two share the
+   * newest `startedAt`, the later-inserted one is the newest.
+   */
+  function heldByPipe(record: SessionRecord): boolean {
+    if (record.state !== "ended" || options.relayAttached?.(record.processToken) !== true) return false;
+    let newest: SessionRecord | null = null;
+    for (const other of sessions.values()) {
+      if (other.processToken !== record.processToken) continue;
+      if (newest === null || other.startedAt >= newest.startedAt) newest = other;
+    }
+    return newest === record;
+  }
+
   // Ended and stale records are kept so the Discord surfaces can paint a final state, but they are
   // not kept forever: nothing else removes a record, and the whole set is rewritten to disk on
   // every hook event.
@@ -1066,6 +1180,7 @@ export function createRegistry(options: RegistryOptions): Registry {
     let removed = 0;
     for (const record of [...sessions.values()]) {
       if (record.state === "live") continue;
+      if (heldByPipe(record)) continue;
       if (at - terminalSince(record) < retainTerminalMs) continue;
       sessions.delete(record.sessionId);
       modelSides.delete(record.sessionId);
@@ -1075,7 +1190,7 @@ export function createRegistry(options: RegistryOptions): Registry {
     if (sessions.size > maxSessions) {
       // A live session is never evicted: losing it would lose the only handle on a running process.
       const terminal = [...sessions.values()]
-        .filter((record) => record.state !== "live")
+        .filter((record) => record.state !== "live" && !heldByPipe(record))
         .sort((a, b) => terminalSince(a) - terminalSince(b));
       for (const record of terminal) {
         if (sessions.size <= maxSessions) break;
@@ -1134,6 +1249,7 @@ export function createRegistry(options: RegistryOptions): Registry {
 
   return {
     apply,
+    registerLate,
     subprocessStart,
     impostorStart,
     engage,
