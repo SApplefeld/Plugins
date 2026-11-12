@@ -9,13 +9,15 @@
 // needs through deps hooks/index.ts builds over `$` and hands in: the
 // formatter the session's working directory, a host to spawn through and
 // the resolver for its launchers, the nudge the session's recognition index,
-// the ready mark the call's shell line, the turn's plan holder and the kit
+// the ready mark the call's shell line, the turn's plan holder, a host to
+// ask GitHub through, the set of the entry's pull request fields and the kit
 // event emit. None reads the shared GuardContext, so none fails where that
 // context cannot be built. The formatter and the ready mark pass over a call
 // whose result is an error, as the PostToolUse hook the formatter replaces
 // fired on a call that succeeded alone.
 
 import type { AfterHook, GuardCall, GuardHost, GuardResult } from "./runner";
+import { PUSH_HOST_TIMEOUT_MS, QUERY_ENV } from "./merged-pr-push";
 
 // Whether a PATH entry names a directory absolutely: a drive path or a UNC
 // path on Windows, a path from the root elsewhere.
@@ -137,9 +139,9 @@ const PR_READY_TOOLS = /^(bash|powershell)$/i;
  * The `gh pr ready` command in a shell line, read at a simple-command
  * position alone: the text's start, or after `&&`, `||`, `;`, `|` or a line
  * break. The split reads no quotes, so a quoted string holding a separator
- * and then `gh pr ready`, as in `echo "done; gh pr ready 12"`, is a mark
- * too, and an echoed or quoted `gh pr ready` with no separator before it
- * inside the quotes is no mark. The first such
+ * and then `gh pr ready`, as in `echo "done; gh pr ready 12"`, reads as a
+ * ready too, and an echoed or quoted `gh pr ready` with no separator before
+ * it inside the quotes does not. The first such
  * command whose words hold no `--undo` is the one read. Returns its words
  * after `ready` and the index of its `gh` in the shell line, or null where
  * no such command stands. The ready mark and the draft-body guard both read
@@ -160,52 +162,184 @@ export function prReadySegmentOf(command: string): { words: string[]; index: num
   }
 }
 
+// The repositories a host query may carry: an owner, one slash and a name,
+// each of letters, digits, dots, dashes and underscores, the owner opening
+// with a letter or digit. The draft-body guard holds a command's repository
+// to it and the ready mark the repository in gh's line.
+export const REPOSITORY_FORM = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+$/;
+
 /**
- * The pull request number the `gh pr ready` command prReadySegmentOf reads
- * names, the first word after `ready` that is one to nine digits, null where
- * it names none; and null where no such command stands.
+ * One host query's run, or null where it did not start or ran past its
+ * bound. The query is an argument vector with no shell, run over the host's
+ * environment plus QUERY_ENV and bounded at PUSH_HOST_TIMEOUT_MS, in `cwd`
+ * where one is given. The bound covers the whole process, so a paged read
+ * that outruns it is null. The draft-body guard and the ready mark both
+ * query through this.
  */
-export function prReadyCommandOf(command: string): { number: number | null } | null {
-  const ready = prReadySegmentOf(command);
-  if (ready === null) return null;
-  const number = ready.words.find((word) => /^[0-9]{1,9}$/.test(word));
-  return { number: number === undefined ? null : Number(number) };
+export async function hostQuery(host: GuardHost, argv: readonly string[], cwd?: string): Promise<{ exitCode: number; stdout: string; stderr: string } | null> {
+  try {
+    return await host.run(argv, { ...(cwd === undefined ? {} : { cwd }), env: { ...QUERY_ENV }, timeoutMs: PUSH_HOST_TIMEOUT_MS });
+  } catch {
+    return null;
+  }
 }
+
+// gh's line for a ready, from its start to its end: an optional lead and one
+// space, then `Pull request <repository>#<number> is marked as "ready for
+// review"`, which gh 2.97.0 prints for a pull request it marked ready, or
+// the same with `is already`, which it prints for one ready before the
+// command. The lead is `!` alone, or one to three characters that are each
+// outside ASCII and no space. That class is there for gh's U+2713 mark,
+// whether shown as written or as a one-byte code page shows its three bytes.
+// The number is one to nine digits with no leading zero.
+const GH_READY_LINE = /^(?:(?:!|[^\x00-\x7f\s]{1,3}) )?Pull request ([^\s#]+)#([1-9][0-9]{0,8}) is (?:marked as|already) "ready for review"$/u;
+
+/**
+ * The repository and the pull request number gh's line for a ready names in
+ * a bash or powershell call's result, or null where the result holds no such
+ * line. The result's standard error is read, then its standard output, the
+ * two streams core hands over under `result`, then its `text`, and the first
+ * such line in that order is the one read. A line is read with a trailing
+ * carriage return dropped and must be GH_READY_LINE whole, so a search hit,
+ * which prints a path before the text, a line carrying colour codes and the
+ * line gh prints for a closed pull request are each no ready. A line whose
+ * repository is off REPOSITORY_FORM, or whose repository name is `.` or
+ * `..`, is no ready either: a tool result is text the session's own model
+ * can write, and the ready mark puts the repository into the path of a host
+ * query, where such a name would be a dot segment.
+ */
+export function ghReadyLineOf(r: GuardResult): { repo: string; number: number } | null {
+  const streams: { stdout?: unknown; stderr?: unknown } = typeof r.result === "object" && r.result !== null ? r.result : {};
+  for (const text of [streams.stderr, streams.stdout, r.text]) {
+    if (typeof text !== "string") continue;
+    for (const line of text.split("\n")) {
+      const read = GH_READY_LINE.exec(line.endsWith("\r") ? line.slice(0, -1) : line);
+      if (read !== null && REPOSITORY_FORM.test(read[1]) && !/\/\.\.?$/.test(read[1])) return { repo: read[1], number: Number(read[2]) };
+    }
+  }
+  return null;
+}
+
+// The paths a pull request's file list may name the plan document at: the
+// entry's planPath, with its backslashes turned to forward slashes and a
+// leading `./` dropped, and that path's file name under each of
+// `archiveDirs`, the folders a finished plan's document sits in. Null where
+// the planPath is empty or no relative path, which no host path can be
+// compared with.
+function planDocumentPlaces(planPath: string, archiveDirs: readonly string[]): string[] | null {
+  const cleaned = planPath.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (cleaned === "" || cleaned.startsWith("/") || /^[A-Za-z]:/.test(cleaned)) return null;
+  const name = cleaned.slice(cleaned.lastIndexOf("/") + 1);
+  return [cleaned, ...archiveDirs.map((dir) => `${dir}/${name}`)];
+}
+
+/**
+ * Whether the pull request gh's line names changes the plan document, which
+ * makes it the plan's own, or null where the host could not be asked. One
+ * read, `gh api --paginate repos/<repository>/pulls/<number>/files`, lists
+ * every changed file a line, up to the 3000 GitHub returns, where `gh pr
+ * view --json files` stops at 100. The read goes to gh's default host,
+ * github.com, and the places are read as paths from the repository's root.
+ * Each line, a trailing carriage return dropped, is compared with `places`,
+ * planDocumentPlaces' answer, exactly, case read. False where the list names
+ * none of them, and where gh answers HTTP 404, which GitHub gives for a
+ * repository or pull request that does not exist or that the login cannot
+ * read. Null where there are no places to compare and where the host gave
+ * no answer: a query that did not start, ran past its bound or exited
+ * non-zero under any other status.
+ */
+async function changesPlanDocument(host: GuardHost, ready: { repo: string; number: number }, places: readonly string[] | null): Promise<boolean | null> {
+  if (places === null) return null;
+  const ran = await hostQuery(host, ["gh", "api", "--paginate", `repos/${ready.repo}/pulls/${ready.number}/files?per_page=100`, "--jq", ".[].filename"]);
+  if (ran === null) return null;
+  if (ran.exitCode !== 0) return /\bHTTP 404\b/.test(ran.stderr) ? false : null;
+  return ran.stdout.split("\n").some((path) => places.includes(path.replace(/\r$/, "")));
+}
+
+// The link and the head branch of the pull request gh's line names, from one
+// read, `gh api repos/<repository>/pulls/<number>`, or null where the query
+// did not start, ran past its bound, exited non-zero or printed anything but
+// a JSON array of two strings.
+async function pullRequestNames(host: GuardHost, ready: { repo: string; number: number }): Promise<{ link: string; branch: string } | null> {
+  const ran = await hostQuery(host, ["gh", "api", `repos/${ready.repo}/pulls/${ready.number}`, "--jq", "[.html_url, .head.ref]"]);
+  if (ran === null || ran.exitCode !== 0) return null;
+  let named: unknown;
+  try {
+    named = JSON.parse(ran.stdout);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(named) || named.length !== 2 || typeof named[0] !== "string" || typeof named[1] !== "string") return null;
+  return { link: named[0], branch: named[1] };
+}
+
+// The three values a ready hands the session for the plan's entry, each as
+// the host gave it: the number in gh's line, and the pull request's link and
+// head branch.
+export type PrReadyFields = { pullRequest: number; pullRequestUrl: string; branch: string };
 
 // What the ready mark reaches through hooks/index.ts: `command` reads the
 // call's shell line as hooks/recognition.ts's shellCommandOf does, `holder`
 // is the plan holder of the entry the turn started on, a goal node carrying
-// planPath, or undefined where the turn started on none, and `emit` writes
-// one pr-ready event for that holder's plan, awaited to the stream's bound
-// and never rejecting.
+// planPath, or undefined where the turn started on none or the session does
+// not own the persona, `archiveDirs` is the plan archive folders, the
+// PLAN_ARCHIVE_DIRS of hooks/plan-record.ts, `host` runs the two GitHub
+// reads, `set` writes the three fields onto the entry of that id, holding
+// each to the store's shape and never rejecting, and `emit` writes one
+// pr-ready event for that holder's plan, awaited to the stream's bound and
+// never rejecting. The holder is read for its id and its plan alone: its
+// stored branch and pull request decide nothing, since a queue record's
+// words fill them.
 export type PrReadyDeps = {
   command(e: GuardCall): string;
-  holder(): { planPath?: string; pullRequest?: number } | undefined;
+  holder(): { id: string; planPath?: string } | undefined;
+  archiveDirs: readonly string[];
+  host: GuardHost;
+  set(entryId: string, fields: PrReadyFields): Promise<void>;
   emit(plan: string, detail?: string): Promise<void>;
 };
 
 /**
- * Writes pr-ready where a bash or powershell call whose result is not an
- * error ran `gh pr ready` at a simple-command position, for the plan holder
- * of the entry the turn started on, detail `pr <number>` from that entry's
- * pullRequest, else from the command's own number, else absent. A turn that
- * started on no plan holder writes nothing. Never blocks or edits the
- * command: it reads the finished call. Attaches nothing.
+ * Writes pr-ready where three things hold of a bash or powershell call whose
+ * result is not an error. Its command ran `gh pr ready` at a simple-command
+ * position, as prReadySegmentOf reads it. Its result holds gh's own line for
+ * a ready, as ghReadyLineOf reads it at gh 2.97.0, so a command that only
+ * mentions the ready writes nothing; a line the command itself prints, an
+ * echo among them, reads as gh's. And the pull request that line names is
+ * the plan's own, as changesPlanDocument asks the host, or the host could
+ * not be asked. The plan is the plan holder of the entry the turn started
+ * on, and a turn with no plan holder writes nothing and asks the host
+ * nothing.
+ *
+ * A real ready so has three outcomes. For the plan's own pull request the
+ * mark is written, detail `pr <number>` with the number in gh's line, and
+ * the entry takes that number with the link and head branch pullRequestNames
+ * reads. For another pull request, or one the host says does not exist,
+ * nothing is written. Where the host could not be asked, or the link and
+ * branch could not be read, the mark is written and nothing is set. Both
+ * reads are built from gh's line alone: no word of the command reaches a
+ * host query. Never blocks or edits the command: it reads the finished call.
+ * Attaches nothing.
  */
 export function prReadyHook(deps: PrReadyDeps): AfterHook {
   return {
     name: "pr-ready",
     readsContext: false,
-    matches: (e: GuardCall, r: GuardResult) => r.isError !== true && PR_READY_TOOLS.test(e.tool) && prReadyCommandOf(deps.command(e)) !== null,
-    apply: async (e: GuardCall) => {
+    matches: (e: GuardCall, r: GuardResult) => r.isError !== true && PR_READY_TOOLS.test(e.tool) && prReadySegmentOf(deps.command(e)) !== null && ghReadyLineOf(r) !== null,
+    apply: async (_e: GuardCall, r: GuardResult) => {
       try {
-        const ready = prReadyCommandOf(deps.command(e));
+        const ready = ghReadyLineOf(r);
         const holder = deps.holder();
         if (ready === null || holder === undefined || !holder.planPath) return {};
-        const number = holder.pullRequest ?? ready.number;
-        await deps.emit(holder.planPath, number === null ? undefined : `pr ${number}`);
+        const own = await changesPlanDocument(deps.host, ready, planDocumentPlaces(holder.planPath, deps.archiveDirs));
+        if (own === false) return {};
+        await deps.emit(holder.planPath, `pr ${ready.number}`);
+        if (own === null) return {};
+        const named = await pullRequestNames(deps.host, ready);
+        if (named !== null) await deps.set(holder.id, { pullRequest: ready.number, pullRequestUrl: named.link, branch: named.branch });
       } catch {
-        // the stream is observability; a failed read or emit marks nothing
+        // the stream is observability; a failed read, emit or set leaves
+        // what was written before it standing
       }
       return {};
     },

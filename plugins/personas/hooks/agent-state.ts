@@ -270,20 +270,25 @@ export interface GoalNode {
                       // that never folded. Load drops a value that is not a
                       // positive integer.
   pullRequest?: number; // Plan node only: the number of the pull request the
-                      // plan's branch is under. Written by goal_add in a
-                      // [QUEUE] delivery turn, from the record's labelled
-                      // `Pull request:` field, in its number or link form.
-                      // The kit event stream's plan-queued event carries it
-                      // as its detail. Absent on an entry queued with no
-                      // record. Load drops a value that is not a positive
-                      // integer.
+                      // plan's branch is under. Two writers. goal_add in a
+                      // [QUEUE] delivery turn writes it from the record's
+                      // labelled `Pull request:` field, in its number or
+                      // link form, and the kit event stream's plan-queued
+                      // event carries that as its detail. The plan's own
+                      // ready, the pr-ready after hook, then sets it from
+                      // gh's line, replacing a record's value. Absent on an
+                      // entry queued with no record until its ready. Load
+                      // drops a value that is not a positive integer.
   branch?: string; // Plan node only: the plan's branch, written by the same
-                      // goal_add from the record's `Branch:` field. Load
-                      // drops a value off the branch shape,
-                      // QUEUE_BRANCH_FORM with no ".." and no trailing "/".
+                      // goal_add from the record's `Branch:` field and set
+                      // by the plan's own ready from the host's head branch
+                      // of the pull request. Load drops a value off the
+                      // branch shape, QUEUE_BRANCH_FORM with no ".." and no
+                      // trailing "/".
   pullRequestUrl?: string; // Plan node only: the pull request's link, written
                       // by the same goal_add where the `Pull request:` field
-                      // is the link form, and absent for the number form.
+                      // is the link form, absent for the number form, and
+                      // set by the plan's own ready from the host's link.
                       // Load drops a value off QUEUE_PULL_REQUEST_LINK_FORM.
   pausedByOperatorLine?: true; // Set on each node an operator's [PAUSE] line
                       // paused, the plan holder and its active leaf. A

@@ -82,8 +82,10 @@ import {
   readOperatorLine,
   applyOperatorLine,
   type OperatorLine,
+  QUEUE_BRANCH_FORM,
+  QUEUE_PULL_REQUEST_LINK_FORM,
 } from "./agent-state";
-import { readPlanRecord, resolvePlanDir } from "./plan-record";
+import { PLAN_ARCHIVE_DIRS, readPlanRecord, resolvePlanDir } from "./plan-record";
 import type { PlanRecordReading } from "./plan-record";
 import type { AgentState, AskEntry, AutonomyLevel, GoalNode, LongTermGoal, NudgeBudget, EnvState, TaskItem } from "./agent-state";
 import {
@@ -209,7 +211,7 @@ import { COMPACT_CUT_MARKER, COMPACT_REMINDER_INTERVAL_MS, COMPACT_VALVE_PERCENT
 import { GuardError, commandVerdictOf, matchingBeforeGuards, runAfter, runBefore, type AfterHook, type BeforeGuard, type GuardCall, type GuardContext, type GuardHost, type GuardResult, type GuardVerdictRecord } from "./guards/runner";
 // The module's own after-call hooks: the C# formatter and the
 // memory-recognition nudge.
-import { formatterHook, prReadyHook, recognitionHook, resolveExecutable } from "./guards/after-hooks";
+import { formatterHook, prReadyHook, recognitionHook, resolveExecutable, type PrReadyFields } from "./guards/after-hooks";
 import { childEnvOf, gitHooksPathOf } from "./spawn";
 import { newSpawnTypes, recordSpawnType, spawnLogLine, spawnTypeOf, type SpawnTypes } from "./spawn-types";
 // The eleven deny guards: the four the kit's command hooks held, ported, the
@@ -1032,6 +1034,39 @@ function turnPlanHolderOf(turnLeafId: string | null): GoalNode | undefined {
   return leaf === undefined ? undefined : planHolderOf(sess.state, leaf);
 }
 
+// The plan's own ready sets the entry's pull request number, link and branch
+// from the host, for the pr-ready after hook. Each value is held to the
+// shape the store's load keeps it in, the queue record reader's own tests,
+// and a value off its shape sets nothing. The fields are written without
+// being read, so a value a queue record put there is replaced, and one
+// pr_ready_fields decision names the entry and the values set and nothing
+// the entry held before. The store write is a goal tool's, persistAnswering:
+// it does not throw, a write that failed leaves the change and a
+// goal_write_failed decision in memory for the next write that lands, and a
+// write that yielded saves nothing. A session that does not own the persona,
+// or one whose tree no longer holds the entry, sets nothing.
+async function setPrReadyFields(dp: any, entryId: string, fields: PrReadyFields): Promise<void> {
+  if (!sess.isOwner) return;
+  const entry = sess.state.goals.find((g) => g.id === entryId);
+  if (entry === undefined) return;
+  const set: string[] = [];
+  if (Number.isInteger(fields.pullRequest) && fields.pullRequest > 0) {
+    entry.pullRequest = fields.pullRequest;
+    set.push(`pull request ${fields.pullRequest}`);
+  }
+  if (QUEUE_PULL_REQUEST_LINK_FORM.test(fields.pullRequestUrl)) {
+    entry.pullRequestUrl = fields.pullRequestUrl;
+    set.push(`link ${fields.pullRequestUrl}`);
+  }
+  if (QUEUE_BRANCH_FORM.test(fields.branch) && !fields.branch.includes("..") && !fields.branch.endsWith("/")) {
+    entry.branch = fields.branch;
+    set.push(`branch ${fields.branch}`);
+  }
+  if (set.length === 0) return;
+  sess.state.decisions.push({ timestamp: Date.now(), loop: "goal", action: "pr_ready_fields", detail: `${entryId}: ${set.join(", ")}` });
+  await persistAnswering({ persist: (rollBackOnYield?: () => void) => persist(dp, rollBackOnYield), sess }, "pr_ready", entryId);
+}
+
 // The module's own after hooks for one call, built over the hook-bound `$`
 // for hostOf's reason: the C# formatter, the pull request ready mark and,
 // on a call the model made, the memory-recognition nudge. A call a plugin
@@ -1042,13 +1077,17 @@ function turnPlanHolderOf(turnLeafId: string | null): GoalNode | undefined {
 // hooks runner.ts holds registered, in a runAfter pass of their own, their
 // contexts after those. `askRecognition` is the call's memory-recognition
 // ask, which the nudge settles before it claims. `turnLeaf` reads the entry
-// the turn started on, for the ready mark's plan holder.
+// the turn started on, for the ready mark's plan holder. The ready mark asks
+// GitHub through the guards' host, which spawns gh by its absolute path.
 function moduleAfterHooks(dp: any, modelMade: boolean, askRecognition: (() => Promise<void>) | undefined, turnLeaf: () => string | null): AfterHook[] {
   const hooks: AfterHook[] = [
     formatterHook({ cwd: () => guardCwdOf(dp), host: guardHostOf(dp), resolve: (name: string) => executableOf(dp, name) }),
     prReadyHook({
       command: (call) => shellCommandOf(call.tool, call),
       holder: () => turnPlanHolderOf(turnLeaf()),
+      archiveDirs: PLAN_ARCHIVE_DIRS,
+      host: guardHostOf(dp),
+      set: (entryId, fields) => setPrReadyFields(dp, entryId, fields),
       emit: (plan, detail) => emitKitEvent(kitEventDepsOf(dp), kitEvents, "pr-ready", plan, detail),
     }),
   ];

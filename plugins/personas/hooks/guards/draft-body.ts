@@ -36,19 +36,14 @@
 
 import type { BeforeGuard, GuardCall, GuardContext, GuardHost } from "./runner";
 import type { LexHost } from "./readonly-agent";
-import { prReadySegmentOf } from "./after-hooks";
-import { BRANCH_ALLOWLIST, PUSH_HOST_TIMEOUT_MS, QUERY_ENV } from "./merged-pr-push";
+import { REPOSITORY_FORM, hostQuery, prReadySegmentOf } from "./after-hooks";
+import { BRANCH_ALLOWLIST } from "./merged-pr-push";
 import { effectiveDir } from "./pr-docs";
 
 // The draft line: the first line of the body of every draft pull request the
 // architect seat opens, and the line the architect and finishing-work skills
 // name.
 export const DRAFT_BODY_LINE = "Plan draft.";
-
-// The repositories the query may carry: an owner, one slash and a name, each
-// of letters, digits, dots, dashes and underscores, the owner opening with a
-// letter or digit.
-const REPOSITORY_FORM = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+$/;
 
 /**
  * Whether a body opens with the draft line: its first line that is not
@@ -119,15 +114,11 @@ function viewTarget(words: readonly string[]): string[] | null {
   return [...(selector === null ? [] : [selector]), ...(repository === null ? [] : ["-R", repository])];
 }
 
-// The query's stdout, or null where it did not start, exited non-zero or ran
-// past its bound.
+// The query's stdout, through hostQuery, or null where it did not start,
+// exited non-zero or ran past its bound.
 async function query(host: GuardHost, argv: readonly string[], cwd: string): Promise<string | null> {
-  try {
-    const ran = await host.run(argv, { cwd, env: { ...QUERY_ENV }, timeoutMs: PUSH_HOST_TIMEOUT_MS });
-    return ran.exitCode === 0 ? ran.stdout : null;
-  } catch {
-    return null;
-  }
+  const ran = await hostQuery(host, argv, cwd);
+  return ran !== null && ran.exitCode === 0 ? ran.stdout : null;
 }
 
 // The refusal, fixed text: it names no word of the command.
