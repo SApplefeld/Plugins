@@ -55,7 +55,7 @@ export interface UnionedClaim extends CommonsClaim {
 }
 
 /**
- * The REAL $.store shape (async). Matched to claude-code.d.ts:941-961.
+ * The REAL $.store shape (async). Matched to CoreEngineInterface, member store, in .claude/types/claude-code.d.ts.
  */
 export interface CommonsStore {
   get(key: string): Promise<unknown>;
