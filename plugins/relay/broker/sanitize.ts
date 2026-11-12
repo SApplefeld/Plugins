@@ -248,16 +248,32 @@ export function visible(value: string): string {
 
 /**
  * Text another author wrote, made one line for a line the broker writes around it: each control
- * character and line break made a space, runs of whitespace made one space, the ends trimmed, and
- * each double quote made a single quote, so text set inside one pair of double quotes can neither
- * leave them nor start a line.
+ * character and line break made a space, the invisible class dropped, runs of whitespace made one
+ * space, the ends trimmed, and every character that carries Unicode's `Quotation_Mark` property made
+ * a single ASCII quote, so text set inside one pair of double quotes can neither leave them nor start
+ * a line.
+ *
+ * The class is Unicode's own and closed: the curly quotes, the guillemets, the CJK corner brackets
+ * and the fullwidth forms are in it, and a character that only resembles a quotation mark, such as
+ * the double prime, is not and stays as written. A curly apostrophe becomes the ASCII one.
+ *
+ * The class is dropped in one pass over code points, after every break is a space. The same pass
+ * makes each lone surrogate U+FFFD, so two halves that sat on either side of a dropped character
+ * cannot meet and pair into a hidden one. The class goes before the whitespace collapse, so a
+ * hidden character between two spaces leaves one space, and a text this function made comes back
+ * unchanged from a second pass.
  */
 export function oneLine(text: string): string {
-  return text
-    .replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/g, " ")
+  return [...text.replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/g, " ")]
+    .map((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code >= 0xd800 && code <= 0xdfff ? "\ufffd" : character;
+    })
+    .filter((character) => !isInvisible(character.codePointAt(0) ?? 0))
+    .join("")
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/"/g, "'");
+    .replace(/\p{Quotation_Mark}/gu, "'");
 }
 
 /**

@@ -3753,17 +3753,26 @@
   const QUOTED_POINTS = 200;
 
   /**
-   * A worker's text in the form the broker quotes it into a line: each control character and line
-   * break made a space, runs of whitespace made one, the ends trimmed, each double quote made a single
-   * one, then cut to `QUOTED_POINTS` with the ellipsis paid out of the bound, in code points and in
-   * UTF-16 units alike. Set inside one pair of double quotes, it can neither leave them nor start a line.
+   * A worker's text in the form the broker quotes it into a line, `oneLine` in `broker/sanitize.ts`:
+   * each control character and line break made a space, each lone surrogate made U+FFFD in the pass
+   * that drops the invisible class, so two halves cannot meet and pair into a hidden one, runs of
+   * whitespace made one, the ends trimmed, every character that carries Unicode's `Quotation_Mark`
+   * property made a single ASCII quote, then cut to `QUOTED_POINTS` with the ellipsis paid out of the
+   * bound, in code points and in UTF-16 units alike. Set inside one pair of double quotes, it can
+   * neither leave them nor start a line. A character that only resembles a quotation mark, such as
+   * the double prime, stays as written.
    */
   function quotedText(text) {
-    const flat = txt(text)
-      .replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/g, " ")
+    const flat = Array.from(txt(text).replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/g, " "))
+      .map((character) => {
+        const code = character.codePointAt(0);
+        return code >= 0xd800 && code <= 0xdfff ? "\ufffd" : character;
+      })
+      .filter((character) => !invisibleCode(character.codePointAt(0)))
+      .join("")
       .replace(/\s+/g, " ")
       .trim()
-      .replace(/"/g, "'");
+      .replace(/\p{Quotation_Mark}/gu, "'");
     if (Array.from(flat).length <= QUOTED_POINTS && flat.length <= QUOTED_POINTS) return flat;
     let kept = Array.from(flat).slice(0, QUOTED_POINTS - 1);
     while (kept.join("").length + 1 > QUOTED_POINTS && kept.length > 0) kept = kept.slice(0, -1);

@@ -350,7 +350,8 @@ export function utcSecond(ms: number): string {
 }
 
 /**
- * A quoted text as its closing line or tag carries it: made one line by `oneLine`, so it can neither
+ * A quoted text as its closing line or tag carries it: made one line by `oneLine`, which also drops
+ * the invisible class and makes every Unicode quotation mark a single ASCII quote, so it can neither
  * start a line of the event nor leave the double quotes it is set in, then cut by `fit`, which ends
  * a cut in an ellipsis and holds both the code-point and the UTF-16 bound. Both steps leave a text
  * they already made unchanged, so the router holds a quote in this form and the render applies it
