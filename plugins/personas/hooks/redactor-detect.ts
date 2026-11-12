@@ -886,11 +886,15 @@ const PW_SYMBOL = /[!#$%&*()=+[\]{}<>:?@^~]/
 
 // The spelling every placeholder's hash is read as: a lowercase letter and a
 // digit, as most hashes hold, and no run of digits or letters that a rule of
-// looksGenerated turns on.
+// looksGenerated turns on. Holding both, it reads to looksLikeName, which
+// looksSecret and urlParamSecret ask, as most hashes do.
 const HASH_AS_READ = '1a2b3c4d'
 
-// A copy of `v` for looksGenerated alone. The value as written is what is
-// kept, minted and tested everywhere else.
+// A copy of `v` for the four checks that judge a value's shape where the
+// value can hold a placeholder: looksGenerated on a quoted value, looksSecret
+// in the sibling test and in the SQL insert's key column, and the class
+// count, name test and entropy test of urlParamSecret. The value as written
+// is what is kept, minted and tested everywhere else.
 function withFixedHashes(v: string): string {
   return v.replace(TAG, (tag) => `${tag.slice(0, -9)}${HASH_AS_READ}]`)
 }
@@ -1534,9 +1538,11 @@ function urlParamSecret(raw: string, cfg: Config): boolean {
     // A broken escape: judge it as it stands.
   }
   if (cfg.allow.has(v) || v.length < 12) return false
-  if ([/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((r) => r.test(v)).length < 2) return false
-  if (looksLikeName(v, true)) return false
-  return entropy(v) >= cfg.contextMinEntropy
+  // Decoding can turn `%5B` and `%5D` into the brackets of a placeholder.
+  const read = withFixedHashes(v)
+  if ([/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((r) => r.test(read)).length < 2) return false
+  if (looksLikeName(read, true)) return false
+  return entropy(read) >= cfg.contextMinEntropy
 }
 
 function scrubCommandLines(text: string, cfg: Config): string {
@@ -1577,7 +1583,7 @@ function scrubAssignments(text: string, cfg: Config): string {
   // A value whose name sits in a sibling field.
   const sibling = (head: string, name: string, v: string, tail = ''): string => {
     if (PW_NAME.test(name)) return value(head, name, v, tail)
-    if (KEY_NAME.test(name) && !/public|publishable/i.test(name) && looksSecret(v, 'key=', cfg)) return head + mint('SECRET', v) + tail
+    if (KEY_NAME.test(name) && !/public|publishable/i.test(name) && !cfg.allow.has(v) && looksSecret(withFixedHashes(v), 'key=', cfg)) return head + mint('SECRET', v) + tail
     return head + v + tail
   }
   if (/pass|secret|key|token|pw/i.test(out)) {
@@ -1647,7 +1653,7 @@ function scrubSqlInserts(text: string, cfg: Config): string {
           const v = text.slice(from, i)
           i++
           const kind = kinds[col]
-          if (kind && v.length >= 3 && !cfg.allow.has(v) && (kind === 'pw' ? !isStandIn(v) : looksSecret(v, 'key=', cfg))) ranges.push([from, from + v.length])
+          if (kind && v.length >= 3 && !cfg.allow.has(v) && (kind === 'pw' ? !isStandIn(v) : looksSecret(withFixedHashes(v), 'key=', cfg))) ranges.push([from, from + v.length])
         } else {
           while (i < limit && text[i] !== ',' && text[i] !== ')') i++
         }
