@@ -83,7 +83,8 @@ steps:
    whichever is missing. The name becomes the folder name and the list entry.
 2. It reads the account's wiki root with `kb-registry.ps1 Root`. Where the
    account has no list yet, it asks once for the absolute folder to keep
-   wikis in, on a local drive.
+   wikis in, on a local drive. "A hard invariant" below says how that
+   folder's place bears on the account boundary.
 3. It asks whether the KB gets a git remote, and takes a URL only where the
    answer is yes. The hand path's "Step 4 (optional)" says when a remote is
    worth having.
@@ -94,7 +95,14 @@ steps:
 5. It specializes the three `CUSTOMIZE` blocks in `CLAUDE.md` from the
    description, the same blocks the hand path's "Step 3: specialize the
    schema" fills, and commits `CLAUDE.md`.
-6. It prints the KB's line from `kb-registry.ps1 List`.
+6. It prints the KB's line from `kb-registry.ps1 List`, then says that the
+   account's walker services the KB once it is registered and where the
+   registration steps are. It registers nothing itself.
+
+Creation registers no scheduled task. The new KB is serviced from the next
+hourly pass once the account's walker, the `wiki-walk` task, is registered,
+which is done once per account and never per KB. Where the account has none
+yet, register it as "Step 5: register automation" below says.
 
 A refused step stops the run with that step's own one-line reason. A stop after
 the copy names the folder it left behind, so you can remove it before a retry.
@@ -268,7 +276,15 @@ particular, do not weaken the "Untrusted input" section or the contradiction
 rule. Show me the proposed edits before writing them.
 ```
 
-When the edits are agreed, commit `CLAUDE.md`.
+When the edits are agreed, commit `CLAUDE.md` yourself, from your own
+PowerShell window, not through the session. The KB's settings deny its agent
+raw git, and its commit helper, `kb-commit.ps1`, refuses `CLAUDE.md`, so the
+session cannot make this commit. Here `<kb>` is the KB's folder:
+
+```
+git -C <kb> add CLAUDE.md
+git -C <kb> commit -m "Specialize the schema"
+```
 
 The "Untrusted input" section and the contradiction rule are security and
 integrity guarantees, not domain choices. The untrusted-input section is what
@@ -302,14 +318,17 @@ run uses to push, pushes only to a remote named `origin`.
 Each account runs one scheduled task, `wiki-walk`, which services every KB on
 the account's wiki list each hour. Where the account has none yet, register it
 once from an elevated PowerShell, as the owning account, with
-`register-walk.ps1`. A KB listed in Step 1 is then serviced from the
-next pass, with no registration of its own. A KB with no remote is serviced
+`register-walk.ps1`. On a standard account the elevated window runs as an
+administrator instead, so follow [runbook_automation.md](runbook_automation.md),
+"Registering the walker", which gives that route. A KB listed in Step 1 is
+then serviced from the next pass, with no registration of its own. A KB with no remote is serviced
 too, with no pull and no push. See [runbook_automation.md](runbook_automation.md)
 for registration and verification detail.
 
 ## Verifying an instantiated KB
 
-Run the structural check against the KB:
+Run the structural check against the KB, from the engine checkout or the
+installed plugin folder, where `tests/` sits:
 
 ```
 pwsh -NoProfile -File tests/Test-KbStructure.ps1 -Path <kb> -RequireSchema -RequireSkills
@@ -340,4 +359,8 @@ workspace trust (step 2), which is per account and per path and lives in
 
 One Windows account holds one entity's KBs, never a second entity's, as
 [runbook_automation.md](runbook_automation.md), "The hard invariant, restated",
-states in full.
+states in full. The boundary holds only where each KB's folder is closed to
+the other accounts on the machine. A folder under the owning account's profile
+is closed to other standard accounts by default. A folder elsewhere, such as
+the `D:\Wikis` example above, may not be, and the runbook's section says how
+to read a folder's rules.

@@ -77,7 +77,11 @@ line that strips by category without the whole class.
 `kb-move.ps1` and `kb-drop.ps1` each hold one line setting `$instructionName`,
 whose quoted pattern naming the instruction files Claude Code loads equals
 `kb-commit.ps1`'s, the reference. It also fails any other line in those files
-that names `$instructionName` outside a `-match` read, lines opening with `#` aside. The source
+that names `$instructionName` outside a `-match` read, lines opening with `#` aside.
+Six of the thirteen ship in the published plugin, the structure, feeder,
+reconcile-gate, run, walk and launcher tests, as "Publishing to the
+marketplace" below lists them. The other seven stay in the source repository,
+so an installed copy's `tests/` folder holds six files. The source
 repository also holds the publish job, `.github/workflows/publish.yml`, and its
 scripts and their tests under `tools/publish/`. "Publishing to the marketplace"
 below covers them. The engine repo is machinery only.
@@ -178,6 +182,12 @@ after the copy names the folder for the operator to remove, and a stop from
 the trust step on also names the trust entry it may have left. The skill then
 fills the three `CUSTOMIZE` blocks from the description and commits
 `CLAUDE.md` with git directly, since `kb-commit.ps1` refuses the schema path.
+Creation registers no scheduled task. The skill ends by printing the KB's list
+line and telling the operator that the account's `wiki-walk` task services the
+KB once it is registered, once per account from an elevated PowerShell with
+`register-walk.ps1`, as the automation runbook's "Registering the walker"
+says. It says this on every creation and does not check whether the task
+exists.
 
 The wiki list is one JSON file per Windows account,
 `%LOCALAPPDATA%\llm-wiki\registry.json`, holding the root folder and one entry
@@ -506,7 +516,9 @@ and Edit tools, not the shell, so `settings.json` also pins
 under the allow-list wall even on an account whose own default is to bypass
 permissions, and a shell write to `.claude/` prompts a human rather than
 running. That effect on a bypass-default account is the design and has not
-been observed on a run.
+been observed on a run. Until it is observed, do not rely on it on such an
+account. Start the session with `claude --permission-mode default`, which sets
+the mode for that run whatever the account's setting says.
 
 The write denies are written relative to the folder a run starts in, as
 `./sources/**` and the like, so they bind inside the KB only. A write outside
@@ -817,9 +829,10 @@ general floor of 60 seconds. Every child the walker starts runs inside a kill-on
 the walker holds, so ending the task ends every child's tree. Each pass writes
 `%LOCALAPPDATA%\llm-wiki\walk-status.json`, naming each KB, each step's
 outcome, every failure and every KB still deferred, and appends a block to
-`walk.log` beside it, and a line to `walk-notices.jsonl` there, the file a
-persona reads, when a KB becomes stuck, once a day while it stays stuck, and
-when it clears. The walker exits 0 after a pass whatever it recorded,
+`walk.log` beside it, and a line to `walk-notices.jsonl` there when a KB
+becomes stuck, once a day while it stays stuck, and when it clears. The
+notices file is for a reader outside the engine to pass on. The walker exits
+0 after a pass whatever it recorded,
 since Task Scheduler logs any exit as completion and never retries, so the
 status file is the report.
 
@@ -969,7 +982,8 @@ operator's procedure.
 
 To stand up a KB, see [instantiation.md](instantiation.md). To schedule and
 verify it, see [runbook_automation.md](runbook_automation.md). To verify a KB's
-structure and its permission allowlist at any time:
+structure and its permission allowlist at any time, from the engine checkout or
+the installed plugin folder:
 
 ```
 pwsh -NoProfile -File tests/Test-KbStructure.ps1 -Path <kb> -RequireSchema -RequireSkills

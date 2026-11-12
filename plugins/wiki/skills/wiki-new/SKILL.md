@@ -202,3 +202,10 @@ already set the branch's upstream. Without a remote, push nothing.
 Run `pwsh -NoProfile -File '<plugin root>\kb-registry.ps1' List` and print the
 one line whose first column is the new name. That line is the result. Add one
 sentence on whether the wiki has a remote.
+
+Then tell the operator in one sentence that the account's walker, its hourly
+`wiki-walk` scheduled task, services the wiki once that task is registered,
+that registration is done once per account from an elevated PowerShell with
+`<plugin root>\register-walk.ps1`, and that
+`<plugin root>\docs\runbook_automation.md`, under "Registering the walker",
+gives the steps. Register nothing yourself, as step 5 says.

@@ -25,7 +25,7 @@ listed KB in turn, one at a time. For each KB it takes these steps in order:
    the new files over `.claude/`, keeping the KB's own `feed.json` and any
    file the engine does not ship, and commits them under the subject
    `Engine: update to <hash8>`, `<hash8>` being the first eight characters of
-   the installed engine's hash. Where an uncommitted file in the KB was written in the last thirty minutes, or a merge is left in progress, it copies nothing, records the step `deferred`, and tries again next pass.
+   the installed engine's hash. Where an uncommitted file in the KB outside `inbox/` was written in the last thirty minutes, or a merge is left in progress, it copies nothing, records the step `deferred`, and tries again next pass.
 3. **Pull.** Where the KB has a remote named `origin`, it fetches and merges
    `origin/main`. A merge that conflicts runs the `wiki-merge` skill, which
    joins both sides of each conflicted wiki page. "Conflicting pulls"
@@ -140,13 +140,39 @@ administrator), logged in as the account that owns the KBs. Registering a
 task with an S4U principal requires elevation, and without it the registrar
 refuses with a one-line reason. The usual route is the owning account
 elevating; the task still runs with a limited token, so a scheduled run holds
-no administrator rights. Where the owning account cannot elevate, an
-administrator registers for it with `-LauncherRoot` naming a folder that
-account can read, which the registrar verifies, as described below. Run the
-registrar from the engine
-checkout or the installed plugin folder, whose path instantiation.md gives
-under "Step 1: create the repo". Look first with `-WhatIf`, which prints the
-definition and registers nothing:
+no administrator rights.
+
+Where the owning account cannot elevate, an administrator registers for it
+with `-LauncherRoot` naming a folder that account can read, which the
+registrar verifies, as described below. A standard account cannot elevate as
+itself: choosing Run as administrator asks for an administrator's name and
+password, and the window that opens runs as that administrator, not as the
+owning account. Run `whoami` in the elevated window to see which account it
+is. Where it prints an account other than the owner, give `-User` the owning
+account, such as `.\kbuser` for a local account, since `-User` defaults to
+the account running the script. Give `-LauncherRoot` a folder that account
+can read as well, since the default launcher folder sits under the
+registering account's profile. The registrar refuses unless `pwsh` and
+`claude` are both on the administrator's own PATH, as the checks below say. It
+only checks that `claude` is there. The task's runs use the owning account's
+own Claude Code, which must still be installed and logged in under that
+account, as
+instantiation.md's Prerequisites say. Where the administrator has no Claude
+Code of their own, add the owning account's `.local\bin` folder to the
+elevated window's PATH for this one run, such as
+`$env:Path += ';C:\Users\kbuser\.local\bin'`. The owning account can write
+that folder, so run nothing else in that window and close it after the
+registration. The task runs the `pwsh` the registrar finds. That copy must be
+one the owning account can run and only Administrators and SYSTEM can write,
+such as a PowerShell 7 installed under `C:\Program Files`.
+
+Run the registrar from a copy that only Administrators and SYSTEM can write,
+such as an engine checkout in such a folder or the administrator's own
+installed plugin folder, whose path instantiation.md gives under "Step 1:
+create the repo". Never run it from a folder under the owning account's
+profile. The registrar loads a file from its own folder, so whatever that
+account can write would run with administrator rights. Look first
+with `-WhatIf`, which prints the definition and registers nothing:
 
 ```
 pwsh -NoProfile -File ./register-walk.ps1 -User '.\kbuser' -WhatIf
@@ -192,7 +218,8 @@ this computer's account named `kbuser`. The registrar does two things:
   SYSTEM and Administrators can write: whoever can write the launcher runs
   code as the account every hour.
 - It registers `wiki-walk` under the task folder
-  `\llm-wiki\<domain>.<account>\`, so each account's task is its own and one
+  `\llm-wiki\<domain>.<account>\`, whose `<domain>` the verification
+  checklist below defines, so each account's task is its own and one
   account's registration never replaces another's. The task's action runs the
   launcher with `pwsh`. Its trigger starts at the next five past the hour and
   repeats hourly. It runs as `-User` with the S4U logon at the Limited run
@@ -241,8 +268,11 @@ option.
 Run every step, in order, as the owning
 account. Each step names the command and the exact observable that proves it.
 A registered task is not a working task until this passes. The examples use
-the account `kbuser`, and `<kb>` stands for the KB's folder. For a local
-account, `<domain>` in a task folder is the computer name.
+the account `kbuser`, and `<kb>` stands for the KB's folder. `<domain>` in a
+task folder is the first part of the account's name. For a local account,
+given as `.\kbuser` or `COMPUTER\kbuser`, it is the computer name. For a
+domain account, given as `DOMAIN\kbuser`, it is the domain's name. A name
+given with no first part takes the domain of the session that registers it.
 
 **1. The task exists and runs as the intended account.**
 
@@ -252,9 +282,9 @@ $task.TaskPath
 $task.Principal
 ```
 
-Observable: one task, under `\llm-wiki\<domain>.kbuser\`. `UserId` reads the
-owning account's bare name, `kbuser`, with no machine or domain prefix, and
-`LogonType` is `S4U`. The registrar registers `.\kbuser` as
+Observable: one task, under `\llm-wiki\<domain>.kbuser\`, and `LogonType` is
+`S4U`. For a local account, `UserId` reads the owning account's bare name,
+`kbuser`, with no machine prefix. The registrar registers `.\kbuser` as
 `COMPUTERNAME\kbuser`, and Task Scheduler reads a local account back by its
 bare name.
 
@@ -363,7 +393,7 @@ under `%LOCALAPPDATA%\llm-wiki\` for the owning account:
 | `walk-status.json` | The last pass whole: when it started and finished, the engine hash, one entry per KB with its result and each step's outcome and note, every KB still deferred and every failed step | First, after any pass |
 | `walk-state.json` | The walker's memory between passes: the KB the last pass ended on, and per KB its last lint stamp, its count of failed lints and the last failed attempt's time, any standing deferral and its notice fields. Rewritten after each KB a pass visits and at the pass's end | To see where the next pass starts, or why a lint reads held |
 | `walk.log` | One block per pass, a line per step with its seconds, kept across passes and rotated to `walk.log.1` at 5 MB | To see a KB's history over several passes |
-| `walk-notices.jsonl` | One JSON line per notice: in the pass that makes a KB stuck, once a day while it stays stuck, and in the pass that clears it. Each line has `id`, `text`, `source` and `at`. A stuck or still-stuck line adds `paths`, the first 10 conflicted paths or paths an engine-change stop refused. The file is kept across passes and rotated to `walk-notices.jsonl.1` at 1 MB | When the operator's thread reports a stuck KB, or to see which notices a pass wrote |
+| `walk-notices.jsonl` | One JSON line per notice: in the pass that makes a KB stuck, once a day while it stays stuck, and in the pass that clears it. Each line has `id`, `text`, `source` and `at`. A stuck or still-stuck line adds `paths`, the first 10 conflicted paths or paths an engine-change stop refused. The file is kept across passes and rotated to `walk-notices.jsonl.1` at 1 MB | When a reader of the file, such as a script of your own that watches it, reports a stuck KB, or to see which notices a pass wrote |
 | `walk-output.log`, `walk-output.err.log` | The walker's console output and that of the feeds, ingests, lints and merges it ran, overwritten at each pass | To read what a model run or the feeder printed |
 | `walk-launcher.log` | One line per launcher refusal, a `WARN` line where `claude` is off PATH or an old snapshot cannot be removed, and an `ERROR` line naming the exit code and the last error line whenever the walker exits non-zero | When `LastTaskResult` is not 0 |
 
@@ -668,6 +698,19 @@ above lists, such a session's file tools reach a folder outside the KB only
 once that folder is added for it. Its shell commands and other tools are not
 bound the same way, as the first reach above says.
 
+The account boundary holds only where each account's KB folders are closed to
+the other accounts. The boundary is Windows' own, kept by each folder's access
+rules, its permissions, rather than by the engine. A folder under the owning
+account's profile is closed to other standard accounts by default. A folder elsewhere takes its
+rules from its parent, and a drive's root can grant every signed-in account
+read and write. Read a KB folder's rules with `icacls <kb>`. A line granting
+rights to any account or group other than the owning account, SYSTEM and
+Administrators lets the accounts it names reach the KB. Users, Authenticated
+Users and Everyone are such groups. The boundary does not hold until those
+rights are removed, and this runbook gives no command for removing them. The
+simple course is to keep each account's KBs under that account's profile
+folder.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Check |
@@ -681,7 +724,7 @@ bound the same way, as the first reach above says.
 | A create run stops with "KB_ENGINE_TIMEOUT_SECONDS must be a whole number of seconds from 1 to 99999." | The account's variable named in the line holds a value outside that range. `kb-create.ps1` checks it on every run, so the run stops before step 1 and copies, trusts and pushes nothing | Set the variable to a whole number from 1 to 99999, or remove it to take the 900-second default. A value below about 640 seconds, the trust step's worst case as `kb-create.ps1` states it beside the bound, can stop a healthy trust step, and such a stop can leave the trust writer's temporary copy of `~/.claude.json` beside it. |
 | A KB reads `deferred: conflict` | A pull conflicted where the model may not join it, or the merge run could not finish, which includes a merge run the wrapper refused on an old or unreadable Claude Code build | The `deferred` list names the paths. First run `claude --version` as the owning account. Where it prints a build older than 2.1.257, or fails, a KB wrapper that holds the build check refuses every merge run on this account, and the row on `is older than 2.1.257` below has the fix. Otherwise resolve the conflict in the KB as the owning account, commit and push. "Conflicting pulls" above has the detail. |
 | A KB reads `deferred: engine change` | A pull from `origin`, read against every merge base, would change a path under `.claude/`, a `.claude` folder anywhere below the root, a `CLAUDE.md` or `CLAUDE.local.md` at any depth, the root `.mcp.json`, or a path holding a Windows short name such as `CLAUDE~1`, that is not the installed engine's own bytes | The `deferred` list names the paths. Read the change as the owning account and, where it is wanted, bring the KB's `HEAD` to hold it: `git merge --ff-only origin/main` in the KB, or a merge you make. Where this machine runs an older engine than the machine that pushed, update this machine's plugin instead and the stop clears on its own. "Conflicting pulls" above has the detail. |
-| The operator's thread says a wiki is stuck | A pull from `origin` conflicted on three passes in a row, or on `.claude/settings.json` from its first pass, and the model merge did not join it; or a pull would change a path under `.claude/`, a `.claude` folder anywhere below the root, a `CLAUDE.md` or `CLAUDE.local.md` at any depth, or the root `.mcp.json`, which the walker stops before any merge | Where the notice names a conflict on paths other than `.claude/settings.json`, first take the `deferred: conflict` row's build check, since a refused merge run counts toward the three passes. Otherwise ask a session on the owning account to resolve the conflict in the wiki, naming the paths in the notice record's `paths` field. The field holds the first 10 paths, and the KB's entry under `deferred` in `walk-status.json` lists them all. The field is an addition to the line, so a reader that ignores it still reads the line. Where a merge had landed, the pass's block in `walk.log` names its restore point. The walker writes the notice to `walk-notices.jsonl` and repeats it once a day. A pass whose pull lands writes a cleared line carrying the pull's note, which names the restore point where a merge landed. For an engine-change stop, ask the session to read the change and bring the KB's `HEAD` to hold it by hand, or update the stuck machine's plugin where it runs the older engine. |
+| A notice says a wiki is stuck, in `walk-notices.jsonl` or wherever a reader passes it on | A pull from `origin` conflicted on three passes in a row, or on `.claude/settings.json` from its first pass, and the model merge did not join it; or a pull would change a path under `.claude/`, a `.claude` folder anywhere below the root, a `CLAUDE.md` or `CLAUDE.local.md` at any depth, or the root `.mcp.json`, which the walker stops before any merge | Where the notice names a conflict on paths other than `.claude/settings.json`, first take the `deferred: conflict` row's build check, since a refused merge run counts toward the three passes. Otherwise ask a session on the owning account to resolve the conflict in the wiki, naming the paths in the notice record's `paths` field. The field holds the first 10 paths, and the KB's entry under `deferred` in `walk-status.json` lists them all. The field is an addition to the line, so a reader that ignores it still reads the line. Where a merge had landed, the pass's block in `walk.log` names its restore point. The walker writes the notice to `walk-notices.jsonl` and repeats it once a day. A pass whose pull lands writes a cleared line carrying the pull's note, which names the restore point where a merge landed. For an engine-change stop, ask the session to read the change and bring the KB's `HEAD` to hold it by hand, or update the stuck machine's plugin where it runs the older engine. |
 | A step reads `deferred: live` pass after pass | Something other than a run is writing a file outside `inbox/`, such as an editor that saves as you type | `pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Live` in the KB lists each path and its minutes. Close the editor, and the step runs thirty minutes after the last write. |
 | A step reads `failed: git identity unset` | The owning account has no git identity | Set `git config --global user.name` and `user.email` as that account. |
 | A KB reads `skipped: budget` every pass | One KB's runs take the pass's whole 6900-second budget | Read `walk.log` for the step's seconds. A large backfill settles once the inbox drains. |

@@ -49,15 +49,21 @@ before the commit, so a crash in between leaves the file tracked by neither the
 inbox nor git, and every ingest run begins by reconciling exactly that state. The same
 step recovers a lint or query run that died mid-edit, committing what it
 recovered under its own `Reconcile:` subject rather than folding it into a
-source's commit. A run that finds a dirty file written within the last thirty
-minutes treats it as another run's live work and stops without writing more, so
-an ingest and a lint can be scheduled side by side. Two runs that each check
-before the other writes can still both write, and a run silent for thirty
-minutes reads as finished to the others.
-Lint also drops any fix whose target text another run changed while lint was
-checking, whose gap another run filled, or whose missing link target
-reappeared, so it never writes over that run's edit, though its other fixes to the
-same page can land beside it until the next lint checks the result.
+source's commit. Scheduled runs never overlap one another: the walker, the
+account's hourly `wiki-walk` task, runs them one at a time, each model run
+under the KB's run lock, as
+[docs/runbook_automation.md](docs/runbook_automation.md), "Run locks", says.
+A person's own Claude Code session in a KB takes no lock, so each run also
+checks for live work. A run that finds an uncommitted file outside `inbox/`
+written within the last thirty minutes treats it as live work and stops
+without writing more. The check has two limits. A session and a run that each
+check before the other's first write can both write. A writer silent for
+thirty minutes reads as finished.
+Lint also drops any fix whose target text another writer changed while lint
+was checking, whose gap another writer filled, or whose missing link target
+reappeared. So it never writes over that writer's edit. Its other fixes to the
+same page can still land beside the edit, until the next lint checks the
+result.
 
 **Query.** Given a question, the query operation reads `index.md` first, opens
 the relevant pages, and synthesizes an answer with citations back to wiki
@@ -162,6 +168,10 @@ for the folder in the account's `~/.claude.json`, whose earlier contents are
 first copied to `~/.claude/kb-trust-backup.json`. It also lists the KB, and
 pushes only where a remote was given. Last, the skill specializes `CLAUDE.md`
 for the domain from the description and commits it.
+Creation registers no scheduled task. The account's walker, its hourly
+`wiki-walk` task, is registered once, from an elevated PowerShell, as
+[docs/runbook_automation.md](docs/runbook_automation.md), "Registering the
+walker", says, and a KB waits unserviced until it is.
 
 A remote is optional. A KB with no remote commits locally and pushes nothing.
 The ingest skill treats that as the normal case, and `kb-commit.ps1 -Push`
@@ -237,8 +247,12 @@ no MCP server, so a channel's reply tool never reaches it. An MCP server is a
 program or service that hands Claude extra tools. Every pass writes
 `%LOCALAPPDATA%\llm-wiki\walk-status.json`, which names each KB, each step's
 outcome, every failure and every deferred KB with its reason. A stuck wiki also
-gets a line in `%LOCALAPPDATA%\llm-wiki\walk-notices.jsonl`, which a persona
-session set to read it posts to the operator's thread. `register-walk.ps1`
+gets a line in `%LOCALAPPDATA%\llm-wiki\walk-notices.jsonl`. The engine only
+writes that file and sends no notice anywhere. It is there for a reader of your
+own, such as a script or a long-running session that passes each line to a
+chat thread you watch. A notice's `paths` field can carry file names chosen by
+whoever can push to the KB's remote, so a reader passes them on as quoted data,
+never as instructions. No such reader ships with the plugin. `register-walk.ps1`
 registers the task once per account, and a plugin update reaches the walker
 and every KB's vendored files on the next pass with no re-registration.
 
@@ -297,8 +311,9 @@ rule to treat it as data, and a file a session names can still be dropped.
 The source repository's `docs/threat-model.md`, which the published plugin
 does not include, covers both in residual 11.
 
-The plugin also registers a `SessionStart` hook. At each session start,
-resume and compaction on an account with a list, it prints a block whose
+The plugin also registers a `SessionStart` hook, a command Claude Code runs by
+itself at set moments in a session. At each session start, resume and
+compaction on an account with a list, it prints a block whose
 heading begins `Wikis on this account` and labels every value below it as
 data. The block holds one line per listed KB and the walker's last pass from
 `%LOCALAPPDATA%\llm-wiki\walk-status.json`. That covers when the pass
@@ -310,9 +325,15 @@ own note where the pass left one. It prints `walker has not run` where no
 status file exists. It closes by asking the session to raise any such line
 with the operator. The walker runs on a box nobody watches, so this block,
 raised by the session, is one way a stuck KB reaches a person. The other is
-`walk-notices.jsonl`, which a persona session on the account reads. An account with no list prints nothing.
+`walk-notices.jsonl`, on an account that runs a reader of it, as "How
+automation works" above says. An account with no list prints nothing.
 
 ## How to verify a KB's structure
+
+Run the structure test from the engine checkout, a clone of the source
+repository, or from the installed plugin folder, where `tests/` sits.
+[docs/instantiation.md](docs/instantiation.md), "Step 1: create the repo",
+gives the installed folder's path. The command is:
 
 ```
 pwsh -File tests/Test-KbStructure.ps1 -Path <kb-path>
