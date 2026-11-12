@@ -6,7 +6,7 @@
 // engine calls, the two model calls with their scrub, the reply backstop's
 // submit and the register-scope values behind closures, so this module
 // never receives the engine object and holds no state of its own.
-import { ASKS_OPEN_MAX, activateNext, applyTurnToErrors, headPoints, openBlockingAsks, planHolderOf, reapTurnRecords, stampAskBriefTurnEnd, type GoalNode, type TurnRecordStamp } from "./agent-state";
+import { ASKS_OPEN_MAX, activateNext, applyTurnToErrors, headPoints, openAskEntries, openBlockingAsks, planHolderOf, reapTurnRecords, stampAskBriefTurnEnd, type GoalNode, type TurnRecordStamp } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, openWorkerAsk as openWorkerAskFromModule, shadowAsk as shadowAskFromModule, shadowAskPlanHealth as shadowAskPlanHealthFromModule, shadowOutcome as shadowOutcomeFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { meterSessionKnown } from "./beat";
 import type { ChannelSender, ExpectedTurn, SubmitOutcome } from "./channel-text";
@@ -77,6 +77,9 @@ export interface TurnCompleteContext extends SharedHandlerState {
   runHealth: (forNodeId: string | null) => Promise<void>;
   completeLeafReturningClosed: (id: string, note: string) => Promise<string[]>;
   queueMemoryCheck: (expectedTurns: ExpectedTurn[], goalId: string, title: string, goalIds: string[]) => void;
+  // Submits the [BLOCKED WITH NO QUESTION] turn for the entry the lead step
+  // turned back; hooks/index.ts holds its text and its submit.
+  queueBlockedTurnBack: (expectedTurns: ExpectedTurn[], entryId: string) => void;
   readPlanDocument: (planPath: string) => Promise<{ reading: PlanRecordReading; liveDir: string | null; planDir: string | null }>;
   readPlanCheckout: (dir: string) => Promise<{ upstream: boolean; ahead: number; dirty: number } | null>;
   closeAsksOnCompletedNodes: (nodeIds: readonly string[], closedBy: string, now: number) => Promise<void>;
@@ -176,7 +179,7 @@ export interface TurnCompleteContext extends SharedHandlerState {
 // before its `next(e)`, from the delete of the turn's open entry to the
 // completion drain it fires after itself.
 export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnCompleteInput): Promise<void> {
-  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyAnsweredThisTurn, replyLineThisTurn, replyCallsThisTurn, lastReplyCallAt, hourLineInFlight, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns } = ctx;
+  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, queueBlockedTurnBack, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyAnsweredThisTurn, replyLineThisTurn, replyCallsThisTurn, lastReplyCallAt, hourLineInFlight, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns } = ctx;
   // The answer with its secrets hidden, scanned once here and read by
   // these copies this handler sends or stores: the reply backstop's
   // direct reply and its fallback re-prompt, the memory queue's answer head
@@ -781,7 +784,24 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // changed, emits each once. A commons yield at that write lands the state
   // and returns false, so it emits none of them, a loss the stream accepts
   // as it accepts a failed append.
+  //
+  // The turn-back: a blocked lead set while the persona's ledger holds no
+  // open ask, on whatever entry, is a stop the operator has no question to
+  // answer. The step marks that lead turnedBack, logs blocked_turn_back and
+  // holds the entry's id, and the store write at the end of this body sends
+  // one [BLOCKED WITH NO QUESTION] turn where it returns true, as it sends
+  // the events. The ledger is read here, below the ASK: lines' opens, so a
+  // question filed by this turn's ask_open or by a line of this closing text
+  // counts, and so does a lifted ask, which stays open. A blocked lead
+  // written over a marked one keeps the mark and is not turned back, so one
+  // stretch of blocked closes draws one turn. A waiting lead and a cleared
+  // one carry no mark, so the blocked close after either is turned back
+  // again. The mark and the decision ride the same write as the lead. Where
+  // that write is refused they stand in memory with it, no turn is sent, and
+  // the stretch stays marked.
   const heldKitEvents: Array<[KitEventKind, string, string]> = [];
+  let turnedBackEntryId: string | null = null;
+  let turnedBackStatus: string | null = null;
   if (!skipped && sess.isOwner && !completesSubagentLoop && turnLeaf) {
     const leadLine = statusLine !== null && statusLine.state !== "working" ? { state: statusLine.state, reason: statusLine.reason } : null;
     const workingLine = statusLine !== null && statusLine.state === "working";
@@ -791,6 +811,21 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
       const changed = !previous || previous.state !== leadLine.state || previous.reason !== leadLine.reason;
       turnLeaf.lead = { state: leadLine.state, reason: leadLine.reason, at: Date.now() };
       turnLeaf.updatedAt = Date.now();
+      if (leadLine.state === "blocked") {
+        if (previous?.state === "blocked" && previous.turnedBack === true) {
+          turnLeaf.lead.turnedBack = true;
+        } else if (openAskEntries(sess.state).length === 0) {
+          turnLeaf.lead.turnedBack = true;
+          turnedBackEntryId = turnLeaf.id;
+          turnedBackStatus = turnLeaf.status;
+          sess.state.decisions.push({
+            timestamp: Date.now(),
+            loop: "goal",
+            action: "blocked_turn_back",
+            detail: `${turnLeaf.id}: a BLOCKED: close with no open ask`,
+          });
+        }
+      }
       if (changed) {
         sess.state.decisions.push({
           timestamp: Date.now(),
@@ -2113,11 +2148,24 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // The kit events held above go out only on a true return, after the
   // write landed what they report, each awaited to the stream's bound. A
   // false return or a throw leaves the list unsent: the write is unchanged
-  // by them, and a failed emit is caught inside the emit itself.
+  // by them, and a failed emit is caught inside the emit itself. The
+  // turn-back the lead step held goes out on the same true return, after
+  // the events, and is not awaited. Steps between the lead step and this
+  // send can end the entry or open an ask: the scorer's complete label,
+  // the round budget, a plan document reading complete, and the turn
+  // budget's blocking ask. So the entry is found again here, and the turn
+  // goes out only where it still stands with the status it had at the lead
+  // step, its lead is still the marked blocked lead, and the ledger still
+  // holds no open ask. The decision and the mark stay as written.
   try {
     if (sess.isOwner && !completesSubagentLoop && !turnIsOpen() && turnStartSeq() === turnStartSeqAtDelete) await foldSettledPlans();
     if (await persist()) {
       for (const [kind, plan, detail] of heldKitEvents) await emitKitEvent(kind, plan, detail);
+      const turnedBack = turnedBackEntryId === null ? undefined : sess.state.goals.find((g) => g.id === turnedBackEntryId);
+      const turnedBackStands = turnedBack !== undefined && turnedBack.status === turnedBackStatus;
+      if (turnedBackStands && turnedBack.lead?.state === "blocked" && turnedBack.lead.turnedBack === true && openAskEntries(sess.state).length === 0) {
+        queueBlockedTurnBack(expectedTurns, turnedBack.id);
+      }
     }
   } catch { /* persist could not read or write the store; this turn's record waits in memory */ }
 

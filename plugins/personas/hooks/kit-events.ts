@@ -7,7 +7,10 @@
 // with its Z, event one of the eleven kinds, project the session's working
 // directory at its start, plan the entry's planPath as stored, session the session's own
 // id, and detail only where the kind carries one. The script normalizes and
-// caps every field, so this side hands it the values as they are.
+// caps every field, so this side hands it every field as it is but the
+// detail, which it scrubs and then cuts at 40 code points, except
+// goal-blocked's, the worker's reason for the stop, which is cut at 200 and
+// ends in three periods where it was cut.
 //
 // Three things live here. The emit spawns the script with the record on
 // stdin, one promise chain per session so two emits never interleave and the
@@ -54,9 +57,16 @@ export const KIT_EVENTS_SCRIPT = "bin/kit-events-append.mjs";
 // reads it as failed. The caller awaits the chain's tail, so this bounds what
 // a tool's answer or a turn's end waits on.
 export const KIT_EVENT_TIMEOUT_MS = 5000;
-// The script's cap on detail. The emit cuts every detail here, after its
-// scrub, so the record names what the script will keep.
+// The script's cap on every detail but goal-blocked's. The emit cuts such a
+// detail here, after its scrub, so the record names what the script will keep.
 export const KIT_EVENT_DETAIL_MAX = 40;
+// The script's cap on a goal-blocked detail, the reason the Channels broker
+// draws its blocked alert from. A scrubbed reason past it is cut to end in
+// KIT_EVENT_CUT_MARK inside the cap, so a reader tells a cut reason from a
+// whole one.
+export const KIT_EVENT_REASON_MAX = 200;
+// ASCII, since the script drops every character outside printable ASCII.
+const KIT_EVENT_CUT_MARK = "...";
 
 export type KitEventKind =
   | "plan-queued" | "plan-started" | "section-closed" | "goal-complete" | "goal-blocked"
@@ -123,7 +133,7 @@ export function kitEventSinkOf(home: string): string {
  * Every event's detail passes here, so this is where it is scrubbed: a
  * pause's or a lead's reason is the model's own text and can carry a
  * secret. The whole detail is scrubbed with the redactor's scrubText before
- * the cut, so a value is judged whole and never cut past the shape the
+ * either cut, so a value is judged whole and never cut past the shape the
  * detector reads. A fixed detail, `pr <n>`, `<n> of <m>` or an ask id,
  * passes the scrub unchanged.
  */
@@ -135,9 +145,18 @@ export function emitKitEvent(deps: KitEventDeps, events: KitEventsState, kind: K
     plan,
     session: deps.sessionId(),
   };
-  if (detail !== undefined && detail !== "") record.detail = headPoints(scrubText(detail).text, KIT_EVENT_DETAIL_MAX);
+  if (detail !== undefined && detail !== "") record.detail = cutDetailOf(kind, scrubText(detail).text);
   events.chain = events.chain.then(() => appendOne(deps, events, record)).catch(() => undefined);
   return events.chain;
+}
+
+// A scrubbed detail at its kind's bound, in code points: goal-blocked's whole
+// up to KIT_EVENT_REASON_MAX and marked where longer, any other kind's first
+// KIT_EVENT_DETAIL_MAX with no mark.
+function cutDetailOf(kind: KitEventKind, scrubbed: string): string {
+  if (kind !== "goal-blocked") return headPoints(scrubbed, KIT_EVENT_DETAIL_MAX);
+  if (headPoints(scrubbed, KIT_EVENT_REASON_MAX) === scrubbed) return scrubbed;
+  return headPoints(scrubbed, KIT_EVENT_REASON_MAX - KIT_EVENT_CUT_MARK.length) + KIT_EVENT_CUT_MARK;
 }
 
 // One spawn of the script. A home that cannot be read, a run that rejects,

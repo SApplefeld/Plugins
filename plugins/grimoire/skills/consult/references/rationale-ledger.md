@@ -279,7 +279,7 @@ Extracted at `6bc07fb`: whole document (`skills.consult.SKILL.md`). Re-extracted
 - source: plugins/grimoire/skills/consult/SKILL.md:37
 - provenance: 1d9c467 2026-08-15, the operator's ruling that the cost hold dies and Opus at `max` is the standing stand-in; 42599a6 2026-08-24 aligned the condition to finishing-work's gate-level fact, pinned by test/doctrine-parity.test.js line 3769; docs/plans/claude-kit_capacity-gate_spec_v1.md section 4 2026-09-24 added the measured downgrade as a separate condition.
 - verdict: keep
-- reason: The contention with brainstorming's wait rule is two intentional semantics: memory `model-tier-substitution-for-review` (operator, 2026-08-18) draws the line at design and planning work, which waits, while a gate-shaped mid-execution seat substitutes. The condition's wording is pinned: any edit must keep "the stand-in is dispatch table row \"Consultant stand-in\"" and "could not be run at the fable tier".
+- reason: The contention with brainstorming's wait rule is two intentional semantics: memory `design-work-waits-for-its-specced-top-tier` (operator, 2026-08-18) draws the line at design and planning work, which waits. A gate-shaped mid-execution seat substitutes instead, at dispatch table row "Consultant stand-in". The condition's wording is pinned: any edit must keep "the stand-in is dispatch table row \"Consultant stand-in\"" and "could not be run at the fable tier".
 - passage: Where this consult could not be run at the fable tier in this environment, per finishing-work's unavailability rule, or where that reading returned `-> downgrade`, the stand-in is dispatch table row "Consultant stand-in",
 
 ### C030

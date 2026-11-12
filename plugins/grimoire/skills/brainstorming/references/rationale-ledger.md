@@ -1476,7 +1476,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:54
 - provenance: dc128d8 2026-07-01 tuned the kit for Fable as the session model; 5854b9b 2026-07-26 moved the session-mode rule from the doctrine into brainstorming.
 - verdict: keep
-- reason: no finding. The session-mode rule's positive half; the operator's 2026-08-18 ruling (model-tier-substitution-for-review) names design strength as where the tiers diverge.
+- reason: no finding. The session-mode rule's positive half; the operator's 2026-08-18 ruling (design-work-waits-for-its-specced-top-tier) names design strength as where the tiers diverge.
 - passage: A Fable-led session is for design: brainstorming, specs, adjudication, and the finishing pass of a high-stakes effort.
 
 ### C146

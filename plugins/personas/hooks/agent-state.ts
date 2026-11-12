@@ -230,7 +230,7 @@ export interface GoalNode {
                       // goal_add or filled from the node's own text on load. The
                       // v2/v3 migration itself writes no value; the load-time
                       // fill runs on every migration exit and may fill one.
-  lead?: { state: "blocked" | "waiting"; reason: string; at: number } | null; // Section 3:
+  lead?: { state: "blocked" | "waiting"; reason: string; at: number; turnedBack?: true } | null; // Section 3:
                       // the worker's own BLOCKED/WAITING first line for a plan entry.
                       // Set and cleared at turn end from the first line of a plan
                       // entry's closing text; a blocked lead is also lifted by
@@ -238,6 +238,10 @@ export interface GoalNode {
                       // closes after it, and completion by the plan document
                       // clears it. Unset by the v2-v4 migration. holdOf reads it
                       // as the controller's hold; the status is never written for it.
+                      // turnedBack marks a blocked lead whose stretch of blocked
+                      // closes the turn end already turned back for holding no
+                      // open ask. The load reads the lead as stored, so a lead
+                      // with no such field, or any value but true, is unmarked.
   chapterCount?: number; // Section 2: the number of "### Chapter N" headings the
                       // plan document held at the last read. Written by the
                       // document read at turn end. Unset by the v2-v4 migration.

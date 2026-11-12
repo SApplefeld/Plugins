@@ -18,10 +18,12 @@
 //
 // Every field is sanitized display data: each is reduced to printable ASCII
 // and cut, at 40 characters for event and detail, 120 for plan and session,
-// and 260 for project, a Windows absolute path bound. The values carry
-// session data such as a path and a session id, and the contract holds at
-// this boundary for the whole record, so no caller can widen what reaches
-// the consumer.
+// and 260 for project, a Windows absolute path bound. A goal-blocked
+// record's detail, the worker's reason for the stop, is cut at 200 instead.
+// The cut adds no mark: the hook marks a reason it cut and hands this script
+// a detail inside the bound. The values carry session data such as a path
+// and a session id, and the contract holds at this boundary for the whole
+// record, so no caller can widen what reaches the consumer.
 //
 // A sink that exists and is not a regular file is left untouched and nothing
 // is written: opening a FIFO blocks, which no try/catch can rescue. The stat
@@ -47,6 +49,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const CAPS = { event: 40, detail: 40, plan: 120, session: 120, project: 260 };
+// The detail cap of a record whose written event is goal-blocked.
+const BLOCKED_DETAIL_CAP = 200;
 const ROTATE_BYTES = 1024 * 1024;
 // The one ts shape the consumer is handed: a UTC instant with its Z, to the
 // second or the millisecond, naming a real calendar instant.
@@ -80,7 +84,9 @@ function recordOf(text) {
     session: eventField(d.session, CAPS.session),
   };
   // The key is present exactly when the caller supplied a detail.
-  if (d.detail !== undefined && d.detail !== '') record.detail = eventField(d.detail, CAPS.detail);
+  if (d.detail !== undefined && d.detail !== '') {
+    record.detail = eventField(d.detail, record.event === 'goal-blocked' ? BLOCKED_DETAIL_CAP : CAPS.detail);
+  }
   return record;
 }
 

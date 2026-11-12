@@ -1548,7 +1548,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:47
 - provenance: 9909bf2 2026-08-28, armed by the operator's ruling at 74a1826.
 - verdict: keep
-- reason: Kept as written and not to be tightened: the store records that on 2026-09-02 four entries satisfied both legs and two belonged to live sessions in long turns (a-self-stamped-liveness-field-cannot-establish-exit; a-heartbeat-stamp-measures-turn-end-not-liveness shows the stamp measures turn end, not liveness). The rule's bound is visibility and recovery, not prevention, and a session changing it needs an instrument the subject does not write.
+- reason: Kept as written and not to be tightened: the store records that on 2026-09-02 four entries satisfied both legs and two belonged to live sessions in long turns (a-self-stamped-liveness-field-cannot-establish-exit; a-heartbeat-stamp-lags-by-the-turn-it-is-inside shows the stamp measures turn end, not liveness). The rule's bound is visibility and recovery, not prevention, and a session changing it needs an instrument the subject does not write.
 - passage: A stamp that advanced past the entry's `Started:` and is now stale past twice the seat's cadence reads as exited.
 
 ### c2.C032
@@ -2253,7 +2253,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:69
 - provenance: ebf5ee0 2026-08-28, the private-store premise shipped as a named precondition of one installation because the kit configures no remote and reads no remote's visibility.
 - verdict: keep
-- reason: No seat can derive its own readership, and the operator-tier record coordinator-board-clearance shows a seat's own memory getting the readership wrong on the mechanism (corrected 2026-08-31); the coordinator owns the precondition and the role skill points at it for the registry. Restated on 2026-10-11 by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on the directory's readers, since no remote carries the board any longer.
+- reason: No seat can derive its own readership. A seat's own memory record once got the readership wrong on the mechanism and was corrected on 2026-08-31, which is why the role skill says "no memory record establishes it or stands in for it". The coordinator owns the precondition and the role skill points at it for the registry. Restated on 2026-10-11 by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on the directory's readers, since no remote carries the board any longer.
 - passage: This file rests on a named precondition: everyone who can read this machine's home directory is the operator's own. Only the operator's answer on a warranted channel naming who reads that directory establishes it, never a file permission.
 
 ### c3.C005
@@ -2289,7 +2289,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:69
 - provenance: ebf5ee0 2026-08-28, the same deviation: a seat that cannot tell which state it is in (after a compaction, or holding a memory record that claims an answer) takes the public case.
 - verdict: keep
-- reason: This is the seat-side case c3.C007 does not name, and the corrected coordinator-board-clearance record is that case having happened; the role skill's bar on a memory record standing in for the answer depends on it.
+- reason: This is the seat-side case c3.C007 does not name, and the corrected memory record c3.C004's reason describes is that case having happened; the role skill's bar on a memory record standing in for the answer depends on it.
 - passage: or a seat cannot say which state it is in
 
 ### c3.C009
@@ -2815,7 +2815,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:79
 - provenance: 44b6010 2026-09-02, the kaizen kind is a refusal with its own exception for friction that becomes a decision or a routed finding.
 - verdict: keep
-- reason: no finding; the seat's own kaizen function reads the inbox rather than the ledger, and the operator-tier record coordinator-carries-kaizen-notes confirms the standing authority.
+- reason: no finding; the seat's own kaizen function reads the inbox rather than the ledger, and the kaizen skill's sentence "Capture is manual and standing-authorized per the doctrine's capture bullet" states the standing authority.
 - passage: Kit friction goes to a kaizen note under the standing capture authorization the kaizen skill owns, never a board line, unless it becomes an operator decision or a routed finding, which board under their own categories above.
 
 ### c3.C063

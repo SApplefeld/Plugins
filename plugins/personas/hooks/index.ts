@@ -2957,7 +2957,7 @@ const TRUNK_GATE_TEXT = "[TRUNK GATE] Run the daily trunk gate now: in your work
 // the ones readStatusLine reads off the closing text's first line, and a
 // nudged turn that opens with none of them, and does no work, is what the
 // nudge count counts.
-const NUDGE_STATUS_LINE_TEXT = "Open your closing text with one status line: WORKING: and what you are doing, WAITING: and what will wake you, or BLOCKED: and what you need from someone else.";
+const NUDGE_STATUS_LINE_TEXT = "Open your closing text with one status line: WORKING: and what you are doing, WAITING: and what will wake you, or BLOCKED: and what you need from the operator, with the question filed through ask_open.";
 
 // The sentence every nudge adds after the status-line request. Leads are
 // read on every entry, so the hold it names exists wherever a nudge goes.
@@ -3710,14 +3710,46 @@ function clearChildBlockedAncestors(...args: AfterDeps<typeof clearChildBlockedA
 
 // Section 3 (plan-health-from-the-record): the worker's own lead. A plan
 // entry's closing text opens with the literal `BLOCKED:` when the worker
-// cannot continue without someone else, and with `WAITING:` when background
-// work will wake it. The controller holds its idle branch for a blocked lead
+// cannot continue without the operator, the question filed through ask_open,
+// and with `WAITING:` when anything else will wake it, background work or a
+// peer's answer among them. The controller holds its idle branch for a blocked lead
 // until a working turn clears it, goal_resume lifts it, or an ask on the
 // entry closes after it was set, and for a waiting lead until
 // LEAD_WAITING_HOLD_MS (hooks/agent-state.ts) after the lead was read or until a turn clears it,
 // a `WORKING:` first line among them. The line is read at turn
 // end, below the ASK: marker parse; the hold is holdOf's read in the
 // controller tick.
+
+// The text of the [BLOCKED WITH NO QUESTION] turn. It is fixed and carries
+// no store data: it names no entry, since the turn's answer sets a lead on
+// the entry active when it runs, as any turn's closing line does.
+const BLOCKED_TURN_BACK_TEXT = "[BLOCKED WITH NO QUESTION] Your last turn closed with BLOCKED: while this persona holds no open question for the operator. The operator has nothing to answer, and the controller sends this entry no nudge while the lead stands. If the work cannot go on without the operator, file the question now with ask_open, with blocking set to true, and open your closing text with BLOCKED: again. If it waits on anything else, such as a peer's answer, a build, a slot or a timer, open your closing text with WAITING: and what will wake you. This turn is sent once.";
+
+// Turns a blocked close back to the worker: one [BLOCKED WITH NO QUESTION]
+// turn for entry `entryId`, whose lead the turn end in
+// hooks/turn-complete.ts marked and whose store write landed before this
+// call. The entry goes into the expected-turn list before the submit, which
+// is not awaited, as queueMemoryCheck's is not: $.prompt.submit resolves only
+// once the session is next idle, and this runs inside the turn end. A
+// rejected or dropped submit leaves the list through submitExpectedTurn and
+// logs blocked_turn_back_refused. The lead keeps its mark either way, so a
+// refused turn is not sent again in that stretch of blocked closes. Top
+// level because it takes `dp`; `expectedTurns` is register's expected-turn
+// list.
+function queueBlockedTurnBack(dp: any, expectedTurns: ExpectedTurn[], entryId: string): void {
+  const blockedTurnBackEntry: ExpectedTurn = { kind: "plugin", text: BLOCKED_TURN_BACK_TEXT };
+  expectedTurns.push(blockedTurnBackEntry);
+  const submitted = submitExpectedTurn(dp, expectedTurns, blockedTurnBackEntry);
+  void submitted.then((outcome) => {
+    if (outcome.ok) return;
+    sess.state.decisions.push({
+      timestamp: Date.now(),
+      loop: "goal",
+      action: "blocked_turn_back_refused",
+      detail: headPoints(`${entryId}: submit ${outcome.how}: ${outcome.reason}`, 200),
+    });
+  });
+}
 
 // The names shown under any of `goalIds`, each once, in the list's order.
 function shownNamesUnder(goalIds: string[]): string[] {
@@ -8182,6 +8214,7 @@ export const register: Register = async (on, options) => {
         runHealth: (forNodeId) => runHealth($, forNodeId),
         completeLeafReturningClosed: (id, note) => completeLeafReturningClosed($, id, note),
         queueMemoryCheck: (expectedTurns, goalId, title, goalIds) => queueMemoryCheck($, expectedTurns, goalId, title, goalIds),
+        queueBlockedTurnBack: (expectedTurns, entryId) => queueBlockedTurnBack($, expectedTurns, entryId),
         readPlanDocument: (planPath) => readPlanDocument($, planPath),
         readPlanCheckout: (dir) => readPlanCheckout($, dir),
         closeAsksOnCompletedNodes: (nodeIds, closedBy, now) => closeAsksOnCompletedNodes($, nodeIds, closedBy, now),
