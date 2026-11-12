@@ -797,7 +797,7 @@ CHILD_TREE_CONFIRMED_AT=""
 CHILD_TREE_FAILED_CONFIRMS=0
 LAST_STOP_SNAPSHOT=""  # the process-tree snapshot a stop or a sweep acted on, left for the retry and the EXIT trap
 STOP_TREE_MOVED=""  # set where stop_child refused because the wrapper moved to a Windows pid no snapshot was walked from; the retry fails on it
-STOP_SNAPSHOT_BUILT=""  # the merged snapshot build_stop_snapshot last built, empty where it could not verify one
+STOP_SNAPSHOT_BUILT=""  # the merged snapshot build_stop_snapshot last built; where its join failed or reached this supervisor's own pid, the list built before the join; empty on any other unverified build
 # Initialized here so it is never unset under `set -u`: the "no child to
 # stop" early return's own `log "... ($STOP_PATH)"` would otherwise abort
 # the script.
@@ -1693,6 +1693,13 @@ walk_msys_process_tree() {
 # carries each one's Windows pid beside it. So the tree is read from there, and
 # only while the child is alive: an exited process is in neither table.
 #
+# The closure is rooted at the launch pid, so it holds the launch chain and
+# not what `claude` starts through a Git Bash shell: a native program started
+# that shell, so its MSYS parent reads 1, and the script it runs has a Windows
+# parent that has exited. The tree record this function keeps therefore names
+# no such process. A stop reaches one through `join_msys_process_table`, which
+# `build_stop_snapshot` runs over this record and its own walks.
+#
 # The Windows pids are then snapshotted the way every other stop-path consumer
 # wants them, "pid,ticks" per line, so `check_snapshot_survivors` and
 # `kill_process_snapshot` can match a genuine survivor against a recycled pid
@@ -2165,6 +2172,260 @@ sweep_child_tree() {
   return 1
 }
 
+# --- Helper: join the MSYS (Git Bash) process table to a stop's snapshot ---
+# A program the child starts through a Git Bash shell sits under a Cygwin fork
+# intermediate that has exited, so its Windows parent has no row and no Windows
+# walk reaches it. The MSYS process table still names the shell as its parent,
+# and carries each process's Windows pid. So this reads `ps` once and the
+# Windows process table once, and closes the snapshot over the two fixed
+# readings under two rules, until a pass adds nothing:
+#   - An MSYS row whose Windows pid the list names is a bridge, and every MSYS
+#     descendant of a bridge, by the table's own parent column, joins with its
+#     Windows pid.
+#   - Every Windows descendant of a joined process joins, by
+#     `process_tree_walk_ps`, the walk every snapshot uses.
+# The two rules feed each other: a shell a native program started has MSYS
+# parent 1, so only the Windows walk reaches it, and only its MSYS row reaches
+# what it runs. Both readings are fixed, so the closure ends, and a native
+# program under Git Bash under a native program is followed to any depth.
+#
+# The table holds every process this user runs under Git Bash, other
+# supervisors' among them, so four rules keep the result to the child's own,
+# within the one limit stated after them:
+#   - A pid on the list bridges only where the Windows table gives that pid the
+#     start ticks the list holds for it, by the agreement
+#     `snapshot_process_tree` applies. A pid under other ticks is another
+#     process that took the number, and it stays out with everything reached
+#     only through it. A line with unreadable ticks bridges nothing. A listed
+#     pid with an MSYS row whose Windows row carries no creation time cannot
+#     be judged, so the join is unverified.
+#   - An MSYS row counts, as a bridge or as a descendant, only where its
+#     Windows pid has a row in the Windows table created no later than the
+#     moment `ps` was read. A process created after that moment cannot be the
+#     one the MSYS row named. A descendant row that does not count stays out,
+#     and the rows under it are still followed, since their parent link comes
+#     from the same `ps` reading. One whose row carries no creation time cannot
+#     be judged either way, so the join is unverified.
+#   - A joined pid is listed with its live start ticks only where they agree
+#     with its row, as `snapshot_process_tree` lists a pid, and a disagreement
+#     makes the join unverified.
+#   - A `ps` reading without this supervisor's own row is a failed reading, so
+#     the join is unverified rather than a tree with nothing to add.
+# The caller clears the merged list of this supervisor's own Windows pid.
+# The MSYS parent column itself takes no age check. An MSYS process keeps its
+# parent's MSYS pid after that parent is killed outright, and the MSYS pid
+# counter wraps, so a row whose parent was killed that way joins any tree whose
+# process now holds that MSYS pid. A Windows creation time cannot stand in for
+# the check, since an MSYS process that execs takes a later Windows row than
+# the children it forked before the exec.
+#
+# The moment `ps` was read is bash's own `EPOCHREALTIME`, taken just before the
+# read, with either `.` or `,` as its decimal separator. A bash without it
+# reads the whole second instead, which leaves out a process created inside
+# that second and admits none created after the read.
+#
+# Everything handed to PowerShell is digits: each snapshot pair is validated
+# the way `check_snapshot_survivors` validates one, the MSYS rows are three
+# numeric columns each and are checked again as a whole, and the read time is
+# checked the same way. The Windows table read, the closure and every joined
+# pid's start ticks run in one PowerShell start, however many rows join.
+#
+# Diagnostics go through `log_diag`, since stdout is the result.
+# Prints the joined "pid,ticks" lines, none of them a line the snapshot already
+# holds a pid for under agreeing ticks. Returns 0 where the join completed,
+# which includes one that added nothing, and 1 where it is unverified.
+# Usage: join_msys_process_table <snapshot, "pid,ticks" per line>
+join_msys_process_table() {
+  local snapshot="$1"
+  local seeds="" sid sticks
+  while IFS=',' read -r sid sticks; do
+    case "$sid" in ''|*[!0-9]*) continue ;; esac
+    case "$sticks" in ''|*[!0-9]*) continue ;; esac
+    seeds="$seeds,@{Id=$sid;Ticks=$sticks}"
+  done <<< "$snapshot"
+  seeds="${seeds#,}"
+  if [ -z "$seeds" ]; then
+    return 0
+  fi
+  local read_at="${EPOCHREALTIME:-}"
+  read_at="${read_at//[.,]/}"
+  case "$read_at" in
+    ''|*[!0-9]*)
+      printf -v read_at '%(%s)T' -1
+      read_at="${read_at}000000"
+      ;;
+  esac
+  # The rows are flattened to "id,parent,winpid," per row. A row is read at the
+  # offsets `refresh_child_tree` reads it at, shifted where `ps` printed a
+  # state character first. This supervisor's own row is looked for among all
+  # rows, and its absence is the awk's own exit code, which the pipeline
+  # returns beside a failed `ps`. A row whose command ends in `<defunct>` is an
+  # exited process whose Windows pid may now belong to another process, so it
+  # joins nothing.
+  local msys_rows rows_rc
+  msys_rows=$(ps 2>/dev/null | awk -v self="$$" '
+    NR > 1 {
+      if ($1 ~ /^[0-9]+$/) { id = $1; pp = $2; wp = $4 }
+      else if ($2 ~ /^[0-9]+$/) { id = $2; pp = $3; wp = $5 }
+      else { next }
+      if (id == self) own = 1
+      if ($NF == "<defunct>") next
+      if (pp ~ /^[0-9]+$/ && wp ~ /^[0-9]+$/) printf "%s,%s,%s,", id, pp, wp
+    }
+    END { if (!own) exit 3 }')
+  rows_rc=$?
+  if [ "$rows_rc" -ne 0 ]; then
+    log_diag "STOP: the MSYS process table reading does not hold this supervisor's own row (rc=$rows_rc) - treating the join as unverified rather than reading a failed table as a tree with nothing to add"
+    return 1
+  fi
+  msys_rows="${msys_rows%,}"
+  case "$msys_rows" in
+    *[!0-9,]*)
+      log_diag "STOP: the MSYS process table reading holds a value that is not a number - refusing to build a join around it"
+      return 1
+      ;;
+  esac
+  local closure
+  closure=$(cat <<'PS'
+      $created = @{}
+      foreach ($r in $rows) { $created[[int64]$r.ProcessId] = $r.CreationDate }
+      $psRead = (New-Object datetime 1970, 1, 1, 0, 0, 0, ([System.DateTimeKind]::Utc)).AddTicks($readAt * 10)
+      $msysWin = @{}
+      $msysKids = @{}
+      $msysByWin = @{}
+      for ($i = 0; $i + 2 -lt $msys.Count; $i += 3) {
+        $mid = [int64]$msys[$i]
+        $mpp = [int64]$msys[$i + 1]
+        $mwp = [int64]$msys[$i + 2]
+        $msysWin[$mid] = $mwp
+        if (-not $msysKids.ContainsKey($mpp)) { $msysKids[$mpp] = New-Object System.Collections.ArrayList }
+        [void]$msysKids[$mpp].Add($mid)
+        if (-not $msysByWin.ContainsKey($mwp)) { $msysByWin[$mwp] = New-Object System.Collections.ArrayList }
+        [void]$msysByWin[$mwp].Add($mid)
+      }
+      $listed = New-Object 'System.Collections.Generic.HashSet[long]'
+      $pending = New-Object 'System.Collections.Generic.Queue[long]'
+      $joinUnverified = $false
+      foreach ($e in $seeds) {
+        $seedId = [int64]$e.Id
+        if (-not $created.ContainsKey($seedId)) { continue }
+        $seedWhen = $created[$seedId]
+        if ($null -eq $seedWhen) {
+          if ($msysByWin.ContainsKey($seedId)) { $joinUnverified = $true }
+          continue
+        }
+        $seedTicks = [int64]$e.Ticks
+        $seedRowTicks = [int64]$seedWhen.Ticks
+        if ($seedTicks -ne $seedRowTicks -and ($seedTicks - ($seedTicks % 10)) -ne $seedRowTicks) { continue }
+        if ($listed.Add($seedId)) { $pending.Enqueue($seedId) }
+      }
+      $joined = New-Object 'System.Collections.Generic.List[long]'
+      $msysSeen = New-Object 'System.Collections.Generic.HashSet[long]'
+      while ($pending.Count -gt 0) {
+        $bridgeWin = $pending.Dequeue()
+        if (-not $msysByWin.ContainsKey($bridgeWin)) { continue }
+        if ($created[$bridgeWin].ToUniversalTime() -gt $psRead) { continue }
+        $under = New-Object 'System.Collections.Generic.Queue[long]'
+        foreach ($m in $msysByWin[$bridgeWin]) {
+          if ($msysSeen.Add($m)) { $under.Enqueue($m) }
+        }
+        while ($under.Count -gt 0) {
+          $msysParent = $under.Dequeue()
+          if (-not $msysKids.ContainsKey($msysParent)) { continue }
+          foreach ($kid in $msysKids[$msysParent]) {
+            if (-not $msysSeen.Add($kid)) { continue }
+            $under.Enqueue($kid)
+            $kidWin = $msysWin[$kid]
+            if (-not $created.ContainsKey($kidWin)) { continue }
+            $kidWhen = $created[$kidWin]
+            if ($null -eq $kidWhen) {
+              $joinUnverified = $true
+              continue
+            }
+            if ($kidWhen.ToUniversalTime() -gt $psRead) { continue }
+            if (-not $listed.Add($kidWin)) { continue }
+            $joined.Add($kidWin)
+            $pending.Enqueue($kidWin)
+            $below = Select-ProcessTree $rows $kidWin
+            if ($below.Unverified) { $joinUnverified = $true }
+            foreach ($d in @($below.Ids)) {
+              $belowId = [int64]$d
+              if ($listed.Add($belowId)) {
+                $joined.Add($belowId)
+                $pending.Enqueue($belowId)
+              }
+            }
+          }
+        }
+      }
+      $ticksMismatch = $false
+      foreach ($thisId in $joined) {
+        $rowWhen = $created[$thisId]
+        $proc = Get-Process -Id $thisId -ErrorAction SilentlyContinue
+        if (-not $proc) { continue }
+        $started = $null
+        try { $started = $proc.StartTime } catch {}
+        if ($null -eq $rowWhen -or $null -eq $started) {
+          Write-Output ("$thisId,UNREADABLE")
+          continue
+        }
+        $liveTicks = [int64]$started.Ticks
+        $rowTicks = [int64]$rowWhen.Ticks
+        if ($liveTicks -ne $rowTicks -and ($liveTicks - ($liveTicks % 10)) -ne $rowTicks) {
+          $ticksMismatch = $true
+          continue
+        }
+        Write-Output ("$thisId," + $liveTicks)
+      }
+      if ($cimFailed) { Write-Output 'CIMFAIL' }
+      if ($joinUnverified) { Write-Output 'WALKUNVERIFIED' }
+      if ($ticksMismatch) { Write-Output 'TICKSMISMATCH' }
+PS
+  )
+  # The process table is read once, in one query, and a failed query emits
+  # `CIMFAIL` after the id loop, as it does in `snapshot_process_tree`. The
+  # three values interpolated here are the ones validated above.
+  local raw
+  raw=$(run_bounded_powershell_capture "$SUPERVISOR_PS_BOUND_S" "
+      $(process_tree_walk_ps)
+      \$cimFailed = \$false
+      \$rows = @()
+      try {
+        \$rows = @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate -ErrorAction Stop)
+      } catch {
+        \$cimFailed = \$true
+      }
+      \$seeds = @($seeds)
+      \$msys = @($msys_rows)
+      \$readAt = [int64]$read_at
+$closure
+      Write-Output '$STOP_PS_SENTINEL'
+    ")
+  if ps_output_has_line "$raw" 'CIMFAIL'; then
+    log_diag "STOP: the Windows process table query of the MSYS join failed - treating the join as unverified rather than trusting a possibly-incomplete tree"
+    return 1
+  fi
+  if ps_output_has_line "$raw" 'WALKUNVERIFIED'; then
+    log_diag "STOP: the MSYS join met a process whose creation time, or its parent's, could not be read - treating the join as unverified rather than trusting a tree that leaves it out"
+    return 1
+  fi
+  if ps_output_has_line "$raw" 'TICKSMISMATCH'; then
+    log_diag "STOP: the MSYS join names a pid whose live start time disagrees with the process table it was joined from - treating the join as unverified rather than recording a process the join never judged"
+    return 1
+  fi
+  if ! ps_output_has_line "$raw" "$STOP_PS_SENTINEL"; then
+    log_diag "STOP: the MSYS join's PowerShell call did not complete - treating the join as unverified"
+    return 1
+  fi
+  local line
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    [ "$line" = "$STOP_PS_SENTINEL" ] && continue
+    printf '%s\n' "$line"
+  done <<< "$raw"
+  return 0
+}
+
 # --- Helper: build the snapshot a stop verifies and kills ---
 # A Windows walk from the wrapper does not reach the child. The live launch
 # runs `claude.exe` under `env.exe`, whose Windows parent is a Cygwin fork
@@ -2177,6 +2438,17 @@ sweep_child_tree() {
 # pid resolved or walked. Lines are deduplicated on pid and start ticks together, so a pid
 # recorded under two different processes keeps both lines and each is
 # matched against its own start time.
+#
+# The union is then joined to the MSYS process table by
+# `join_msys_process_table`, for a launched and an adopted child alike. The
+# three readings stop at what the child starts through a Git Bash shell: a
+# script a tool command runs has a Windows parent that has exited, and the
+# closure the refresh reads is rooted at the launch pid, which the tool's own
+# shell, started by a native program, is not under. The join reaches such a
+# script, and everything under it, from the Windows pids the union already
+# holds, and reads no recorded MSYS pid. A process whose every parent has
+# exited is in neither table's links and stays outside the snapshot. A join
+# that is unverified makes the build unverified.
 #
 # Every other record state names a way the record falls short of the tree,
 # and a union built on it could verify part of the tree dead while a
@@ -2197,9 +2469,18 @@ sweep_child_tree() {
 # after a `refresh_child_tree`, so the retry backstop never kills from a
 # narrower tree than the stop itself would.
 #
-# Sets STOP_SNAPSHOT_BUILT to the snapshot, "pid,ticks" per line, and to empty
-# on every unverified result. Returns 0 where the snapshot is verified, which
-# includes a verified empty one, and non-zero where it is not.
+# Sets STOP_SNAPSHOT_BUILT to the snapshot, "pid,ticks" per line. Returns 0
+# where the snapshot is verified, which includes a verified empty one, and
+# non-zero where it is not. An unverified result leaves STOP_SNAPSHOT_BUILT
+# empty, except where the walks and the self check verified and the join then
+# failed or reached this supervisor's own Windows pid: then it holds the list
+# the walks built, so the stop kills that list ticks-matched while it reports
+# the tree unverified.
+# A verified build logs one `snapshot_built:` line: the count of lines in the
+# snapshot, how many of them the join added, and the Windows pids in the
+# snapshot's own order. A verified empty build logs both counts as 0 and ends
+# the line at its last colon. An unverified build logs no such line, since
+# every refusal above logs its own reason.
 # Usage: build_stop_snapshot <label>
 build_stop_snapshot() {
   local label="$1"
@@ -2289,8 +2570,14 @@ $walked"
 $walked"
     fi
   done
-  local snapshot self_winpid
+  local snapshot self_winpid joined line walked_count=0 built_count=0 built_pids=""
   snapshot=$(printf '%s\n' "$union" | grep -v '^$' | sort -u)
+  # The lines before the join, so the log can say how many the join added.
+  while IFS= read -r line; do
+    [ -n "$line" ] && walked_count=$((walked_count + 1))
+  done <<< "$snapshot"
+  # The self check runs first on the list the walks built, so that list is
+  # verified before the join reads anything.
   self_winpid=$(resolve_windows_pid "$$")
   if [ -z "$self_winpid" ]; then
     log "STOP[$label]: this supervisor's own Windows pid does not resolve, so the stop's snapshot cannot be cleared of it"
@@ -2300,7 +2587,32 @@ $walked"
     log "STOP[$label]: the stop's snapshot names this supervisor's own Windows pid $self_winpid, so every process in it may have been reached through this process"
     return 1
   fi
+  # The join runs over the union of every reading above, for a launched and an
+  # adopted child alike. Where the join is unverified, or a line it adds is
+  # this supervisor's own Windows pid, the build is unverified, and the list
+  # the walks built is kept for the stop to kill, ticks-matched.
+  if ! joined=$(join_msys_process_table "$snapshot"); then
+    log "STOP[$label]: the join of the MSYS process table to child-$CHILD_INDEX's snapshot is unverified, so the snapshot cannot be said to name the whole tree"
+    STOP_SNAPSHOT_BUILT="$snapshot"
+    log "STOP[$label]: the list built before the join is kept and will be killed ticks-matched, while the stop reports the tree unverified"
+    return 1
+  fi
+  if printf '%s\n' "$joined" | grep -q "^$self_winpid,"; then
+    log "STOP[$label]: the stop's snapshot names this supervisor's own Windows pid $self_winpid through the Git Bash table, so every process the join added may have been reached through this process"
+    STOP_SNAPSHOT_BUILT="$snapshot"
+    log "STOP[$label]: the list built before the join is kept and will be killed ticks-matched, while the stop reports the tree unverified"
+    return 1
+  fi
+  if [ -n "$joined" ]; then
+    snapshot=$(printf '%s\n%s\n' "$snapshot" "$joined" | grep -v '^$' | sort -u)
+  fi
   STOP_SNAPSHOT_BUILT="$snapshot"
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    built_count=$((built_count + 1))
+    built_pids="$built_pids ${line%%,*}"
+  done <<< "$snapshot"
+  log "STOP[$label]: snapshot_built: $built_count processes, $((built_count - walked_count)) through the Git Bash table:$built_pids"
   return 0
 }
 
@@ -2361,11 +2673,14 @@ retry_stop_escalation() {
   if [ -z "$LAST_STOP_SNAPSHOT" ]; then
     log "STOP[$label]: stop_child reported failure (STOP_PATH=$STOP_PATH) with no snapshot to retry against; attempting one re-snapshot"
     local resnap_rc=1
+    STOP_SNAPSHOT_BUILT=""
     if [ -n "${CHILD_LAUNCH_PID:-}" ]; then
       refresh_child_tree
       build_stop_snapshot "$label"
       resnap_rc=$?
-      LAST_STOP_SNAPSHOT="$STOP_SNAPSHOT_BUILT"
+      if [ "$resnap_rc" -eq 0 ]; then
+        LAST_STOP_SNAPSHOT="$STOP_SNAPSHOT_BUILT"
+      fi
     fi
     # Only a snapshot the merged build verified can end the retry: an
     # unverified build fails fast, since sleeping out the budget cannot make it
@@ -2387,21 +2702,35 @@ retry_stop_escalation() {
     # `adopted_unverified_kill:` and a `record=` field carrying the record's
     # state and entry count, or `record=empty`, so a reader can tell a list of
     # the pair alone from one that carried the record.
+    #
+    # A build that failed at its join still holds the list its walks
+    # built, and the retry kills that list, ticks-matched, before failing, as
+    # `stop_child` does: an adopted child's with its record and pair, a
+    # launched child's on its own. The retry still fails.
     if [ "$resnap_rc" -ne 0 ]; then
       if [ "${CHILD_ADOPTED:-}" = "1" ] && [ -n "${CHILD_WINPID:-}" ] && [ -n "${CHILD_TICKS:-}" ]; then
         local adopted_list="${CHILD_TREE_SNAPSHOT:-}" adopted_record adopted_held
         if [ -n "$adopted_list" ]; then
           adopted_record="record=$(child_tree_record_state) entries=$(printf '%s\n' "$adopted_list" | grep -c .)"
           adopted_held="its tree record and recorded pair"
+        elif [ -n "$STOP_SNAPSHOT_BUILT" ]; then
+          adopted_record="record=empty"
+          adopted_held="its recorded pair, since its tree record is empty"
         else
           adopted_record="record=empty"
           adopted_held="its recorded pair alone, since its tree record is empty"
         fi
-        adopted_list=$(printf '%s\n%s,%s\n' "$adopted_list" "$CHILD_WINPID" "$CHILD_TICKS" | grep -v '^$' | sort -u)
+        if [ -n "$STOP_SNAPSHOT_BUILT" ]; then
+          adopted_held="$adopted_held, and the list built before the join"
+        fi
+        adopted_list=$(printf '%s\n%s\n%s,%s\n' "$adopted_list" "$STOP_SNAPSHOT_BUILT" "$CHILD_WINPID" "$CHILD_TICKS" | grep -v '^$' | sort -u)
         log "STOP[$label]: adopted_unverified_kill: $adopted_record - re-snapshot of adopted child-$CHILD_INDEX could not be verified, killing $adopted_held, ticks-matched, before failing"
         kill_process_snapshot "$adopted_list" || true
+      elif [ "${CHILD_ADOPTED:-}" != "1" ] && [ -n "$STOP_SNAPSHOT_BUILT" ]; then
+        log "STOP[$label]: re-snapshot of child-$CHILD_INDEX could not be verified, killing the list built before its join, ticks-matched, before failing"
+        kill_process_snapshot "$STOP_SNAPSHOT_BUILT" || true
       fi
-      log "STOP[$label]: re-snapshot could not verify the child's tree (rc=$resnap_rc; no child pid, a record that is not whole, a walk that did not complete, or a self pid it could not clear) - failing fast rather than sleeping out the budget"
+      log "STOP[$label]: re-snapshot could not verify the child's tree (rc=$resnap_rc; no child pid, a record that is not whole, a walk that did not complete, a join that did not verify, or a self pid it could not clear) - failing fast rather than sleeping out the budget"
       return 1
     fi
     if [ -z "$LAST_STOP_SNAPSHOT" ]; then
@@ -2465,9 +2794,11 @@ child_turn_state() {
 # tree is confirmed dead at that phase, "eof_kill_failed",
 # "term_kill_failed", "kill_failed" when a survivor from the snapshot was
 # alive or unverifiable after that phase's own escalation, "unverified" when
-# nothing was confirmed either way: the snapshot could never be built in the
-# first place, because a walk did not complete, the tree record is not whole,
-# or the snapshot could not be cleared of this supervisor's own pid, or the
+# nothing was confirmed either way: the snapshot could not be verified,
+# because a walk did not complete, the tree record is not whole, the join of
+# the Git Bash process table did not verify, or the snapshot could not be
+# cleared of this supervisor's own pid (where the join alone failed or reached
+# that pid, the list the walks built is still killed, ticks-matched), or the
 # wrapper reached the force kill running as a Windows pid the snapshot was
 # never walked from -
 # "gone" when the wrapper had already
@@ -2569,8 +2900,11 @@ stop_child() {
   # process it names, so a list of the wrapper pair alone leaves the
   # `claude.exe` under it running, and a record that reads stale or behind
   # still names real pid and ticks pairs that the kill matches on their ticks.
-  # A snapshot the build could not verify is still not left for the retry, so
-  # the retry takes its own re-snapshot rather than confirming this list.
+  # A build that failed at its join holds the list its walks built, and
+  # that list is killed ticks-matched at every unverified exit below, for a
+  # launched and an adopted child alike. A snapshot the build could not verify
+  # is still not left for the retry, so the retry takes its own re-snapshot
+  # rather than confirming this list.
   local snapshot_winpid=""
   if [ "${CHILD_ADOPTED:-}" = "1" ]; then
     snapshot_winpid="${CHILD_WINPID:-}"
@@ -2586,7 +2920,8 @@ stop_child() {
   snapshot="$STOP_SNAPSHOT_BUILT"
   if [ "${CHILD_ADOPTED:-}" = "1" ] && [ -n "${CHILD_WINPID:-}" ] && [ -n "${CHILD_TICKS:-}" ]; then
     if [ "$snap_rc" -ne 0 ] && [ -n "${CHILD_TREE_SNAPSHOT:-}" ]; then
-      snapshot="$CHILD_TREE_SNAPSHOT"
+      snapshot="$snapshot
+$CHILD_TREE_SNAPSHOT"
     fi
     snapshot=$(printf '%s\n%s,%s\n' "$snapshot" "$CHILD_WINPID" "$CHILD_TICKS" | grep -v '^$' | sort -u)
   fi
@@ -2597,9 +2932,11 @@ stop_child() {
   # the log, rather than a silent, indistinguishable clean report.
   if [ "$snap_attempted" -eq 0 ] || [ "$snap_rc" -ne 0 ]; then
     if [ "${CHILD_ADOPTED:-}" = "1" ] && [ -n "${CHILD_WINPID:-}" ] && [ -n "${CHILD_TICKS:-}" ]; then
-      log "STOP[$label]: tree not verified (the walk from adopted child-$CHILD_INDEX's recorded Windows pid did not complete, or its tree record is not whole, rc=$snap_rc) - the stop kills the recorded pair, and the tree record where it names anything, ticks-matched"
+      log "STOP[$label]: tree not verified (adopted child-$CHILD_INDEX's snapshot build did not verify, for the reason the lines before this one log, rc=$snap_rc) - the stop kills the recorded pair, the tree record where it names anything, and the list built before the join where one was kept, ticks-matched"
+    elif [ -n "$snapshot" ]; then
+      log "STOP[$label]: tree not verified (the snapshot build for pid $pid did not verify, for the reason the lines before this one log, rc=$snap_rc) - the list built before the join is killed ticks-matched, beside the child's own launch pid"
     else
-      log "STOP[$label]: tree not verified (no snapshot resolved for pid $pid, or the walk did not complete, rc=$snap_rc) - stop relies on the child's own launch pid alone"
+      log "STOP[$label]: tree not verified (the snapshot build for pid $pid did not verify, for the reason the lines before this one log, rc=$snap_rc) - stop relies on the child's own launch pid alone"
     fi
     LAST_STOP_SNAPSHOT=""
   else
@@ -2627,14 +2964,15 @@ stop_child() {
   # would be the exact report a slow-spawn regime (the bound this whole
   # function exists for) produces on a tree that was never actually
   # looked at.
-  # Usage: kill_stale_entry_list - the one unverified case that still holds
-  # a verified list: the patient wait's rebuild failed and `snapshot` is the
-  # entry list. That list is killed, ticks-matched, so nothing it names
-  # outlives the stop, while the verdict stays unverified because nothing
-  # the child started during the wait is on it. An adopted child's unverified
-  # list also holds its recorded pair and whatever its tree record names,
-  # which are killed here the same way.
-  # Every other unverified case holds an empty list and this does nothing.
+  # Usage: kill_stale_entry_list - kills the list an unverified stop still
+  # holds, ticks-matched, so nothing it names outlives the stop, while the
+  # verdict stays unverified. `snapshot` holds a list in three cases: the
+  # patient wait's rebuild failed and it holds the entry list, with the
+  # rebuild's pre-join list where that build kept one; a build failed at
+  # its join and it holds the list the walks built before the join; or the
+  # child is adopted and it holds the recorded pair and whatever the tree
+  # record names. Every other unverified case holds an empty list and this
+  # does nothing.
   kill_stale_entry_list() {
     if [ -n "$snapshot" ]; then
       if kill_process_snapshot "$snapshot"; then
@@ -2660,8 +2998,13 @@ stop_child() {
       return 0
     fi
     log "STOP[$label]: the wrapper is gone but its own snapshot shows a confirmed survivor: $(echo "$alive" | tr '\n' ' ') - escalating the tree kill"
+    local kill_rc
     kill_process_snapshot "$snapshot"
-    return $?
+    kill_rc=$?
+    if [ "$kill_rc" -eq 0 ]; then
+      log "STOP[$label]: escalated_kill_dead: every process the snapshot names is confirmed dead after the escalated kill"
+    fi
+    return "$kill_rc"
   }
 
   # Phase 1: end of input - kill the holder so the child reads end of input.
@@ -2746,13 +3089,16 @@ stop_child() {
         build_stop_snapshot "$label"
         snap_rc=$?
         if [ "$snap_rc" -ne 0 ]; then
-          # The entry list stays in `snapshot`, so the phases below still
-          # run the ticks-matched kill over what it names, but nothing the
-          # child started during the wait is on it, so the stop reports
-          # unverified and leaves no list for the retry, which then takes
-          # its own re-snapshot.
+          # The entry list stays in `snapshot`, joined by the list the
+          # rebuild's walks built where its join failed, so the phases
+          # below still run the ticks-matched kill over what they name. The
+          # rebuild did not verify, so the stop reports unverified and leaves
+          # no list for the retry, which then takes its own re-snapshot.
+          if [ -n "$STOP_SNAPSHOT_BUILT" ]; then
+            snapshot=$(printf '%s\n%s\n' "$snapshot" "$STOP_SNAPSHOT_BUILT" | grep -v '^$' | sort -u)
+          fi
           LAST_STOP_SNAPSHOT=""
-          log "STOP[$label]: tree not verified after the patient wait (the walk did not complete, rc=$snap_rc) - the entry list is still killed, ticks-matched, and the stop reports unverified"
+          log "STOP[$label]: tree not verified after the patient wait (the rebuild did not verify, for the reason the lines before this one log, rc=$snap_rc) - the entry list is still killed, ticks-matched, and the stop reports unverified"
         else
           snapshot=$(printf '%s\n%s\n' "$snapshot" "$STOP_SNAPSHOT_BUILT" | grep -v '^$' | sort -u)
           snapshot_winpid="$STOP_SNAPSHOT_WRAPPER_WINPID"
@@ -2784,8 +3130,9 @@ stop_child() {
   # holds, which carries the recorded child pair and the walked tree: the
   # first rung kills and waits the grace, and the second kills again and
   # reads the result as the stop's verdict. An unverified snapshot still holds
-  # the recorded pair, whatever the tree record names, and the entry list
-  # where the patient wait's rebuild failed, so both rungs kill what it names
+  # the recorded pair, whatever the tree record names, the list the walks
+  # built where the join failed, and the entry list where the patient
+  # wait's rebuild failed, so both rungs kill what it names
   # while the stop reports the tree unverified and fails closed for the retry,
   # as the launched path does. Only a snapshot with nothing in it leaves no
   # rung.
