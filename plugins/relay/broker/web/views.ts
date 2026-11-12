@@ -34,7 +34,8 @@ import type { UsageAccount } from "../usage/cache.ts";
 import { PACE_PERIOD_MS, aheadOfPace, measuredAt, projectExhaustion, rolledWeekly } from "../usage/pace.ts";
 import { foldRootName } from "./config.ts";
 import { MAX_BRIEF_FILE_BYTES, parseBrief } from "./brief.ts";
-import type { Brief } from "./brief.ts";
+import type { Brief, BriefPart } from "./brief.ts";
+import type { ChangelogKind, ChangelogRecord } from "./changelog.ts";
 import { headingOf } from "./direction.ts";
 import type { DirectionReading, Heading } from "./direction.ts";
 import type { InstalledRelease } from "./plugins.ts";
@@ -151,6 +152,8 @@ export type RolloutReading = {
   readAt: string | null;
   /** Every repository's open branches, one record each, from the repositories with a default branch and a successful fetch. */
   branches: readonly OpenBranches[];
+  /** Every repository's changelog record, one each, from the repositories whose changelog read has run at least once, well or not. */
+  changelog: readonly ChangelogRecord[];
   /** The roots that hold no repository, whose personas' reviews no page lists. */
   outside: readonly string[];
 };
@@ -587,6 +590,47 @@ export type HealthView = {
   capacity: AccountLine[];
   verdict: Verdict;
   hands: Item[];
+  asOf: AsOf;
+  held: readonly SourceName[];
+};
+
+/**
+ * One repository on the Changelog screen's filter: its name, the rows its record holds, unreadable
+ * ones included, whether a later read failed, and when its last good read ran, null before one has.
+ */
+export type ChangelogRepo = { repo: string; count: number; stale: boolean; readAt: string | null };
+
+/**
+ * One row of the Changelog screen: the repository, the file's path, the landing commit's committer
+ * time, and the entry's fields. An unreadable row, a file that is no entry or was not read, carries
+ * null fields, no parts and `unreadable` true.
+ */
+export type ChangelogLine = {
+  repo: string;
+  path: string;
+  at: string;
+  title: string | null;
+  kind: ChangelogKind | null;
+  product: string | null;
+  corrects: string | null;
+  correctedBy: string | null;
+  parts: BriefPart[];
+  unreadable: boolean;
+};
+
+/**
+ * The Changelog screen's view. `repos` lists every repository holding a changelog record, whatever
+ * the filter. `repo` is the filter applied, or null. `entries` is the first `count` rows of the
+ * merged list, `total` the rows after the filter, `more` whether `total` is above `count`, and
+ * `older` the files past each filtered record's kept rows.
+ */
+export type ChangelogView = {
+  repos: ChangelogRepo[];
+  repo: string | null;
+  entries: ChangelogLine[];
+  total: number;
+  more: boolean;
+  older: number;
   asOf: AsOf;
   held: readonly SourceName[];
 };
@@ -2132,6 +2176,67 @@ export function healthView(readings: Readings): HealthView {
     capacity: (readings.usage.value ?? []).map((account) => accountLine(account, readings.now)),
     verdict: verdictOver(readings, repos),
     hands: handsItems(readings, repos),
+    asOf: asOf(readings),
+    held: readings.held,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Changelog
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The Changelog screen's view: the rows of every repository's changelog record, or of the one
+ * `repo` names, merged newest first, the first `count` of them. Each repository's rows stay in their
+ * own landing order, the log's, even where their committer times run backwards: the merge takes, at
+ * each step, the repository whose next row has the newest landing time, a tie going to the
+ * repository name in code-point order, and never sorts the list by time. A `repo` no record names
+ * gives an empty list. While the rollout source is unread, `repos` and `entries` are empty.
+ */
+export function changelogView(readings: Readings, repo: string | null, count: number): ChangelogView {
+  const records = readings.rollout.value?.changelog ?? [];
+  const filtered = records.filter((record) => repo === null || record.repo === repo);
+  const heads = filtered.map((record) => ({ record, next: 0 }));
+  const entries: ChangelogLine[] = [];
+  while (entries.length < count) {
+    let best: (typeof heads)[number] | null = null;
+    let bestAt = 0;
+    for (const head of heads) {
+      const row = head.record.rows[head.next];
+      if (row === undefined) continue;
+      const at = Date.parse(row.at);
+      // Repository names pass `repoNameFault`, ASCII alone, so code-unit order is code-point order.
+      if (best === null || at > bestAt || (at === bestAt && head.record.repo < best.record.repo)) {
+        best = head;
+        bestAt = at;
+      }
+    }
+    if (best === null) break;
+    const row = best.record.rows[best.next];
+    best.next += 1;
+    if (row === undefined) break;
+    const entry = row.entry;
+    entries.push({
+      repo: best.record.repo,
+      path: row.path,
+      at: row.at,
+      title: entry?.title ?? null,
+      kind: entry?.kind ?? null,
+      product: entry?.product ?? null,
+      corrects: entry?.corrects ?? null,
+      correctedBy: entry?.correctedBy ?? null,
+      parts: entry === null ? [] : [...entry.parts],
+      unreadable: entry === null,
+    });
+  }
+  const total = filtered.reduce((sum, record) => sum + record.rows.length, 0);
+  return {
+    repos: records.map((record) => ({ repo: record.repo, count: record.rows.length, stale: record.stale, readAt: record.readAt })),
+    repo,
+    entries,
+    total,
+    more: total > count,
+    older: filtered.reduce((sum, record) => sum + record.older, 0),
     asOf: asOf(readings),
     held: readings.held,
   };

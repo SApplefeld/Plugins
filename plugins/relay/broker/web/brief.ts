@@ -38,14 +38,15 @@ export type BriefPart = { label: string; text: string };
 /** A brief: its parts in file order, at least one. */
 export type Brief = { parts: BriefPart[] };
 
-/** The brief in `text`, or null where the text does not open as a brief or holds no part. */
-export function parseBrief(text: string): Brief | null {
-  // A byte-order mark ahead of the first line would otherwise defeat the first-line comparison, as
-  // it would defeat a line-start anchor in `parsePlan`.
-  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
-  if (!(lines[0] ?? "").startsWith(BRIEF_FIRST_LINE)) return null;
+/**
+ * The parts among `lines`, in order, at most `MAX_BRIEF_PARTS`: each line of the form
+ * `**<label>.** <text>`, its text cut at `MAX_BRIEF_TEXT`. A line whose label is empty or runs over
+ * `MAX_BRIEF_LABEL`, or whose text is empty, is no part. A brief and a changelog entry both take
+ * their parts from here, so the two share one rule and its bounds.
+ */
+export function parseParts(lines: readonly string[]): BriefPart[] {
   const parts: BriefPart[] = [];
-  for (const line of lines.slice(1)) {
+  for (const line of lines) {
     if (parts.length === MAX_BRIEF_PARTS) break;
     const match = PART.exec(line);
     if (match === null) continue;
@@ -56,6 +57,16 @@ export function parseBrief(text: string): Brief | null {
     if (words === "") continue;
     parts.push({ label, text: words });
   }
+  return parts;
+}
+
+/** The brief in `text`, or null where the text does not open as a brief or holds no part. */
+export function parseBrief(text: string): Brief | null {
+  // A byte-order mark ahead of the first line would otherwise defeat the first-line comparison, as
+  // it would defeat a line-start anchor in `parsePlan`.
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
+  if (!(lines[0] ?? "").startsWith(BRIEF_FIRST_LINE)) return null;
+  const parts = parseParts(lines.slice(1));
   return parts.length === 0 ? null : { parts };
 }
 

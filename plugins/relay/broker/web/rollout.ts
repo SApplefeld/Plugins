@@ -23,6 +23,13 @@
 // operator removes from the remote leaves the rows on the next fetch, a branch deleted on the
 // remote leaves `refs/open/`, and a prune reaches only the broker's own refs.
 //
+// Each repository with a default branch also publishes its changelog: the entries under
+// `docs/changelog/` at the default branch's commit, read by `readChangelog` in `./changelog.ts`
+// inside the recompute, under the group's lock, and only when that commit has moved since the last
+// good read. A read that fails keeps the last record and marks it stale. It never marks the group
+// failed and never holds the source, and it is not tried again until the group's next fetch has
+// started.
+//
 // The plan branches are fetched so a queued plan whose document lives on an unmerged branch can be
 // read: `readBranchFiles` reads a file's blob from the bare repository at the branch's commit, under
 // the local read limits, with nothing checked out anywhere.
@@ -56,6 +63,8 @@ import path from "node:path";
 import { comparablePath } from "../board/events.ts";
 import { MAX_PLAN_FILE_BYTES } from "../board/plans.ts";
 import { MAX_INTAKE_REF_LENGTH } from "../board/queues.ts";
+import { readChangelog } from "./changelog.ts";
+import type { ChangelogEntry, ChangelogRecord, HeldEntries } from "./changelog.ts";
 import { LOCAL_READ, OVERFLOW, REMOTE_CALL, runGit } from "./git.ts";
 import type { GitLimits, GitRunner } from "./git.ts";
 import type { OpenBranches, PublishRow, RolloutCheckout, RolloutCommit, RolloutRow, SharedRow } from "./views.ts";
@@ -109,6 +118,8 @@ export type RolloutState = {
   readAt: string | null;
   /** Every repository's open branches, one record each, from the repositories with a default branch and a successful fetch. */
   branches: readonly OpenBranches[];
+  /** Every repository's changelog record, one each, from the repositories whose changelog read has run at least once, well or not. */
+  changelog: readonly ChangelogRecord[];
   /** The latest cycle's roots that hold no repository: git's own origin read failed, and no `.git` stands in the folder or any parent. */
   outside: readonly string[];
   /** Whether a read cycle has completed at all; the pass leaves the source unread until one has. */
@@ -430,6 +441,8 @@ export function planBranchFault(branch: string): PlanBranchRule | null {
 
 type Refs = {
   defaultRef: string | null;
+  /** The commit `defaultRef` points at, the object id the ref listing printed on that ref's own line. */
+  defaultTip: string | null;
   clients: string[];
   /** How many client branches the remote has that `clientBranchSafe` refused, left out of `clients`. */
   refused: number;
@@ -454,6 +467,8 @@ type Group = {
   bare: string;
   /** When the last fetch was started, success or not, so a failing remote is retried on the cadence. */
   fetchedAt: number | null;
+  /** How many fetches have been started, so a read can tell whether one has started since it last ran. */
+  fetches: number;
   /**
    * When the last read whose two fetches both succeeded was started, null before one has. It is
    * the start of the cycle or refresh that ran them, taken before the first fetch, so it is a lower
@@ -469,6 +484,12 @@ type Group = {
    * come from one fetch.
    */
   branches: OpenBranches | null;
+  /** The changelog as last read, null until a changelog read has run; stale where the latest one failed. */
+  changelog: ChangelogRecord | null;
+  /** The parses the changelog record's rows stand on, by blob id, so a moved tip reads only new blobs. */
+  changelogHeld: HeldEntries;
+  /** The value of `fetches` at the changelog read or fetch that last failed, null where the latest read succeeded; the read waits until `fetches` passes it. */
+  changelogFailedAt: number | null;
   readAt: string | null;
   failed: boolean;
   everRead: boolean;
@@ -522,7 +543,8 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
   const unprepared = new Set<string>();
   const unfetchedOpen = new Set<string>();
   const refusedClients = new Set<string>();
-  let state: RolloutState = { rows: [], checkouts: [], shared: [], publish: [], readAt: null, branches: [], outside: [], attempted: false, held: true, reachedGit: false };
+  const unreadChangelog = new Set<string>();
+  let state: RolloutState = { rows: [], checkouts: [], shared: [], publish: [], readAt: null, branches: [], changelog: [], outside: [], attempted: false, held: true, reachedGit: false };
   /** The latest cycle's roots that hold no repository, published beside its checkouts. */
   let outsideRoots: readonly string[] = [];
   let inFlight: Promise<void> | null = null;
@@ -535,26 +557,31 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
   /** Whether the last cycle had a root whose origin read failed as anything but git's own `exit <n>`; it holds the source. */
   let unanswered = false;
 
-  /** The remote-tracking refs: the default branch, where one can be named, and the client branches. */
+  /**
+   * The remote-tracking refs: the default branch, where one can be named, with the commit it points
+   * at, and the client branches. That commit is the object id on the listing's line whose refname
+   * is the default branch's own, an exact match, so no name is ever resolved as a revision.
+   */
   async function refsOf(root: string): Promise<Refs> {
-    const listed = lines(await git(root, ["for-each-ref", "--format=%(refname)%09%(symref)", REMOTE_PREFIX], LOCAL_READ));
-    const names = new Set<string>();
+    const listed = lines(await git(root, ["for-each-ref", "--format=%(refname)%09%(symref)%09%(objectname)", REMOTE_PREFIX], LOCAL_READ));
+    const names = new Map<string, string>();
     let head: string | null = null;
     for (const line of listed) {
-      const [refname = "", symref = ""] = line.split("\t");
+      const [refname = "", symref = "", object = ""] = line.split("\t");
       if (refname === `${REMOTE_PREFIX}HEAD`) head = symref === "" ? null : symref;
-      else names.add(refname);
+      else names.set(refname, object);
     }
     let defaultRef: string | null = null;
     if (head !== null && names.has(head)) defaultRef = head;
     else if (names.has(`${REMOTE_PREFIX}main`)) defaultRef = `${REMOTE_PREFIX}main`;
     else if (names.has(`${REMOTE_PREFIX}master`)) defaultRef = `${REMOTE_PREFIX}master`;
-    const named = [...names]
+    const defaultTip = defaultRef === null ? null : (names.get(defaultRef) ?? null);
+    const named = [...names.keys()]
       .filter((name) => name.startsWith(REMOTE_PREFIX + CLIENT_PREFIX))
       .map((name) => name.slice(REMOTE_PREFIX.length))
       .sort();
     const clients = named.filter(clientBranchSafe);
-    return { defaultRef, clients, refused: named.length - clients.length, empty: listed.length === 0 };
+    return { defaultRef, defaultTip, clients, refused: named.length - clients.length, empty: listed.length === 0 };
   }
 
   /**
@@ -847,6 +874,37 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
       .sort();
   }
 
+  /**
+   * The group's changelog, read where the default branch's commit is not the one a good record
+   * stands on. The read runs inside the recompute, so under the group's lock. A read that fails
+   * keeps the record the group had and marks it stale, or makes a stale record with no rows where
+   * the group had none, with one log line naming the group and the kind while the failure lasts.
+   * It then waits until the group's next fetch has started, so a repository that keeps failing
+   * costs one attempt a fetch interval. A read that fails partway through its blob reads keeps the
+   * parses taken by then, so the next attempt reads only the rest. It throws nothing, so it never
+   * marks the group failed and never holds the source or its rows.
+   */
+  async function readGroupChangelog(group: Group, tip: string, readAt: string): Promise<void> {
+    const record = group.changelog;
+    if (record !== null && !record.stale && record.tip === tip) return;
+    if (group.changelogFailedAt === group.fetches) return;
+    const parsed = new Map<string, ChangelogEntry | null>();
+    try {
+      const read = await readChangelog(git, group.bare, tip, group.changelogHeld, group.name, readAt, parsed);
+      group.changelog = read.record;
+      group.changelogHeld = read.held;
+      group.changelogFailedAt = null;
+      unreadChangelog.delete(group.folded);
+    } catch (error) {
+      // Filled only once the read reached its blob reads, and then with every kept blob known, at most the cap's worth.
+      if (parsed.size > 0) group.changelogHeld = parsed;
+      group.changelog = record === null ? { repo: group.name, tip: null, readAt: null, stale: true, rows: [], older: 0 } : { ...record, stale: true };
+      group.changelogFailedAt = group.fetches;
+      if (!unreadChangelog.has(group.folded)) log(`web rollout: ${group.name} could not read its changelog (${kindOf(error)})`);
+      unreadChangelog.add(group.folded);
+    }
+  }
+
   async function computeGroup(group: Group): Promise<void> {
     const readAt = new Date(now()).toISOString();
     const refs = await refsOf(group.bare);
@@ -884,6 +942,11 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
         }
       }
     }
+    // The last read of the recompute, and one that throws nothing, so the lists above are stored whatever it finds.
+    // With no default branch found the entries cannot be read at all, so a record held from a good
+    // read is marked stale, as a failed read marks it, and read again once a tip is found.
+    if (refs.defaultTip !== null) await readGroupChangelog(group, refs.defaultTip, readAt);
+    else if (group.changelog !== null && !group.changelog.stale) group.changelog = { ...group.changelog, stale: true };
     group.rows = rows;
     group.shared = shared;
     group.publish = publishRows;
@@ -892,11 +955,24 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
   }
 
   /**
+   * A failed fetch's mark on the changelog: a held record is marked stale, keeping its rows, its tip
+   * and its read time, and waits for the next fetch as a failed read does, so a recompute from the
+   * held refs before then does not read it again. The remote losing its default branch fails the
+   * fetch, which names the branch held, so this is the mark that case takes.
+   */
+  function staleChangelog(group: Group): void {
+    if (group.changelog === null) return;
+    if (!group.changelog.stale) group.changelog = { ...group.changelog, stale: true };
+    group.changelogFailedAt = group.fetches;
+  }
+
+  /**
    * One repository's fetch where due or forced, its bare repository prepared ahead of it, or null
    * where no fetch was due. A preparation that fails holds the group with one log line naming it,
    * never its URL, and waits out the fetch interval like a failed fetch, so a group that cannot be
    * prepared does not spawn git on every pass tick. A fetch that fails leaves the refs as they
-   * stand and marks the group failed until the next good read. Either failure answers its kind.
+   * stand and marks the group failed until the next good read. Either failure marks a held
+   * changelog stale until the next good fetch, by `staleChangelog`, and answers its kind.
    * With `open`, the second fetch, into `refs/open/`, runs after the first and its `set-head`
    * succeed; a tap passes no `open`, so it waits on the first fetch alone. The second fetch's
    * failure is not the group's: the group is not marked failed, nothing is answered, and the rows
@@ -911,16 +987,19 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     } catch (error) {
       group.failed = true;
       group.fetchedAt = at;
+      staleChangelog(group);
       if (!unprepared.has(group.folded)) log(`web rollout: ${group.name} could not be prepared (${kindOf(error)})`);
       unprepared.add(group.folded);
       return kindOf(error);
     }
     unprepared.delete(group.folded);
     group.fetchedAt = at;
+    group.fetches += 1;
     try {
       await fetchGroup(group);
     } catch (error) {
       group.failed = true;
+      staleChangelog(group);
       return kindOf(error);
     }
     if (!open) return null;
@@ -1114,6 +1193,7 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
       publish: listed.flatMap((group) => group.publish),
       readAt,
       branches: listed.flatMap((group) => (group.branches === null ? [] : [group.branches])),
+      changelog: listed.flatMap((group) => (group.changelog === null ? [] : [group.changelog])),
       outside: outsideRoots,
       attempted: true,
       // Roots that hold no repository are a good read with no rows; a machine where git never
@@ -1195,11 +1275,15 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
             url,
             bare: path.join(stateRoot, ROLLOUT_STATE_FOLDER, folded),
             fetchedAt: null,
+            fetches: 0,
             fetchedWellAt: null,
             rows: [],
             shared: [],
             publish: [],
             branches: null,
+            changelog: null,
+            changelogHeld: new Map(),
+            changelogFailedAt: null,
             readAt: null,
             failed: false,
             everRead: false,

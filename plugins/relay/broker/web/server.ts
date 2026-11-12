@@ -56,7 +56,7 @@ import { RING_CAPACITY, lineageKnown, talkView } from "./talk.ts";
 import type { TalkRing, TalkViewInput } from "./talk.ts";
 import type { WebFiles } from "../routing/attachments.ts";
 import type { WebAnswerStatus, WebDeliveryStatus } from "../routing/inbound.ts";
-import { CLIENT_PREFIX, planBranchFault } from "./rollout.ts";
+import { CLIENT_PREFIX, planBranchFault, repoNameFault } from "./rollout.ts";
 import type { BranchRead, PublishMark, RolloutMark, RolloutReader } from "./rollout.ts";
 import { planStem } from "../board/plans.ts";
 import { appendDirection, calendarDate, steerText } from "./direction.ts";
@@ -67,7 +67,7 @@ import type { QuestionDesk, QuestionEntryView } from "../question-desk.ts";
 import { jumpLink } from "../discord/links.ts";
 import { answerableFromThread } from "../discord/question-message.ts";
 import type { Verdict } from "../security/permission.ts";
-import { askView, blockKey, blockedReasons, branchPlanView, checkoutRepoOf, drawnAsk, healthView, listedReview, needsMeView, planView, repoView, rootName, standupView, todayView, workersView } from "./views.ts";
+import { askView, blockKey, blockedReasons, branchPlanView, changelogView, checkoutRepoOf, drawnAsk, healthView, listedReview, needsMeView, planView, repoView, rootName, standupView, todayView, workersView } from "./views.ts";
 import type { Readings } from "./views.ts";
 import type { HandledHow, HandledMark, WatermarkStore } from "./watermarks.ts";
 
@@ -103,7 +103,7 @@ const ROUTE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
  */
 const SHELL_PAGE = "shell.html";
 /** The fixed page paths, each served the shell. `/needs-me` stays so an old link opens on Today. */
-const PAGE_ROUTES: ReadonlySet<string> = new Set(["/", "/today", "/repos", "/plan", "/health", "/talk", "/needs-me", "/ask", "/workers"]);
+const PAGE_ROUTES: ReadonlySet<string> = new Set(["/", "/today", "/repos", "/plan", "/health", "/talk", "/needs-me", "/ask", "/workers", "/changelog"]);
 const REPO_PREFIX = "/repo/";
 const ROUTE_PREFIX = "/web/";
 /** The one path the summary peer list admits a node to, the summary `registerViewHandlers` serves. */
@@ -655,6 +655,13 @@ function single(query: Map<string, string[]>, key: string): string | null {
   return values !== undefined && values.length === 1 ? values[0] : null;
 }
 
+/** The rows a changelog answer holds where the request names no `count`. */
+const CHANGELOG_COUNT = 30;
+/** The most rows one changelog answer holds, so a poll's answer stays bounded. */
+const MAX_CHANGELOG_COUNT = 300;
+/** The one form a changelog `count` takes: the decimal digits of a whole number, with no sign and no leading zero. */
+const CHANGELOG_COUNT_FORM = /^[1-9][0-9]{0,2}$/;
+
 function sendJson(response: ServerResponse, body: unknown, status = 200): void {
   const text = JSON.stringify(body);
   response.writeHead(status, {
@@ -667,13 +674,14 @@ function sendJson(response: ServerResponse, body: unknown, status = 200): void {
 }
 
 /**
- * Registers `/web/standup`, `/web/today`, `/web/needs-me`, `/web/workers`, `/web/ask`, `/web/repo`, `/web/plan`, `/web/health` and `/web/summary`.
+ * Registers `/web/standup`, `/web/today`, `/web/needs-me`, `/web/workers`, `/web/ask`, `/web/repo`, `/web/changelog`, `/web/plan`, `/web/health` and `/web/summary`.
  * Each answers a GET from the readings `source` hands back, the pass's latest, and reads no file of its own,
  * save the plan route's branch read below. A request string reaches no log: it is compared with names the
- * broker holds and dropped. It reaches no response either, save one: a branch read's 200 answers
+ * broker holds and dropped. It reaches no response either, save two: a branch read's 200 answers
  * `source.branch` as the name the caller sent and `path` and `title` from the path the caller sent, once
  * the screens have admitted both, the branch has matched by its exact ref name a plan branch the last
- * fetch brought, and git has shown a file at that path.
+ * fetch brought, and git has shown a file at that path; and the changelog route answers the `repo` the
+ * caller sent in its `repo` field once `repoNameFault` has admitted it, even where no record names it.
  *
  * A refused shape answers 400 and a well-shaped request for something the readings do not hold
  * answers 404 with an empty body. The plan route alone answers a refusal with a reason body, each
@@ -684,7 +692,9 @@ function sendJson(response: ServerResponse, body: unknown, status = 200): void {
  * `missing` and `not-a-plan`; and a branch read's 502 `{"refused":"read-failed"}`. A swept miss
  * without `branch` stays an empty 404. Every refusal the gate itself makes stays empty, as the
  * header above states. A reader failing is not a failure here: the view says which source is held
- * and serves what the pass last read.
+ * and serves what the pass last read. The changelog route is the one exception to the 404: a `repo`
+ * no record names answers its empty list, so a filtered screen opened before the first read fills
+ * on a later poll.
  *
  * The plan route is the one view that reads past the readings: with `branch`, it asks `rollout`,
  * the rollout reader, for the plan file and its brief from that plan branch of the root's
@@ -745,6 +755,26 @@ export function registerViewHandlers(
     const view = repoView(source(), name);
     if (view === null) return empty(response, 404);
     sendJson(response, view);
+  });
+
+  get("changelog", (request, response) => {
+    const query = queryOf(request.url ?? "");
+    let repo: string | null = null;
+    if (query.has("repo")) {
+      // A repo given twice, undecodable or refused as a folder name is one refusal; one no record names reads empty.
+      const raw = single(query, "repo");
+      const decoded = raw === null ? null : decodeParam(raw);
+      if (decoded === null || repoNameFault(decoded) !== null) return empty(response, 400);
+      repo = decoded;
+    }
+    let count = CHANGELOG_COUNT;
+    if (query.has("count")) {
+      const raw = single(query, "count");
+      const decoded = raw === null ? null : decodeParam(raw);
+      if (decoded === null || !CHANGELOG_COUNT_FORM.test(decoded) || Number(decoded) > MAX_CHANGELOG_COUNT) return empty(response, 400);
+      count = Number(decoded);
+    }
+    sendJson(response, changelogView(source(), repo, count));
   });
 
   get("plan", async (request, response) => {

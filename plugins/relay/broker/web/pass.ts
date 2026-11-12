@@ -454,7 +454,7 @@ export function createWebPass(options: WebPassOptions): WebPass {
       attempt("rollout", rollout, at, () =>
         state === null || state.held
           ? UNREADABLE
-          : { rows: state.rows, checkouts: state.checkouts, shared: state.shared, publish: state.publish, readAt: state.readAt, branches: state.branches, outside: state.outside },
+          : { rows: state.rows, checkouts: state.checkouts, shared: state.shared, publish: state.publish, readAt: state.readAt, branches: state.branches, changelog: state.changelog, outside: state.outside },
       );
     }
     // A held reading keeps its last good rows, but `outside` is the reader's own evidence from the folders,

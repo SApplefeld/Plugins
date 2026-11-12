@@ -2637,6 +2637,92 @@ a.wk-row:hover {
   padding: var(--space-1) var(--space-3);
 }
 
+/* Changelog screen: the filter, the stale lines, the day headings and the entries, one column at every width. */
+.cl-filter .chip,
+.cl-stale-line,
+.cl-meta,
+.cl-path,
+.cl-unreadable,
+.cl-ref,
+.cl-toggle,
+.cl-older,
+.cl-foot,
+.cl-empty {
+  font-size: var(--t-md);
+}
+
+.cl-stale {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cl-stale-line {
+  margin: 0;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.cl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 760px;
+}
+
+.cl-day {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cl-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cl-title {
+  margin: 0;
+  font-size: var(--t-md);
+  font-weight: 600;
+}
+
+/* The kind reads in the ink colour on the track, which holds the contrast floor in both palettes. */
+.badge.cl-kind {
+  color: var(--ink);
+  background: var(--track);
+}
+
+.cl-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  color: var(--muted);
+}
+
+.cl-path,
+.cl-unreadable,
+.cl-ref,
+.cl-foot,
+.cl-empty {
+  margin: 0;
+}
+
+/* The repository is a folder name, set in mono so it reads apart from a product of the same word. */
+.cl-repo {
+  font-family: var(--mono);
+}
+
+.cl-toggle,
+.cl-older {
+  align-self: flex-start;
+}
+
 .ro-repo {
   display: flex;
   flex-direction: column;

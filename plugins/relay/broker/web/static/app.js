@@ -42,6 +42,7 @@
     ask: { render: renderAsk, url: askUrl, gone: askGone },
     talk: { render: renderTalkScreen, url: talkUrl, accept: talkAccept, follow: true },
     workers: { render: renderWorkers, url: () => "/web/workers" },
+    changelog: { render: renderChangelog, url: changelogUrl },
   };
 
   // ---------------------------------------------------------------------------------------------
@@ -49,7 +50,7 @@
   // ---------------------------------------------------------------------------------------------
 
   /** The fixed path of each screen, the paths the broker serves the shell on; the repo screen is `REPO_PREFIX` plus the name. */
-  const SCREEN_PATHS = { today: "/today", standup: "/repos", ask: "/ask", plan: "/plan", health: "/health", talk: "/talk", workers: "/workers" };
+  const SCREEN_PATHS = { today: "/today", standup: "/repos", ask: "/ask", plan: "/plan", health: "/health", talk: "/talk", workers: "/workers", changelog: "/changelog" };
   const REPO_PREFIX = "/repo/";
 
   /**
@@ -60,7 +61,7 @@
   const PATH_ALIASES = { "/": "today", "/needs-me": "today" };
 
   /** The query keys each screen reads, in the order a path the shell builds carries them; a key off the list is dropped. */
-  const SCREEN_KEYS = { today: ["item"], standup: [], ask: ["repo", "id"], plan: ["root", "path", "repo", "branch"], health: [], talk: ["lineage", "root", "path"], repo: [], workers: ["name"] };
+  const SCREEN_KEYS = { today: ["item"], standup: [], ask: ["repo", "id"], plan: ["root", "path", "repo", "branch"], health: [], talk: ["lineage", "root", "path"], repo: [], workers: ["name"], changelog: ["repo"] };
 
   /** The list row a query selects: the Today screen's `item`, or the Workers screen's `name`, the persona's; null where it names none. */
   function selectedOf(query) {
@@ -283,11 +284,14 @@
     return box;
   }
 
-  /** The line of per-source read times that ends a page. */
-  function sources(view, names) {
+  /**
+   * The line of per-source read times that ends a page. `unreadRollout` set draws a rollout source
+   * neither read nor held as having no reading yet, for a screen whose only source it is.
+   */
+  function sources(view, names, unreadRollout) {
     const asOf = view && view.asOf ? view.asOf : {};
     // A rollout source neither read nor held draws nothing: a host with no git renders as it did before the source.
-    const shown = names.filter((name) => name !== "rollout" || parse(asOf[name]) !== null || list(view && view.held).includes(name));
+    const shown = names.filter((name) => name !== "rollout" || unreadRollout === true || parse(asOf[name]) !== null || list(view && view.held).includes(name));
     const note = h("div", "note");
     shown.forEach((name, index) => {
       const at = parse(asOf[name]);
@@ -2065,6 +2069,206 @@
   }
 
   // ---------------------------------------------------------------------------------------------
+  // Changelog page
+  // ---------------------------------------------------------------------------------------------
+
+  /** The rows the Changelog screen asks for at first and adds per Show older, and the most one answer holds: the broker's default and ceiling. */
+  const CHANGELOG_STEP = 30;
+  const CHANGELOG_MAX = 300;
+
+  /** The parts an entry draws closed; the rest open with its Corrects and Corrected by lines on a tap. */
+  const CHANGELOG_SHOWN = ["What changed", "Why"];
+
+  /**
+   * What the Changelog screen holds for one visit: the rows it asks for, and the entries opened, by
+   * key, so the poll's redraw keeps an opened entry open. A move to another screen or filter resets both.
+   */
+  const changelogHeld = { count: CHANGELOG_STEP, open: new Set() };
+
+  /** The repository the address filters on, or null for every repository. */
+  function changelogRepo() {
+    const repo = new URLSearchParams(location.search).get("repo");
+    return repo === null || repo === "" ? null : repo;
+  }
+
+  /** The Changelog reading: the address's repository where it names one, and the count where Show older has raised it. */
+  function changelogUrl() {
+    const repo = changelogRepo();
+    const pairs = [];
+    if (repo !== null) pairs.push("repo=" + encodeURIComponent(repo));
+    if (changelogHeld.count !== CHANGELOG_STEP) pairs.push("count=" + changelogHeld.count);
+    return pairs.length === 0 ? "/web/changelog" : "/web/changelog?" + pairs.join("&");
+  }
+
+  /** The filter: All, then each repository the view lists, and the filtered one where the view lists no record for it, the one shown marked. */
+  function changelogFilter(repos, filter) {
+    const names = repos.map((repo) => txt(repo.repo)).filter((name) => name !== "");
+    if (filter !== null && !names.includes(filter)) names.push(filter);
+    const nav = h("nav", "chips cl-filter", null, "cl-filter");
+    nav.setAttribute("aria-label", "Repository");
+    const choice = (words, query, on, key) => {
+      const anchor = link(on ? "chip on" : "chip", pathOf(routeTo("changelog", query)), words, key);
+      if (on) anchor.setAttribute("aria-current", "page");
+      return anchor;
+    };
+    nav.append(choice("All", {}, filter === null, "filter-all"));
+    for (const name of names) nav.append(choice(name, { repo: name }, name === filter, "filter:" + name));
+    return nav;
+  }
+
+  /**
+   * One line per stale repository, under a filter too, so these lines and the empty words' stale check
+   * read the same repositories: its name and its last good read, or that it has not been read yet.
+   */
+  function changelogStale(repos, now) {
+    const box = h("div", "cl-stale", null, "cl-stale");
+    for (const repo of repos) {
+      const name = txt(repo.repo);
+      if (repo.stale !== true) continue;
+      const at = parse(repo.readAt);
+      const line = h("p", "cl-stale-line", null, "stale:" + name);
+      if (at === null) line.append(name + ": has not been read yet");
+      else line.append(name + ": last good read ", clockText("span", null, dayClock(at, now)));
+      box.append(line);
+    }
+    return box.childNodes.length === 0 ? null : box;
+  }
+
+  /** The key the patch pairs an entry by, and the open set holds it under: its repository and path. */
+  function changelogKey(entry) {
+    return "entry:" + txt(entry.repo) + ":" + txt(entry.path);
+  }
+
+  /** A reference line, Corrects or Corrected by, with the other entry's path as text. */
+  function changelogRef(words, path) {
+    const line = h("p", "cl-ref");
+    line.append(words + " ", h("span", "mono", path));
+    return line;
+  }
+
+  /**
+   * One entry: its title, kind, product and repository, then What changed and Why, and a toggle that
+   * opens the other parts and the Corrects and Corrected by lines. An unreadable row draws its path and
+   * that the file is not a changelog entry. Every value is set as text, a part's through `briefGrid`.
+   */
+  function changelogEntry(entry) {
+    const key = changelogKey(entry);
+    const card = h("article", "card pad cl-entry", null, key);
+    const meta = h("div", "cl-meta");
+    if (entry.unreadable === true) {
+      meta.append(h("span", "cl-repo", txt(entry.repo)));
+      card.append(h("p", "cl-path mono", txt(entry.path)), h("p", "muted cl-unreadable", "This file is not a changelog entry."), meta);
+      return card;
+    }
+    if (txt(entry.kind) !== "") meta.append(h("span", "badge cl-kind", txt(entry.kind)));
+    if (txt(entry.product) !== "") meta.append(h("span", "cl-product", txt(entry.product)));
+    meta.append(h("span", "cl-repo", txt(entry.repo)));
+    // The title's id names it to the toggle below. Encoding the key keeps whitespace out of the id,
+    // since `aria-describedby` reads a space-separated list of ids.
+    const titleId = "cl-title:" + encodeURIComponent(key);
+    const title = h("h3", "cl-title", txt(entry.title || entry.path));
+    title.id = titleId;
+    card.append(title, meta);
+    const parts = list(entry.parts).filter((part) => part && txt(part.label) !== "" && txt(part.text) !== "");
+    const shown = parts.filter((part) => CHANGELOG_SHOWN.includes(part.label));
+    const rest = parts.filter((part) => !CHANGELOG_SHOWN.includes(part.label));
+    const corrects = txt(entry.corrects);
+    const correctedBy = txt(entry.correctedBy);
+    if (shown.length > 0) card.append(briefGrid(shown));
+    if (rest.length === 0 && corrects === "" && correctedBy === "") return card;
+    const open = changelogHeld.open.has(key);
+    if (open) {
+      if (rest.length > 0) card.append(briefGrid(rest));
+      if (corrects !== "") card.append(changelogRef("Corrects:", corrects));
+      if (correctedBy !== "") card.append(changelogRef("Corrected by:", correctedBy));
+    }
+    const button = h("button", "linkbtn cl-toggle", open ? "Show less" : "Show more", "toggle");
+    button.type = "button";
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.setAttribute("aria-describedby", titleId);
+    listen(button, "click", () => {
+      if (changelogHeld.open.has(key)) changelogHeld.open.delete(key);
+      else changelogHeld.open.add(key);
+      redrawNeeds();
+    });
+    card.append(button);
+    return card;
+  }
+
+  /**
+   * The entries in the view's order, with a day heading wherever a row's local landing day differs from
+   * the row above it. A heading is keyed by its day and that day's run ordinal, 0 for the day's first
+   * run, so a new entry landing under an unchanged heading leaves the heading's key, and the heading, as it was.
+   */
+  function changelogList(entries, now) {
+    const box = h("div", "cl-list", null, "cl-list");
+    const runs = new Map();
+    let lastDay = null;
+    for (const entry of entries) {
+      const ms = parse(entry.at);
+      const day = ms === null ? null : new Date(ms).toDateString();
+      if (day !== null && day !== lastDay) {
+        const run = runs.get(day) ?? 0;
+        runs.set(day, run + 1);
+        box.append(h("h2", "cl-day", dayOf(entry.at, now), "day:" + day + ":" + run));
+      }
+      lastDay = day;
+      box.append(changelogEntry(entry));
+    }
+    return box;
+  }
+
+  /** What follows the list: Show older, the line to pick a repository at the ceiling with no filter set, or the count of older entries in the folder. */
+  function changelogFoot(view, filter) {
+    const count = changelogHeld.count;
+    if (view.more === true && count < CHANGELOG_MAX) {
+      const button = h("button", "linkbtn cl-older", "Show older", "cl-older");
+      button.type = "button";
+      listen(button, "click", () => {
+        changelogHeld.count = Math.min(CHANGELOG_MAX, changelogHeld.count + CHANGELOG_STEP);
+        refreshView();
+      });
+      return button;
+    }
+    if (view.more === true) return filter === null ? h("p", "muted cl-foot", "Pick a repository to reach older entries.", "cl-foot") : null;
+    const older = num(view.older);
+    if (older === null || older <= 0) return null;
+    const folder = filter === null ? " in each repository's docs/changelog/ folder." : " in the repository's docs/changelog/ folder.";
+    return h("p", "muted cl-foot", plural(older, "older entry is", "older entries are") + folder, "cl-foot");
+  }
+
+  /**
+   * The Changelog screen, drawn as one pane: the repository filter, a line per stale repository, the
+   * entries under their day headings, then Show older or the line that stands for it. With no entries
+   * from a rollout source that has been read, and nothing held or stale to explain it, the screen says
+   * no entry has landed yet; a source not yet read draws no such words, since nothing was read.
+   */
+  function renderChangelog(view) {
+    const now = nowOf(view);
+    const repos = objects(view.repos);
+    const filter = typeof view.repo === "string" ? view.repo : null;
+    const entries = objects(view.entries);
+    const top = h("div", "top", null, "top");
+    const row = h("div", "top-row");
+    row.append(h("h1", null, "Changelog"), stamp(view));
+    top.append(row);
+    const parts = [top, changelogFilter(repos, filter)];
+    const stale = changelogStale(repos, now);
+    if (stale !== null) parts.push(stale);
+    if (entries.length > 0) parts.push(changelogList(entries, now));
+    else if (parse(isObject(view.asOf) ? view.asOf.rollout : null) !== null && !list(view.held).includes("rollout") && !repos.some((repo) => repo.stale === true)) {
+      parts.push(h("p", "muted cl-empty", "No changelog entries have landed yet.", "cl-empty"));
+    }
+    const foot = changelogFoot(view, filter);
+    if (foot !== null) parts.push(foot);
+    // Rollout is this screen's only source, so an unread one still draws its note rather than leave the screen silent.
+    parts.push(sources(view, ["rollout"], true));
+    const out = document.createDocumentFragment();
+    out.append(pane("whole", ...parts));
+    return out;
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // Talk page
   // ---------------------------------------------------------------------------------------------
 
@@ -3299,13 +3503,15 @@
    * so an ask whose recommendation changed, or a rollout just marked, shows the new text now in both
    * panes rather than on the next poll; a fetch that fails draws the last reading instead. An answer
    * arriving after the shell moved to another screen visit draws nothing, so a reading is never drawn
-   * through another screen's renderer.
+   * through another screen's renderer, and neither does a Changelog answer for a count or filter the
+   * screen no longer asks for, so a late shorter list never replaces the longer one Show older drew.
    */
   async function refreshView() {
     const here = visit;
     try {
-      const [read] = await Promise.all([fetchView(page.url()), fetchBeside()]);
-      if (here !== visit) return;
+      const url = page.url();
+      const [read] = await Promise.all([fetchView(url), fetchBeside()]);
+      if (here !== visit || (screen === "changelog" && url !== changelogUrl())) return;
       const view = await acceptView(read, here);
       if (view === null || here !== visit) return;
       lastView = view;
@@ -5249,6 +5455,7 @@
     { screen: "today", glyph: "◉", words: "Today", marks: ["today"] },
     { screen: "workers", glyph: "▤", words: "Workers", marks: ["workers"] },
     { screen: "standup", glyph: "⌂", words: "Repos", marks: ["standup", "repo", "plan"] },
+    { screen: "changelog", glyph: "≡", words: "Changelog", marks: ["changelog"] },
     { screen: "health", glyph: "♥", words: "Health", marks: ["health"] },
   ];
 
@@ -5256,6 +5463,7 @@
    * The count beside a rail entry, or null for none: Today takes the summary's `needsYou`,
    * Workers the Workers reading's `tiles.working` where the shell holds one, else the number of
    * standup repos working from the standup reading it holds, and Health the capacity verdict word.
+   * Repos and Changelog carry none.
    */
   function railCount(entry) {
     if (entry.screen === "today") {
@@ -5279,7 +5487,7 @@
   }
 
   /**
-   * The rail: the brand, a link to the root path and so to Today, the four entries with their counts, the entry of the screen drawn marked,
+   * The rail: the brand, a link to the root path and so to Today, the five entries with their counts, the entry of the screen drawn marked,
    * and at the foot the sibling pills above the sandbox's name. On a phone the stylesheet lays it
    * as the bottom tab bar.
    */
@@ -5610,13 +5818,15 @@
     const here = visit;
     let failure = null;
     try {
-      const [view] = await Promise.all([fetchView(page.url()), fetchSiblings(), fetchSummary(), fetchBeside()]);
+      const url = page.url();
+      const [view] = await Promise.all([fetchView(url), fetchSiblings(), fetchSummary(), fetchBeside()]);
       if (here !== visit) return;
       try {
         const shown = await acceptView(view, here);
         if (here !== visit) return;
-        if (shown === null) {
-          // An answer the page has moved past: nothing is drawn and the last good view stays.
+        if (shown === null || (screen === "changelog" && url !== changelogUrl())) {
+          // An answer the page has moved past, a Changelog answer for a count or filter it no longer
+          // asks for among them: nothing is drawn and the last good view stays.
           pollTimer = setTimeout(poll, POLL_MS);
           return;
         }
@@ -5697,6 +5907,8 @@
     // Workers reading the rail's count reads. The standup is kept where the list it draws stays on the
     // page, so the list is drawn from it at once.
     askToday = null;
+    changelogHeld.count = CHANGELOG_STEP;
+    changelogHeld.open.clear();
     if (!listKept) standupView = null;
     workersView = null;
     if (!planToPlan) repoBeside = null;

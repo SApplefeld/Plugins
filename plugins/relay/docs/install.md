@@ -603,8 +603,9 @@ deploy, or what a repository that ships by `publish-*` tags has on its default b
 newest one, need git 2.37 or later on the scheduled task account's `PATH`. The reader finds repositories
 through the `CHANNEL_BOARD_PROJECTS` roots and the roster personas' working directories, and fetches
 over https under the task account's stored git credential. Mark rolled out and Mark published also need a committer
-identity, `user.name` and `user.email`, in that account's git config. A host without git draws no
-rollout card, and every other page works as before. [`operations.md`](operations.md) names the tag
+identity, `user.name` and `user.email`, in that account's git config. The Changelog screen reads
+each repository's changelog entries through the same reader, so it needs git too. A host without
+git draws no rollout card and no changelog entries, and every other page works as before. [`operations.md`](operations.md) names the tag
 convention and the undo command.
 
 On Windows, allow the web port inbound on the Tailscale interface. Windows Firewall can place that
