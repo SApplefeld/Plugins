@@ -165,6 +165,35 @@ export function closingLeafObjective(planPath: string): string {
   return `Set ${planPath} Status to Complete`;
 }
 
+// The open closing leaf under `plan`, or undefined where it has none: a child
+// the controller added (source "controller"), whose objective is the plan's
+// closing-leaf text and whose status is neither complete nor abandoned. A
+// worker's task with the same objective is not one. Derived from the tree on
+// every read, so no field records it.
+export function closingLeafOf(state: Pick<AgentState, "goals">, plan: GoalNode): GoalNode | undefined {
+  if (!plan.planPath) return undefined;
+  const objective = closingLeafObjective(plan.planPath);
+  return state.goals.find((g) => g.parentId === plan.id && g.objective === objective
+    && g.source === "controller" && g.status !== "complete" && g.status !== "abandoned");
+}
+
+// Whether `node` is its parent's open closing leaf: the parent carries a
+// planPath and closingLeafOf reads this node under it. The texts that tell an
+// active entry how to close choose the closing leaf's form by this test.
+export function isClosingLeaf(state: Pick<AgentState, "goals">, node: GoalNode): boolean {
+  const parent = node.parentId ? state.goals.find((g) => g.id === node.parentId) : undefined;
+  return parent !== undefined && !!parent.planPath && closingLeafOf(state, parent)?.id === node.id;
+}
+
+// The closing sentence a plan's closing leaf reads in place of the one that
+// asks for goal_done, in the [GOAL TREE] block and in both idle nudges, since
+// goal_done on the leaf is refused while the document reads a Status short of
+// Complete. The path is store text reaching the model inside a line the plugin
+// composes, so it is folded onto one line and its brackets are neutralized.
+export function closingLeafLine(planPath: string): string {
+  return `This entry is a plan's closing leaf, which closes itself once the plan document ${bracketSafeText(oneLine(planPath))} reads Complete and its checkout is clean and pushed: goal_done on it is refused while that document reads a Status short of Complete and closes the leaf once the document reads Complete, so the step is to carry that document to Complete.`;
+}
+
 // A plan document's Status value as the walk up and goal_done quote it: one
 // line, its brackets neutralized, cut to 80 characters, since the value is
 // text a repository supplies and reaches the model.

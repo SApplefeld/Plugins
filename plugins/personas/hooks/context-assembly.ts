@@ -23,6 +23,7 @@ import type { AgentState, AskEntry, AutonomyLevel, GoalNode, TaskItem } from "./
 import { ASKS_OPEN_MAX, TURN_BUDGET_REASON, bracketSafeText, envNotable, hasStartableWork, headPoints, oneLine, openAskEntries, openGoals, planHolderOf, recordShownMemory, stallPartsText } from "./agent-state";
 import { TURN_END_SOURCE } from "./follow-ups";
 import { DONE_HOLD_REASON, goalContextText } from "./goal-persona";
+import { closingLeafLine, isClosingLeaf } from "./plan-route";
 import { STRETCH_SOURCE } from "./stretch-distillation";
 
 // The marker opening a follow-up line, by the entry's source. A
@@ -229,6 +230,13 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
     // The seeded root's done statements and turn count, spliced after the
     // path, and empty for a root goal_create made.
     const goalPart = goalContextText(root);
+    // The block's closing sentence. A plan's closing leaf reads the sentence
+    // naming its wait, since goal_done on it is refused while the plan
+    // document reads a Status short of Complete; every other entry reads the
+    // goal_done one.
+    const closeLine = parent?.planPath && isClosingLeaf(state, activeNode)
+      ? closingLeafLine(parent.planPath)
+      : `Close this step with goal_done, whose description says what the call does next.`;
     const goalBlock =
       `[GOAL TREE]\n` +
       `Active: ${activeNode.kind} ${activeNode.id}${roundText} | ${oneLine(activeNode.objective)}\n` +
@@ -239,7 +247,7 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
       lastNote +
       openAsksPart +
       `Keep working toward this objective. If the user's current request conflicts with it, follow the user.\n` +
-      `Close this step with goal_done, whose description says what the call does next.`;
+      closeLine;
     contextBlocks.push(goalBlock);
     // L17: log each injected block.
     try { log(`Agentic: [GOAL TREE] injected for ${activeNode.id}`); } catch { /* non-fatal */ }

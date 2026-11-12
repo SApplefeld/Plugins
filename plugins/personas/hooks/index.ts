@@ -235,7 +235,7 @@ import { ATTACHMENT_WITHHELD, BLOCK_WITHHELD, bodyFileRefusal, PROMPT_WITHHELD, 
 import { ROUTINE_LEAD_TEXT } from "./routines";
 import { drainOwnIdNote, setOwnSessionId } from "./redactor-detect";
 import { type ExpectedTurn, turnTextEquals, findExpectedTurn, type ChannelSender as ChannelSenderFromModule, OPERATOR_SENDER, ASKED_BY_MAX_CHARS as ASKED_BY_MAX_CHARSFromModule, channelSenderOf as channelSenderOfFromModule, TASK_TEXT_MAX_CHARS as TASK_TEXT_MAX_CHARSFromModule, TASK_ID_MAX_CHARS as TASK_ID_MAX_CHARSFromModule, type SubmitOutcome, removeExpectedTurn, CHANNEL_SEGMENT_PATTERN, CHANNEL_SEGMENT_MAX_BYTES, channelSegmentPath } from "./channel-text";
-import { TURN_PLAN_EDITS_MAX as TURN_PLAN_EDITS_MAXFromModule, namesPlanDocument, planPathUnderCwd as planPathUnderCwdFromModule, reactivateAskedEntry, isPlanEntry, PLAN_CHECKOUT_TIMEOUT_MS, closingLeafObjective, planStatusText } from "./plan-route";
+import { TURN_PLAN_EDITS_MAX as TURN_PLAN_EDITS_MAXFromModule, namesPlanDocument, planPathUnderCwd as planPathUnderCwdFromModule, reactivateAskedEntry, isPlanEntry, PLAN_CHECKOUT_TIMEOUT_MS, closingLeafObjective, closingLeafOf, isClosingLeaf, closingLeafLine, planStatusText } from "./plan-route";
 import { MEMQ_WRITE_TIMEOUT_MS, type RecallInjection, recallGetNamesOf as recallGetNamesOfFromModule, RECOGNITION_CHECK_EVERY_MS, type NudgePrepared, nudgeToolPayload } from "./recall-text";
 import { STATE_NOT_LOADED_STORE_CAUSE, STORE_EMPTY_AT_START, STORE_UNREADABLE_AT_START, readPersonaStore, HEARTBEAT_FILENAME, PERSONA_STORE_FILENAME, YIELD_LOG_FILENAME, GOAL_HISTORY_FILENAME, METER_DRAIN_EVERY_MS, METER_DRAIN_TIMEOUT_MS, personaStoreId as personaStoreIdFromModule } from "./store-files";
 import { isWorkTool, isNudgeCountWork, type StepWatch, stepWatchOf, nextStepToolsValue, stepEffortRewrite, TURN_TOOL_RING_MAX, type TurnToolFlags, freshTurnToolFlags, RECAP_TIMEOUT_MS, RECAP_RECENT_MS, RECAP_OPERATOR_MS, recapTimeOf, recapAgeText } from "./turn-state-text";
@@ -3836,16 +3836,10 @@ async function readPlanCheckout(dp: any, dir: string): Promise<{ upstream: boole
   };
 }
 
-// The open closing leaf under `plan`, or undefined where it has none: a child
-// the controller added (source "controller"), whose objective is the plan's
-// closing-leaf text and whose status is neither complete nor abandoned. A
-// worker's task with the same objective is not one. Derived from the tree on
-// every read, so no field records it.
+// The open closing leaf under `plan`, or undefined where it has none, as
+// closingLeafOf in plan-route.ts defines it over this session's tree.
 function openClosingLeafOf(plan: GoalNode): GoalNode | undefined {
-  if (!plan.planPath) return undefined;
-  const objective = closingLeafObjective(plan.planPath);
-  return sess.state.goals.find((g) => g.parentId === plan.id && g.objective === objective
-    && g.source === "controller" && g.status !== "complete" && g.status !== "abandoned");
+  return closingLeafOf(sess.state, plan);
 }
 
 // Adds the closing leaf under `plan`, held open while its document reads
@@ -6596,6 +6590,19 @@ export const register: Register = async (on, options) => {
         // architectLine/expiredAskLine declarations directly above
         // nudgeText.
         const planLine = planDocumentLine(sess.state, g);
+        // Each arm's closing sentence. A plan's closing leaf reads the
+        // sentence naming its wait, since goal_done on it is refused
+        // while the plan document reads a Status short of Complete;
+        // every other entry reads the arm's own goal_done sentence.
+        // Declared here, above
+        // architectLine, for the reason planLine is.
+        const leafPlan = sess.state.goals.find((p) => p.id === g.parentId);
+        const idleGapCloseLine = leafPlan?.planPath && isClosingLeaf(sess.state, g)
+          ? `${closingLeafLine(leafPlan.planPath)}\n`
+          : `Otherwise take the next concrete step and mark it finished with goal_done.\n`;
+        const idleTimeoutCloseLine = leafPlan?.planPath && isClosingLeaf(sess.state, g)
+          ? `${closingLeafLine(leafPlan.planPath)}\n`
+          : `Re-read the objective and take the next concrete step toward it, then report that step done with goal_done.\n`;
         // R8: nudge text appends goal_done instruction, and both arms
         // close with NUDGE_STATUS_LINE_TEXT, the status line the
         // nudge count reads at the nudged turn's end, followed by
@@ -6638,14 +6645,14 @@ export const register: Register = async (on, options) => {
             `If you genuinely hold a fork the plan doesn't resolve, file it in this turn with ask_open, naming the choice you proceed on as its recommend.\n` +
             `An ask does not stop the work: proceed on your recommendation while it stands. Set blocking to true and open the closing text with BLOCKED: only where the next step is irreversible without the answer, or where another plan waits on it.\n` +
             architectLine +
-            `Otherwise take the next concrete step and mark it finished with goal_done.\n` +
+            idleGapCloseLine +
             NUDGE_STATUS_LINE_TEXT +
             leadHoldLine
           : `[GOAL] The active goal is: ${g.objective}\n` +
             planLine +
             expiredAskLine +
             `The Controller detected ${idleDisplay} of idle time. ` +
-            `Re-read the objective and take the next concrete step toward it, then report that step done with goal_done.\n` +
+            idleTimeoutCloseLine +
             NUDGE_STATUS_LINE_TEXT +
             leadHoldLine;
         // The floor is spent here, before the submit, so that the open-turn
