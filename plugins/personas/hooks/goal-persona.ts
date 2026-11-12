@@ -190,6 +190,12 @@ export function turnBudgetResumeRefusedText(rootId: string): string {
 
 // The record the completed root of a goal-lifetime persona sends the
 // coordinator persona, whose fleet_retire disables the entry in the roster.
+// A root carrying a turn budget ends the record on the turns it spent of that
+// budget since its seed or its last goal_resume, the sentence the coordinator
+// passes to the roadmap persona. Each goal_resume restarts the count, so the
+// figure is a floor on what the goal cost rather than its total. A root with
+// no budget adds nothing.
 export function retireRecordText(persona: string, root: GoalNode): string {
-  return `[RETIRE] Persona '${safeText(persona)}' completed its goal "${safeText(root.objective)}" and its roster entry carries lifetime goal, so retire the entry with fleet_retire. Its store, memory and run directory stay.`;
+  const spent = typeof root.turnBudget === "number" ? ` It spent ${root.turnsSpent ?? 0} of ${root.turnBudget} turns since its seed or last resume.` : "";
+  return `[RETIRE] Persona '${safeText(persona)}' completed its goal "${safeText(root.objective)}" and its roster entry carries lifetime goal, so retire the entry with fleet_retire. Its store, memory and run directory stay.${spent}`;
 }

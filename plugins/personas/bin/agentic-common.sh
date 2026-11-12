@@ -13,15 +13,16 @@
 #           read_settings_coordinator_persona,
 #           read_settings_architect_persona,
 #           read_settings_liaison_persona,
+#           read_settings_roadmap_persona,
 #           read_settings_fleet_roster,
 #           valid_persona_name, set_aside_store,
 #           find_global_store, list_installed_stores,
 #           plugin_store_file_name, migrate_global_store,
 #           installed_id_cutover_done, poll_decisions, poll_heartbeat.
-# COORDINATOR_PERSONA, ARCHITECT_PERSONA and LIAISON_PERSONA are exported on
-# both settings branches: emit_settings_json exports the names it writes, and
-# the three read_settings_*_persona functions print the names a provided file
-# resolves to, for the caller to export.
+# COORDINATOR_PERSONA, ARCHITECT_PERSONA, LIAISON_PERSONA and ROADMAP_PERSONA
+# are exported on both settings branches: emit_settings_json exports the names
+# it writes, and the four read_settings_*_persona functions print the names a
+# provided file resolves to, for the caller to export.
 # All functions use W2 read-error semantics: a read error is a transient mid-write
 # race, treated as "live" (or "not ready"), never an abort. The timeout is the only
 # exit. refuse_if_persona_live is the one exception: it is a start-only check with
@@ -177,8 +178,8 @@ jev_live_to_csv() {
 EMIT_SETTINGS_OWNED_KEYS=(controllerTickMs nudgeIdleMs nudgeFloorMs gitProbeMs heartbeatMs staleAfterMs
   memoryGateDiscardPercent selfReviewEveryTurns costSummaryEveryNTicks costMaxNudgesPerHour
   costMaxPluginCallsPerHour costBackoffAfterTicks costBackoffMaxMs jevMode jevLive guards restartRecap
-  persona arming coordinatorPersona architectPersona liaisonPersona fleetRoster supervisorMailbox
-  heartbeatPath supervisorHeartbeatPath goalFile lifetime)
+  persona arming coordinatorPersona architectPersona liaisonPersona roadmapPersona fleetRoster
+  supervisorMailbox heartbeatPath supervisorHeartbeatPath goalFile lifetime)
 
 # --- emit_settings_json ---
 # Usage: emit_settings_json <output-file> [carry_dev_mode: 0|1]
@@ -190,6 +191,7 @@ EMIT_SETTINGS_OWNED_KEYS=(controllerTickMs nudgeIdleMs nudgeFloorMs gitProbeMs h
 #          and architectPersona (from ARCHITECT_PERSONA, which has no default:
 #          the key is omitted where the variable is unset or empty),
 #          and liaisonPersona (from LIAISON_PERSONA, omitted the same way),
+#          and roadmapPersona (from ROADMAP_PERSONA, omitted the same way),
 #          and fleetRoster (from FLEET_ROSTER, which has no default either
 #          and is omitted the same way), and supervisorMailbox, heartbeatPath
 #          and supervisorHeartbeatPath (from SUPERVISOR_MAILBOX, HEARTBEAT_PATH
@@ -213,12 +215,13 @@ EMIT_SETTINGS_OWNED_KEYS=(controllerTickMs nudgeIdleMs nudgeFloorMs gitProbeMs h
 # with a WARN line on stderr. One holding no options under that id carries
 # nothing with no line, as does one whose top level, pluginConfigs or entry
 # under that id is not an object.
-# Exports COORDINATOR_PERSONA, ARCHITECT_PERSONA and LIAISON_PERSONA to the
-# values it wrote, so a caller can compare its own persona against the same
-# names without parsing the settings file. This is the emit branch's half of
-# those exports; the provided-settings branch reads the same names back through
-# read_settings_coordinator_persona, read_settings_architect_persona and
-# read_settings_liaison_persona.
+# Exports COORDINATOR_PERSONA, ARCHITECT_PERSONA, LIAISON_PERSONA and
+# ROADMAP_PERSONA to the values it wrote, so a caller can compare its own
+# persona against the same names without parsing the settings file. This is
+# the emit branch's half of those exports; the provided-settings branch reads
+# the same names back through read_settings_coordinator_persona,
+# read_settings_architect_persona, read_settings_liaison_persona and
+# read_settings_roadmap_persona.
 emit_settings_json() {
   local out="$1" carry_dev_mode="${2:-}"
   local self_review_opts=""
@@ -311,9 +314,9 @@ emit_settings_json() {
   # Every value below is spliced into JSON unescaped, so each is held to a
   # shape that cannot close a string or an object and that JSON accepts:
   # digits with no leading zero for the numbers, letters, digits, underscore
-  # and hyphen for the persona and for coordinatorPersona, architectPersona and
-  # liaisonPersona (the same valid_persona_name check, since all four are
-  # spliced the same way).
+  # and hyphen for the persona and for coordinatorPersona, architectPersona,
+  # liaisonPersona and roadmapPersona (the same valid_persona_name check, since
+  # all five are spliced the same way).
   local var
   for var in TICK_MS NUDGE_IDLE_MS GIT_PROBE_MS NUDGE_FLOOR_MS HEARTBEAT_MS STALE_AFTER_MS \
     MEMORY_GATE_DISCARD_PERCENT \
@@ -415,6 +418,41 @@ emit_settings_json() {
     liaison_opt=",\"liaisonPersona\":\"$liaison_persona\""
   fi
   export LIAISON_PERSONA="$liaison_persona"
+  # roadmapPersona names the persona that receives the roadmap seat's standing
+  # instruction, under the liaison key's rule: no default, so an unset or empty
+  # variable omits the key and no persona receives the charter; the same
+  # character class and valid_persona_name check; "default" refused for the
+  # same reason; and a name another seat holds refused, the coordinator's, the
+  # architect's or the liaison's, since that persona's one priming write would
+  # tell one session it holds two exclusive seats. It needs no architect named
+  # beside it: its one required correspondent is the coordinator, which every
+  # launch resolves.
+  local roadmap_persona="${ROADMAP_PERSONA:-}"
+  local roadmap_opt=""
+  if [ -n "$roadmap_persona" ]; then
+    if ! valid_persona_name "$roadmap_persona"; then
+      echo "ERROR: emit_settings_json: ROADMAP_PERSONA '$roadmap_persona' may hold only letters, digits, underscore and hyphen" >&2
+      return 1
+    fi
+    if [ "$roadmap_persona" = "default" ]; then
+      echo "ERROR: emit_settings_json: ROADMAP_PERSONA must not be 'default'" >&2
+      return 1
+    fi
+    if [ "$roadmap_persona" = "$coordinator_persona" ]; then
+      echo "ERROR: emit_settings_json: ROADMAP_PERSONA and COORDINATOR_PERSONA are both '$roadmap_persona'; one persona cannot hold both seats" >&2
+      return 1
+    fi
+    if [ "$roadmap_persona" = "$architect_persona" ]; then
+      echo "ERROR: emit_settings_json: ROADMAP_PERSONA and ARCHITECT_PERSONA are both '$roadmap_persona'; one persona cannot hold both seats" >&2
+      return 1
+    fi
+    if [ "$roadmap_persona" = "$liaison_persona" ]; then
+      echo "ERROR: emit_settings_json: ROADMAP_PERSONA and LIAISON_PERSONA are both '$roadmap_persona'; one persona cannot hold both seats" >&2
+      return 1
+    fi
+    roadmap_opt=",\"roadmapPersona\":\"$roadmap_persona\""
+  fi
+  export ROADMAP_PERSONA="$roadmap_persona"
   # fleetRoster names the roster file the plugin reads: its fleet_status tool
   # on demand, and its controller tick to watch each roster persona's health.
   # The setting carries no default, as architectPersona does not: an unset or
@@ -479,7 +517,7 @@ emit_settings_json() {
   # absent from the engine's type file, and options under the other id are
   # ignored without an error, so the same options are written under both.
   # test-personas/settings-plugin-key-test.sh pins both ids against the two manifests.
-  local options="{\"controllerTickMs\":$TICK_MS,\"nudgeIdleMs\":$NUDGE_IDLE_MS,\"nudgeFloorMs\":${NUDGE_FLOOR_MS:-300000},\"gitProbeMs\":$GIT_PROBE_MS,\"heartbeatMs\":${HEARTBEAT_MS:-30000},\"staleAfterMs\":${STALE_AFTER_MS:-90000},\"memoryGateDiscardPercent\":${MEMORY_GATE_DISCARD_PERCENT:-90}$self_review_opts$cost_opts$jev_opts$guards_opts$recap_opts$persona_opt,\"arming\":\"owner\",\"coordinatorPersona\":\"$coordinator_persona\"$architect_opt$liaison_opt$roster_opt$supervisor_opts$goal_opts}"
+  local options="{\"controllerTickMs\":$TICK_MS,\"nudgeIdleMs\":$NUDGE_IDLE_MS,\"nudgeFloorMs\":${NUDGE_FLOOR_MS:-300000},\"gitProbeMs\":$GIT_PROBE_MS,\"heartbeatMs\":${HEARTBEAT_MS:-30000},\"staleAfterMs\":${STALE_AFTER_MS:-90000},\"memoryGateDiscardPercent\":${MEMORY_GATE_DISCARD_PERCENT:-90}$self_review_opts$cost_opts$jev_opts$guards_opts$recap_opts$persona_opt,\"arming\":\"owner\",\"coordinatorPersona\":\"$coordinator_persona\"$architect_opt$liaison_opt$roadmap_opt$roster_opt$supervisor_opts$goal_opts}"
   # autoContinue is the harness's own setting, at the top level rather than
   # under a plugin id. Off, a child that trips a usage limit ends its turn and
   # sits idle rather than parking until the limit resets, and the supervisor's
@@ -1128,7 +1166,7 @@ console.log(usable && value.trim() !== "default" ? value.trim() : "coordinator")
 # refuses, so a mis-set name is a refused launch named in the log rather than a
 # fleet that comes up with no architect; the error-line shape is the same, and
 # it prints nothing then. The rule itself lives in read_settings_seat_persona,
-# which the liaison key's read shares.
+# which the liaison key's read and the roadmap key's read share.
 read_settings_architect_persona() {
   read_settings_seat_persona read_settings_architect_persona architectPersona "$1" "${2:-1}"
 }
@@ -1147,14 +1185,27 @@ read_settings_liaison_persona() {
   read_settings_seat_persona read_settings_liaison_persona liaisonPersona "$1" "${2:-1}"
 }
 
+# --- read_settings_roadmap_persona ---
+# Usage: read_settings_roadmap_persona <settings-file> [dev_mode: 0|1, default 1]
+# Prints the roadmapPersona a settings file the caller provided carries, so
+# bin/supervise.sh can export ROADMAP_PERSONA on the provided branch to the
+# same value the emit branch exports. The plugin does not read the key. It
+# takes the architect key's rule through the same shared read: the loaded id
+# alone, no default, a name outside the persona class or naming "default"
+# refused with the value named, and the same refusals of a file that cannot
+# hold options, each naming this function.
+read_settings_roadmap_persona() {
+  read_settings_seat_persona read_settings_roadmap_persona roadmapPersona "$1" "${2:-1}"
+}
+
 # --- read_settings_seat_persona ---
 # Usage: read_settings_seat_persona <caller> <key> <settings-file> <dev_mode>
-# The read the two named-seat keys share, architectPersona and liaisonPersona,
-# so the rule a name spliced into a standing instruction is held to is written
-# once. Reads <key> under the plugin id dev_mode picks, as
+# The read the three named-seat keys share, architectPersona, liaisonPersona
+# and roadmapPersona, so the rule a name spliced into a standing instruction is
+# held to is written once. Reads <key> under the plugin id dev_mode picks, as
 # read_settings_coordinator_persona does, prints the name trimmed, and prints
-# the empty string for a missing key or an empty value, since neither seat has
-# a default. Refuses, with ERROR lines opening "<caller>: <file>", the shapes
+# the empty string for a missing key or an empty value, since none of the three
+# seats has a default. Refuses, with ERROR lines opening "<caller>: <file>", the shapes
 # read_settings_coordinator_persona refuses, a present value that is not a
 # string, and a name outside valid_persona_name's class or naming "default".
 read_settings_seat_persona() {

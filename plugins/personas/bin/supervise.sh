@@ -647,6 +647,29 @@ else
     echo "ERROR: $SETTINGS_FILE resolves liaisonPersona to '$LIAISON_PERSONA' while architectPersona is unset; a liaison sends its briefs to the architect, so a file naming one must name the other" | tee -a "$LOG" >&2
     exit 1
   fi
+  # The roadmap persona's name travels the same two branches under the
+  # liaison's rule, through the same shared read: no default, the persona
+  # class, and "default" refused. A name another seat holds builds two seats'
+  # role instructions into one priming write, so each of the three pairs is
+  # refused here as emit_settings_json refuses it on the other branch. The
+  # roadmap persona needs no architect named beside it.
+  if ! ROADMAP_PERSONA="$(read_settings_roadmap_persona "$SETTINGS_FILE" "$DEV_MODE" 2>>"$LOG")"; then
+    echo "ERROR: could not read roadmapPersona from $SETTINGS_FILE; see $LOG" | tee -a "$LOG" >&2
+    exit 1
+  fi
+  export ROADMAP_PERSONA
+  if [ -n "$ROADMAP_PERSONA" ] && [ "$ROADMAP_PERSONA" = "$COORDINATOR_PERSONA" ]; then
+    echo "ERROR: $SETTINGS_FILE resolves '$ROADMAP_PERSONA' as both coordinatorPersona and roadmapPersona; one persona cannot hold both seats" | tee -a "$LOG" >&2
+    exit 1
+  fi
+  if [ -n "$ROADMAP_PERSONA" ] && [ "$ROADMAP_PERSONA" = "$ARCHITECT_PERSONA" ]; then
+    echo "ERROR: $SETTINGS_FILE resolves '$ROADMAP_PERSONA' as both architectPersona and roadmapPersona; one persona cannot hold both seats" | tee -a "$LOG" >&2
+    exit 1
+  fi
+  if [ -n "$ROADMAP_PERSONA" ] && [ "$ROADMAP_PERSONA" = "$LIAISON_PERSONA" ]; then
+    echo "ERROR: $SETTINGS_FILE resolves '$ROADMAP_PERSONA' as both liaisonPersona and roadmapPersona; one persona cannot hold both seats" | tee -a "$LOG" >&2
+    exit 1
+  fi
 fi
 
 # How long a probe waits for the plugin's ack before it reads silent: an idle
@@ -4937,7 +4960,7 @@ while true; do
     # it is set.
     PERSONA="$PERSONA" NO_CHANNEL="$NO_CHANNEL" \
     COORDINATOR_PERSONA="${COORDINATOR_PERSONA:-}" ARCHITECT_PERSONA="${ARCHITECT_PERSONA:-}" \
-    LIAISON_PERSONA="${LIAISON_PERSONA:-}" GOAL_FILE="${GOAL_FILE:-}" \
+    LIAISON_PERSONA="${LIAISON_PERSONA:-}" ROADMAP_PERSONA="${ROADMAP_PERSONA:-}" GOAL_FILE="${GOAL_FILE:-}" \
     CHILD_INDEX="$CHILD_INDEX" SUPERVISOR_HOLDER_POLL_S="${SUPERVISOR_HOLDER_POLL_S:-2}" \
       bash "$PLUGIN_DIR/bin/supervise-holder.sh" \
         "$HOLDER_PID_FILE" "$OUT" "$CHILD_PID_FILE" "$ASK_REQUEST_FILE" "${PROMPT_FILE:-}" "$INTERRUPT_REQUEST_FILE" \

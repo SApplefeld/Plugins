@@ -589,12 +589,14 @@ export type CompactionPlan = {
 };
 
 // What applying a plan to a message list produced. `changed` is each call
-// whose result was dropped or cut, with its tool and input. `paired` is
-// whether every call that had its result in the list still has it there,
-// directly after the assistant message carrying the call, or has lost both.
-// `failing` counts the calls for which that does not hold, so `paired` is
-// `failing === 0`, and `broken` counts the failing ones whose result sat
-// directly after the call in the list handed in.
+// whose result was dropped or cut, with its tool and input. `paired` is the
+// pairing read's verdict, which compares each pair with where it sat before
+// the plan: whether every call that had its result in the list handed in
+// still has it, on the same side of the call and no farther from it than it
+// sat there, or has lost both. `failing` counts the calls for which that
+// does not hold, so `paired` is `failing === 0`, and `broken` counts the
+// failing ones whose result sat directly after the call in the list handed
+// in.
 export type ApplyResult = {
   messages: PassMessage[];
   counts: { keep: number; cut: number; drop: number };
@@ -980,9 +982,10 @@ export function buildPlan(
 // Why a plan does not apply to a message list, or null where it does: no
 // plan, keys that do not open the list, a kept estimate over the target or
 // no target to read it against where the size checks run, and an apply that
-// would leave a kept tool
-// result not directly after the assistant message carrying its call, or a
-// kept call without its result.
+// fails the pairing read, which compares each call and its result with where
+// the two sat before the plan: it would leave a kept call without its
+// result, a kept result without its call, or a pair farther apart than the
+// list held it, in one message or in the other order.
 export type PlanRefusal = "no-plan" | "prefix" | "over-target" | "no-target" | "pairing";
 
 // `sizeChecks` false skips the two refusals that bound the cut list's size,
@@ -1067,10 +1070,11 @@ export function isCutLine(text: string): boolean {
 // a result is cut once across passes, and so does each id in `protect`,
 // which the live pass fills from protectedResultIdsOf and the shadow
 // estimate leaves empty. `paired` reads the output against the list handed
-// in: each call whose result the list held keeps both, its result in the
-// message directly after its call's, or loses both. `failing` and `broken`
-// are pairingFailures' counts of the calls for which that does not hold.
-// Pure.
+// in, comparing each pair with where it sat before the plan: each call whose
+// result the list held keeps both, on the same side of each other and no
+// farther apart than the list held them, or loses both. `failing` and
+// `broken` are pairingFailures' counts of the calls for which that does not
+// hold. Pure.
 export function applyPlan(
   messages: readonly PassMessage[],
   plan: { verdicts: Readonly<Record<string, ToolVerdict>>; skillKept: readonly string[]; skillBodyChars?: Readonly<Record<string, number>> },
@@ -1184,7 +1188,8 @@ export function applyPlan(
     result.push(message);
   }
   // The pairing read: every call the list held with its result keeps both,
-  // the result directly after the call, or loses both.
+  // on the same side of each other and no farther apart than the list held
+  // them, or loses both.
   const { failing, broken } = pairingFailures(messages, result);
   return { messages: result, counts, keptCount: result.length, keptChars, droppedChars, skillKept, skillSuperseded, changed, paired: failing === 0, failing, broken };
 }
@@ -1202,12 +1207,19 @@ function pairPositions(messages: readonly PassMessage[]): { useAt: Map<string, n
 }
 
 // The pairing read's counts over the list a plan was applied to and the list
-// it produced. A call the first list held with its result fails where the
-// second holds one of the two without the other, or holds both with the
-// result anywhere but the message directly after the call's. `failing`
-// counts those calls, and `broken` counts the failing ones whose result sat
-// directly after the call in the first list, so the two were adjacent before
-// the plan. Pure.
+// it produced. The read compares each pair with where it sat before the
+// plan. A pair's gap is its result's message index minus its call's. A call
+// the first list held with its result passes where the second holds neither
+// of the two, or holds both with the gap it had or one strictly between zero
+// and that gap, so the two sit on the same side of each other and no farther
+// apart. It fails where the second holds one of the two without the other,
+// or holds both in one message when they were not, in the other order, or
+// farther apart. An adjacent pair therefore passes only where it stays
+// adjacent, and a pair the engine handed over apart passes where the plan
+// left it as it was or closer, which is what removing an emptied message
+// from between the two does. `failing` counts the failing calls, and
+// `broken` counts the failing ones whose result sat directly after the call
+// in the first list, so the two were adjacent before the plan. Pure.
 export function pairingFailures(before: readonly PassMessage[], after: readonly PassMessage[]): { failing: number; broken: number } {
   const was = pairPositions(before);
   const now = pairPositions(after);
@@ -1216,12 +1228,17 @@ export function pairingFailures(before: readonly PassMessage[], after: readonly 
   for (const [id, resultWas] of was.resultAt) {
     const useWas = was.useAt.get(id);
     if (useWas === undefined) continue;
+    const gapWas = resultWas - useWas;
     const u = now.useAt.get(id);
     const r = now.resultAt.get(id);
-    if ((u === undefined) !== (r === undefined) || (u !== undefined && r !== u + 1)) {
-      failing += 1;
-      if (resultWas === useWas + 1) broken += 1;
+    if (u === undefined && r === undefined) continue;
+    if (u !== undefined && r !== undefined) {
+      const gap = r - u;
+      if (gap === gapWas) continue;
+      if (gap !== 0 && Math.sign(gap) === Math.sign(gapWas) && Math.abs(gap) < Math.abs(gapWas)) continue;
     }
+    failing += 1;
+    if (gapWas === 1) broken += 1;
   }
   return { failing, broken };
 }

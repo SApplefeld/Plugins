@@ -48,6 +48,7 @@ export const ROSTER_FIELDS = [
   "coordinatorPersona",
   "architectPersona",
   "liaisonPersona",
+  "roadmapPersona",
   "fleetRoster",
   "jevMode",
   "jevLive",
@@ -83,6 +84,7 @@ export type WrittenRosterEntry = {
   coordinatorPersona?: string;
   architectPersona?: string;
   liaisonPersona?: string;
+  roadmapPersona?: string;
   fleetRoster?: string;
   jevMode?: string;
   jevLive?: string[];
@@ -163,6 +165,7 @@ const GLOB_CHECKED_FIELDS: readonly string[] = [
   "coordinatorPersona",
   "architectPersona",
   "liaisonPersona",
+  "roadmapPersona",
   "fleetRoster",
   "jevLive",
   "args",
@@ -283,6 +286,7 @@ function stringProblem(field: string, value: unknown, rosterPath: string): strin
     case "coordinatorPersona":
     case "architectPersona":
     case "liaisonPersona":
+    case "roadmapPersona":
       // agentic-common.sh emit_settings_json: valid_persona_name, and never
       // `default`, the persona every unnamed launch carries.
       if (!ROLE_NAME_RE.test(value)) return "may hold only letters, digits, underscore and hyphen";
@@ -403,14 +407,17 @@ function fieldProblem(field: RosterField, value: unknown, rosterPath: string): s
 // The persona-role rules bin/agentic-common.sh emit_settings_json checks at
 // each launch against the names the entry itself carries: the coordinator
 // defaults to `coordinator` where the entry names none, the architect cannot
-// be the coordinator, and the liaison cannot be either and needs an architect
-// beside it. Each field's own charset and `default` rule is the validator's;
-// this reads the three names together. Exported on its own so the add tool
-// can name the rule it refused on.
-export function rosterRoleProblem(entry: { coordinatorPersona?: unknown; architectPersona?: unknown; liaisonPersona?: unknown }): string | null {
+// be the coordinator, the liaison cannot be either and needs an architect
+// beside it, and the roadmap persona cannot be any of the three and needs no
+// architect, since its one required correspondent is the coordinator. Each
+// field's own charset and `default` rule is the validator's; this reads the
+// four names together. Exported on its own so the add tool can name the rule
+// it refused on.
+export function rosterRoleProblem(entry: { coordinatorPersona?: unknown; architectPersona?: unknown; liaisonPersona?: unknown; roadmapPersona?: unknown }): string | null {
   const coordinator = typeof entry.coordinatorPersona === "string" ? entry.coordinatorPersona : "coordinator";
   const architect = typeof entry.architectPersona === "string" ? entry.architectPersona : "";
   const liaison = typeof entry.liaisonPersona === "string" ? entry.liaisonPersona : "";
+  const roadmap = typeof entry.roadmapPersona === "string" ? entry.roadmapPersona : "";
   if (architect !== "" && architect === coordinator) {
     return `field 'architectPersona' and the coordinator persona are both '${architect}'; one persona cannot hold both seats`;
   }
@@ -418,6 +425,11 @@ export function rosterRoleProblem(entry: { coordinatorPersona?: unknown; archite
     if (liaison === coordinator) return `field 'liaisonPersona' and the coordinator persona are both '${liaison}'; one persona cannot hold both seats`;
     if (liaison === architect) return `field 'liaisonPersona' and field 'architectPersona' are both '${liaison}'; one persona cannot hold both seats`;
     if (architect === "") return "field 'liaisonPersona' needs field 'architectPersona', since the liaison sends its briefs to the architect";
+  }
+  if (roadmap !== "") {
+    if (roadmap === coordinator) return `field 'roadmapPersona' and the coordinator persona are both '${roadmap}'; one persona cannot hold both seats`;
+    if (roadmap === architect) return `field 'roadmapPersona' and field 'architectPersona' are both '${roadmap}'; one persona cannot hold both seats`;
+    if (roadmap === liaison) return `field 'roadmapPersona' and field 'liaisonPersona' are both '${roadmap}'; one persona cannot hold both seats`;
   }
   return null;
 }

@@ -194,7 +194,7 @@ import { RECOGNITION_OPS_MAX, nudgeClaim, nudgeCollectHits, nudgeDedupKey, nudge
 import { assembleContext, deliveryWithContext, type ContextSources } from "./context-assembly";
 import { cacheModelSwitch, type CacheClockState } from "./cache-clock";
 import { FORK_IDLE } from "./fork-watch";
-import { compactionAfterDetail, compactionAfterRoute, compactionPassEvent, compactionPassOptionOf, compactionPassReading, compactionPassShadow, compactionPassStep, compactionPlanDetail, compactionReadingDetail, compactionRerunAtCompaction, compactionSummaryUsageDetail, compactionSurveyDetail, newCompactionPassState, type CompactionAfterArm, type CompactionPassDeps, type CompactionPassOption, type CompactionPassReading } from "./compaction-pass";
+import { compactionAfterDetail, compactionAfterRoute, compactionCutStanding, compactionHandUpOptionOf, compactionPassEvent, compactionPassOptionOf, compactionPassReading, compactionPassShadow, compactionPassStep, compactionPlanDetail, compactionReadingDetail, compactionRerunAtCompaction, compactionSummaryUsageDetail, compactionSurveyDetail, newCompactionPassState, type CompactionAfterArm, type CompactionPassDeps, type CompactionPassOption, type CompactionPassReading } from "./compaction-pass";
 import { endStretchAtCompaction, markStretchApplied, stretchInstructions, WRITER_TAG_STRETCH, type StretchDeps } from "./stretch-distillation";
 import { boundaryBankCompactionBoundary, boundaryKitInstallPathOf, boundaryKitMemq, boundaryKitNodeRun, firstFailureToday, MEMQ_UNAVAILABLE_LINES, type KitBoundaryDeps, type KitMemqOptions, type KitMemqResult } from "./memq-boundary";
 import { emitGoalDiff, emitGoalDiffFrom, emitKitEvent, followKitEventsOwner, newKitEventsState, type KitEventDeps } from "./kit-events";
@@ -4924,14 +4924,24 @@ export const register: Register = async (on, options) => {
   // folds any value outside "off" and "shadow" to "off" on its own.
   const jevMode = typeof cfg.jevMode === "string" ? cfg.jevMode : "shadow";
 
-  // The compaction pass's switch: off, shadow or live, and live where the
+  // The compaction pass's switch: off, shadow or live, and shadow where the
   // configuration carries no value, a fallback that sits in code for
-  // jevMode's reason. live is read as live and acts as shadow. Any other
-  // value reads as off, and session.start logs the refused value once, where
-  // a state exists to log against.
+  // jevMode's reason, so the pass reports and changes no message unless the
+  // plugin's options name live. Any other value reads as off, and
+  // session.start logs the refused value once, where a state exists to log
+  // against.
   const compactionPassRead = compactionPassOptionOf(cfg.compactionPass);
   const compactionPassOption: CompactionPassOption = compactionPassRead.option;
   let compactionPassInvalid: string | null = compactionPassRead.invalid;
+
+  // The hand-up switch, compactionHandUp: on or off, and off where the
+  // configuration carries no value. It rides the pass's state, where the
+  // timer's step and the session.compact hook read it, and only a live pass
+  // acts on it. Any other value reads as off and is logged once on the
+  // pattern above.
+  const compactionHandUpRead = compactionHandUpOptionOf(cfg.compactionHandUp);
+  compactionPass.handUp = compactionHandUpRead.option;
+  let compactionHandUpInvalid: string | null = compactionHandUpRead.invalid;
 
   // The guard seam's switch: off, shadow or live, and live where the
   // configuration carries no value, a fallback that sits in code for
@@ -5879,6 +5889,7 @@ export const register: Register = async (on, options) => {
           coordinatorPersona: { type: "string", description: "The coordinatorPersona, the coordinator seat's persona, coordinator where omitted." },
           architectPersona: { type: "string", description: "The architectPersona, the architect seat's persona, never the coordinator's." },
           liaisonPersona: { type: "string", description: "The liaisonPersona, the liaison seat's persona, which needs architectPersona and differs from both seats." },
+          roadmapPersona: { type: "string", description: "The roadmapPersona, the roadmap seat's persona, which differs from the three other seats." },
           fleetRoster: { type: "string", description: "The roster its plugin watches, which must be this same roster." },
           jevMode: { type: "string", description: "The jevMode setting, off or shadow." },
           jevLive: { type: "array", description: "The jevLive ids, from the promotable set: turn-open, turn-disposition, memory-kind, turn-score, controller-decision, step-effort.", items: { type: "string" } },
@@ -5902,8 +5913,8 @@ export const register: Register = async (on, options) => {
         "directory, store and goal tree stay. Refused when this session does not hold the coordinator persona, when no " +
         "roster is set, when the roster cannot be read or is not an array, when no entry carries the name, when the entry " +
         "is already disabled, when the persona is this session's own (supervisor_shutdown stops that one), and when another " +
-        "enabled entry names the persona as its coordinatorPersona, architectPersona or liaisonPersona. Nothing is written " +
-        "on a refusal. The one caller it serves is the session holding the coordinator persona.",
+        "enabled entry names the persona as its coordinatorPersona, architectPersona, liaisonPersona or roadmapPersona. " +
+        "Nothing is written on a refusal. The one caller it serves is the session holding the coordinator persona.",
       inputSchema: {
         type: "object",
         properties: {
@@ -6192,6 +6203,18 @@ export const register: Register = async (on, options) => {
         detail: `compactionPass ${headPoints(bracketSafeText(oneLine(compactionPassInvalid)), 50)} is not off, shadow or live; using off`,
       });
       compactionPassInvalid = null;
+    }
+
+    // The hand-up switch's refused value, logged and cleared the same way,
+    // and folded and bounded the same way before it rides a line.
+    if (compactionHandUpInvalid !== null) {
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "monitor",
+        action: "setting_clamped",
+        detail: `compactionHandUp ${headPoints(bracketSafeText(oneLine(compactionHandUpInvalid)), 50)} is not on or off; using off`,
+      });
+      compactionHandUpInvalid = null;
     }
 
     // The guards option, read at registration too, is logged and cleared on
@@ -7034,20 +7057,24 @@ export const register: Register = async (on, options) => {
     // a marked one, which is the module's own manual compaction carrying
     // COMPACT_CUT_MARKER as its whole instructions, read the plan against
     // the hook's messages. At an auto or precompute the plan applies where it
-    // covers them with every kept call beside its result, whatever its kept
-    // estimate against the target, and the applied list goes down through
-    // next, so the engine's summary runs over the cut list; kept messages
-    // carry their handles, so the engine reads each as its own. Where it does
-    // not apply, next summarizes the untouched messages. A marked compaction
-    // never calls next: an applying plan, which there must also sit under
-    // target, is handed up as the hook's own result, and otherwise it returns
-    // a skip naming why, so the engine never summarizes on the module's
-    // request. A marked compaction runs later than the tick that
-    // queued it, so it cuts only where the cache still reads expired, a turn
-    // in between having re-warmed it, and where the plan as read now still
-    // saves COMPACT_CUT_MIN_SAVED_TOKENS. Under shadow and off none of this
-    // runs, and a manual compaction with any other instructions passes down
-    // as today. Where a plan covers the messages, the conversation's Messages
+    // covers them and leaves no call worse paired than the engine handed it,
+    // whatever its kept estimate against the target, and the applied list
+    // goes down through next, so the engine's summary runs over the cut list;
+    // kept messages carry their handles, so the engine reads each as its own.
+    // Where it does not apply, next summarizes the untouched messages. A
+    // marked compaction never calls next: an applying plan, which there must
+    // also sit under target, is handed up as the hook's own result, and
+    // otherwise it returns a skip naming why, so the engine never summarizes
+    // on the module's request. While the hand-up switch, compactionHandUp,
+    // reads off, every marked compaction is refused with hand-up-off, ahead
+    // of any other reason, a marker typed by hand included, so nothing is
+    // handed up where the plugin's options did not turn the switch on. A
+    // marked compaction runs later than the tick that queued it, so it cuts
+    // only where the cache still reads expired, a turn in between having
+    // re-warmed it, and where the plan as read now still saves
+    // COMPACT_CUT_MIN_SAVED_TOKENS. Under shadow and off none of this runs,
+    // and a manual compaction with any other instructions passes down as
+    // today. Where a plan covers the messages, the conversation's Messages
     // API form is read once first: a result whose user message carries a
     // block the rows do not, an image or a document, is kept, so that message
     // is untouched and stands as the engine has it. A read that fails refuses
@@ -7095,7 +7122,8 @@ export const register: Register = async (on, options) => {
     const liveRefusal: Record<string, string> = apiWhy === null ? {} : { plan: "none", why: apiWhy };
     let markedWhy: string | null = null;
     if (passLive && marked) {
-      if (reading === null) markedWhy = "the plan could not be read";
+      if (compactionPass.handUp !== "on") markedWhy = "hand-up-off";
+      else if (reading === null) markedWhy = "the plan could not be read";
       else if (applies === null) markedWhy = reading.why ?? apiWhy ?? "no-plan";
       else if (!cacheExpired(Date.now(), compactionPass.lastMainTurnEndedAt, false)) markedWhy = "cache-warm";
       else if (!cutWorthStarting(tokensOf(applies.droppedChars))) markedWhy = "under-minimum";
@@ -7190,15 +7218,18 @@ export const register: Register = async (on, options) => {
     // beside whether the compaction was marked, whether the plan was handed
     // up, and what the summary read: cut where the cut list went down to it,
     // whole where it read the untouched messages, none where the marked
-    // hand-up answered. Where next answered, tokensBefore, tokensAfter and the
-    // summarizer's usage are the engine's as it reported them; a hand-up has
-    // none. Then the rerun windows: a compaction that ran, a precompute aside
-    // since it installs nothing, ends the open ones and starts one per result
-    // the cut list or the hand-up dropped or cut. Each failure is caught,
-    // since a throw from this hook fails the compaction.
+    // hand-up answered. cutStanding is how many of the applied plan's changed
+    // calls still stand in the messages the compaction resolved to, null
+    // where no plan applied. Where next answered, tokensBefore, tokensAfter
+    // and the summarizer's usage are the engine's as it reported them; a
+    // hand-up has none. Then the rerun windows: a compaction that ran, a
+    // precompute aside since it installs nothing, ends the open ones and
+    // starts one per result the cut list or the hand-up dropped or cut. Each
+    // failure is caught, since a throw from this hook fails the compaction.
     if (passLive && (gated || marked) && ran) {
       try {
         const engine = handUp === null;
+        const appliedPlan = handUp ?? cut;
         await compactionPassEvent(compactionPassDepsOf($), {
           trigger: e.trigger,
           option: compactionPassOption,
@@ -7208,6 +7239,7 @@ export const register: Register = async (on, options) => {
           marked,
           handedUp: !engine,
           summarized: !engine ? "none" : cut !== null ? "cut" : "whole",
+          cutStanding: appliedPlan === null ? null : compactionCutStanding(appliedPlan.changed, result.messages),
           tokensBefore: engine && typeof result.tokensBefore === "number" ? result.tokensBefore : null,
           tokensAfter: engine && typeof result.tokensAfter === "number" ? result.tokensAfter : null,
           ...compactionSummaryUsageDetail(engine ? result.usage : undefined),

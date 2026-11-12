@@ -98,11 +98,27 @@ const COMPACTION_SITE = "compaction";
 // The pass option's three values. Any other value reads as off.
 export type CompactionPassOption = "off" | "shadow" | "live";
 
-// The option as the configuration spells it: one of the three, or off with
-// the value that was refused, so session.start can log it once.
+// The option as the configuration spells it: one of the three, shadow where
+// it carries no value, so the pass reports and changes no message unless the
+// plugin's options name live, or off with the value that was refused, so
+// session.start can log it once.
 export function compactionPassOptionOf(value: unknown): { option: CompactionPassOption; invalid: string | null } {
-  if (value === undefined) return { option: "live", invalid: null };
+  if (value === undefined) return { option: "shadow", invalid: null };
   if (value === "off" || value === "shadow" || value === "live") return { option: value, invalid: null };
+  return { option: "off", invalid: typeof value === "string" ? value : JSON.stringify(value) ?? String(value) };
+}
+
+// The hand-up switch's two values. It holds the marked compaction, the one
+// route that replaces the conversation with the cut list and no summary, and
+// it acts only under a live pass.
+export type CompactionHandUpOption = "on" | "off";
+
+// The switch as the configuration spells it: on or off, off where it carries
+// no value, or off with the value that was refused, so session.start can log
+// it once.
+export function compactionHandUpOptionOf(value: unknown): { option: CompactionHandUpOption; invalid: string | null } {
+  if (value === undefined) return { option: "off", invalid: null };
+  if (value === "on" || value === "off") return { option: value, invalid: null };
   return { option: "off", invalid: typeof value === "string" ? value : JSON.stringify(value) ?? String(value) };
 }
 
@@ -113,6 +129,10 @@ export function compactionPassOptionOf(value: unknown): { option: CompactionPass
 // itself lives in the engine's state, which the host keeps across a reload,
 // so a result is asked about once per session.
 export type CompactionPassState = {
+  // The hand-up switch as the configuration reads, set once where
+  // hooks/index.ts reads the pass option. While it reads off, the timer
+  // starts no marked compaction and the hook refuses one.
+  handUp: CompactionHandUpOption;
   // The plan as last built, or null before the first build.
   plan: CompactionPlan | null;
   // The verdict cache, read from the engine's state at the first tick that
@@ -131,7 +151,8 @@ export type CompactionPassState = {
   // meter row carries it, or 0 where none has; the cache clock runs from it.
   lastMainTurnEndedAt: number;
   // Whether the current idle stretch has had its cold_cache line, and under
-  // live its marked compaction. A turn ending opens a new stretch.
+  // live with the hand-up switch on its marked compaction. A turn ending
+  // opens a new stretch.
   coldCacheJournaled: boolean;
   // Whether the seam has answered no_key in this session. Once it has, the
   // step still builds its plan from the cache and asks nothing more, since
@@ -202,7 +223,7 @@ export function compactionAfterDetail(
 
 // A fresh state, as a session starts with it.
 export function newCompactionPassState(): CompactionPassState {
-  return { plan: null, cache: null, cacheVersion: 0, planCacheVersion: -1, busy: false, disabledJournaled: false, lastMainTurnEndedAt: 0, coldCacheJournaled: false, seamNoKey: false, rerun: null, rerunWrites: Promise.resolve(), after: null };
+  return { handUp: "off", plan: null, cache: null, cacheVersion: 0, planCacheVersion: -1, busy: false, disabledJournaled: false, lastMainTurnEndedAt: 0, coldCacheJournaled: false, seamNoKey: false, rerun: null, rerunWrites: Promise.resolve(), after: null };
 }
 
 // The verdict cache, read from the engine's state once and held. A read
@@ -279,20 +300,40 @@ export function compactionSurveyDetail(messages: unknown): { pairCalls: number; 
   return { pairCalls: survey.calls, pairApart: survey.apart, pairApartBatch: survey.apartBatch };
 }
 
+// How many of an applied plan's changed calls still stand in the messages a
+// compaction left: those whose id a row there carries as a tool call or a
+// tool result, each call counted once. A value that is not a list holds
+// none, and a row or a block that is not an object is passed over, so the
+// count is over what can be read.
+export function compactionCutStanding(changed: ReadonlyArray<{ id: string }>, messages: unknown): number {
+  const held = new Set<string>();
+  for (const row of Array.isArray(messages) ? (messages as unknown[]) : []) {
+    if (typeof row !== "object" || row === null) continue;
+    const { toolUses, toolResults } = row as { toolUses?: unknown; toolResults?: unknown };
+    for (const blocks of [toolUses, toolResults]) {
+      for (const block of Array.isArray(blocks) ? (blocks as unknown[]) : []) {
+        const id: unknown = typeof block === "object" && block !== null ? (block as { tool_use_id?: unknown }).tool_use_id : undefined;
+        if (typeof id === "string") held.add(id);
+      }
+    }
+  }
+  return changed.filter((c) => held.has(c.id)).length;
+}
+
 // The pass's tick, run from the heartbeat in an armed session, owner or
 // reader, and from the one timer an unarmed session starts for it. With the
 // compactionPass option off it does nothing. Where the seam's mode sends
 // nothing, no plan can exist, so it journals one disabled line per session
-// and does nothing more. With no turn open it reads the
-// usage with its breakdown and, where a plan stands and the cache has
-// expired, reads the rows and journals one cold_cache line for the idle
-// stretch if the plan still covers them, and under live starts one marked
-// compaction beside it. Then, where the fill reaches the floor, read against
-// the auto-compaction threshold, and where no plan stands, ten
-// messages have arrived since the last one, or verdicts have landed since
-// it was built, it reads both forms of the transcript, surveys them, asks
-// tool-result-stale of at most COMPACT_ASK_BATCH results that hold no
-// verdict, each through shadowAsk as its own call of site compaction, and
+// and does nothing more. With no turn open it reads the usage with its
+// breakdown and, where a plan stands and the cache has expired, reads the
+// rows and journals one cold_cache line for the idle stretch if the plan
+// still covers them, and under live, where the hand-up switch reads on,
+// starts one marked compaction beside it. Then, where the fill reaches the
+// floor, read against the auto-compaction threshold, and where no plan
+// stands, ten messages have arrived since the last one, or verdicts have
+// landed since it was built, it reads both forms of the transcript, surveys
+// them, asks tool-result-stale of at most COMPACT_ASK_BATCH results that hold
+// no verdict, each through shadowAsk as its own call of site compaction, and
 // builds the plan from the cache as it stands. Once the seam has answered
 // no_key in the session, the step builds the plan and asks nothing. A verdict
 // lands through the ask's result hook, into the cache and the engine's state,
@@ -345,25 +386,28 @@ export async function compactionPassStep(deps: CompactionPassDeps, option: Compa
       if (current !== null && !turnOpen() && keysPrefix(standing.keys, current)) {
         deps.pass.coldCacheJournaled = true;
         // Under live the plan must save at least COMPACT_CUT_MIN_SAVED_TOKENS
-        // for this moment to start a cut; a live line declining for that
-        // reason names it as its why.
-        const startCut = option === "live" && cutWorthStarting(standing.droppedTokens);
+        // for this moment to start a cut, and the hand-up switch must read
+        // on. A live line declining names its reason as its why:
+        // under-minimum first, whatever the switch reads, then hand-up-off.
+        const worth = option === "live" && cutWorthStarting(standing.droppedTokens);
+        const startCut = worth && deps.pass.handUp === "on";
         await compactionPassEvent(deps, {
           trigger: "cold_cache",
           option,
           plan: "covering",
-          why: option === "live" && !startCut ? "under-minimum" : null,
+          why: option !== "live" || startCut ? null : worth ? "hand-up-off" : "under-minimum",
           ...compactionPlanDetail(standing),
           ...compactionSurveyDetail(current),
           tokensAfter: null,
           idleS: Math.floor((now - deps.pass.lastMainTurnEndedAt) / 1000),
           messages: current.length,
         });
-        // Under live the same moment starts the marked compaction, once per
-        // idle stretch since the line above is. The engine runs it through
-        // the session.compact hook in hooks/index.ts, which cuts by the plan or
-        // skips, and never summarizes. Not awaited: the command queues until
-        // the session is idle, and a refusal is counted as one decision.
+        // Under live with the switch on, the same moment starts the marked
+        // compaction, once per idle stretch since the line above is. The
+        // engine runs it through the session.compact hook in hooks/index.ts,
+        // which cuts by the plan or skips, and never summarizes. Not awaited:
+        // the command queues until the session is idle, and a refusal is
+        // counted as one decision.
         if (startCut) {
           void Promise.resolve()
             .then(() => deps.host.runCommand({ command: "compact", args: COMPACT_CUT_MARKER }))
@@ -435,8 +479,10 @@ export async function compactionPassStep(deps: CompactionPassDeps, option: Compa
 // is never changed here. One compaction_pass line records what the plan
 // would have kept beside what the summary kept, or why no plan applied: no
 // plan, a prefix mismatch, no target, an estimate over the target, or an
-// apply that would split a call from its result. No Jev call and no model
-// call runs here: the plan is read as the timer left it.
+// apply that fails the pairing read, which compares each call and its result
+// with where the two sat before the plan and refuses one left alone or left
+// farther apart. No Jev call and no model call runs here: the plan is read
+// as the timer left it.
 export async function compactionPassShadow(deps: CompactionPassDeps, e: { trigger: string; messages?: unknown }, result: { tokensAfter?: number; skip?: string }, option: CompactionPassOption): Promise<void> {
   const reading = compactionPassReading(deps.pass, e.messages);
   await compactionPassEvent(deps, {
@@ -482,9 +528,13 @@ export function compactionSummaryUsageDetail(usage: unknown): { summaryInputToke
 
 // The compaction_pass line's plan fields for one reading, with the pairing
 // survey of the messages it read. Where the plan was applied to them, the
-// line also carries the pairing read's verdict and its two counts:
-// pairFailing, the calls that fail the read, and pairBroken, the failing
-// ones whose call and result were adjacent before the plan.
+// line also carries the pairing read's verdict and its two counts. The read
+// compares each pair with where it sat before the plan, so a pair the engine
+// handed over apart and the plan left as it was, or closer, passes.
+// pairFailing is the calls that fail the read: a call left without its
+// result, a result left without its call, and a pair left farther apart, in
+// one message or in the other order. pairBroken is the failing ones whose
+// call and result were adjacent before the plan.
 export function compactionReadingDetail(reading: CompactionPassReading): Record<string, string | number | boolean | null> {
   const applied = reading.applied;
   return {

@@ -73,6 +73,10 @@ let minted: Set<string> | null = null
 
 const TAG = /\[REDACTED-(?:SECRET|EMAIL|LITERAL)-[0-9a-f]{8}\]/g
 const WHOLE_TAG = /^\[REDACTED-(?:SECRET|EMAIL|LITERAL)-[0-9a-f]{8}\]$/
+// A placeholder's body with no bracket: the word, the kind and the hash, which
+// withFixedHashes reads. An encoder that re-spells only the brackets leaves the
+// body as written.
+const TAG_BODY = /(REDACTED-(?:SECRET|EMAIL|LITERAL)-)[0-9a-f]{8}/g
 
 // The session's own id, trimmed and lowercased, which the vault never keeps
 // however a value equal to it arrives: the harness prints that id on every
@@ -887,16 +891,19 @@ const PW_SYMBOL = /[!#$%&*()=+[\]{}<>:?@^~]/
 // The spelling every placeholder's hash is read as: a lowercase letter and a
 // digit, as most hashes hold, and no run of digits or letters that a rule of
 // looksGenerated turns on. Holding both, it reads to looksLikeName, which
-// looksSecret and urlParamSecret ask, as most hashes do.
+// looksSecret, urlParamSecret and cookieSecret ask, as most hashes do.
 const HASH_AS_READ = '1a2b3c4d'
 
-// A copy of `v` for the four checks that judge a value's shape where the
+// A copy of `v` for the five checks that judge a value's shape where the
 // value can hold a placeholder: looksGenerated on a quoted value, looksSecret
-// in the sibling test and in the SQL insert's key column, and the class
-// count, name test and entropy test of urlParamSecret. The value as written
-// is what is kept, minted and tested everywhere else.
+// in the sibling test and in the SQL insert's key column, the class count,
+// name test and entropy test of urlParamSecret, and the name, digit, letter
+// and entropy tests of cookieSecret. The copy reads a placeholder's hash as
+// HASH_AS_READ however its brackets are spelled: it finds the placeholder by
+// its body and asks for no bracket on either side. The value as written is
+// what is kept, minted and tested everywhere else.
 function withFixedHashes(v: string): string {
-  return v.replace(TAG, (tag) => `${tag.slice(0, -9)}${HASH_AS_READ}]`)
+  return v.replace(TAG_BODY, (_m, prefix: string) => prefix + HASH_AS_READ)
 }
 
 function looksGenerated(v: string): boolean {
@@ -1685,7 +1692,7 @@ function cookieSecret(raw: string, cfg: Config): boolean {
   if (cfg.allow.has(raw) || raw.includes('[REDACTED-')) return false
   const m = raw.match(COOKIE_VALUE)
   if (!m) return false
-  const body = m[1]!
+  const body = withFixedHashes(m[1]!)
   if (looksLikeName(body, true)) return false
   return /[0-9]/.test(body) && /[A-Za-z]/.test(body) && entropy(body) >= cfg.contextMinEntropy
 }

@@ -102,6 +102,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | The liaison seat's conduct in a shared client thread | `liaison` |
 | The Architect seat's conduct: a design ask, the plan written for a worker and never run, the clone, branch and report rules | `architect` |
 | A goal persona's conduct: reading its seeded root, design asks to the architect, plan reports, the turn budget and completing the root | `goal-holder` |
+| The roadmap seat's conduct: the roadmap document, an epic's brief and done statements, an epic's start and a change to a running epic | `roadmap` |
 | Parking a session at its next safe point on request | `executing-work` (the `WAITING:` stop shape) |
 | How a plan run is approved, and what holds it to completion | `executing-work` (the goal template) |
 | Dispatching this session's own subagents | doctrine (Dispatch is requested standing) |

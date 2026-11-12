@@ -112,6 +112,12 @@
       "title": "Liaison persona name",
       "description": "The persona name this file offers as the liaison: the seat several people talk with in one thread, which shapes their asks into briefs for the architect and relays status from the coordinator, and whose own launch receives the liaison charter. The supervisor reads it to build that charter and the coordinator's clause answering the liaison's status asks. The plugin does not read it: the effort gate admits an architect record on its [QUEUE] lead in whatever session it lands. The supervisor refuses a name of 'default', the coordinator's or the architect's own name, and a liaison named in a file that names no architect. Where this file names no liaison, the fleet has none and neither text is built."
     },
+    "roadmapPersona": {
+      "type": "string",
+      "default": "",
+      "title": "Roadmap persona name",
+      "description": "The persona name this file offers as the roadmap persona: the seat that settles with the operator what the product line builds and in what order, and asks the coordinator for a goal persona to hold each epic. The supervisor reads it to build the roadmap seat's priming and the coordinator's clause on the roadmap persona's asks. The plugin does not read it. The supervisor refuses a name of 'default' and the coordinator's, the architect's or the liaison's own name. Where this file names no roadmap persona, the fleet has none and neither text is built."
+    },
     "fleetRoster": {
       "type": "string",
       "default": "",
@@ -138,9 +144,15 @@
     },
     "compactionPass": {
       "type": "string",
-      "default": "live",
+      "default": "shadow",
       "title": "Compaction pass",
-      "description": "off, shadow or live, and live is the default. shadow has the module ask Jev on a timer, the heartbeat in an armed session and a timer of its own in an unarmed one, whether each old tool result is kept, cut or dropped, build a plan from those answers, and write to the decision journal what the plan would have kept at each automatic compaction and once per idle stretch past the cache life. It changes no message. live plans the same way and then acts: at an automatic compaction or its precompute it sends the plan's cut message list down to the engine's summary where the plan covers the transcript and keeps each call beside its result, and otherwise the summary runs over the whole transcript. At an expired cache it starts one marked compaction per idle stretch, only where the plan would drop at least 20,000 tokens, and that compaction cuts or skips and never summarizes. off asks nothing and writes nothing. Any other value is read as off, with one decision saying so. Under jevMode off a pass that is not off asks nothing, writes one compaction_pass_disabled line per session, armed or not, and writes no line at a compaction."
+      "description": "off, shadow or live, and shadow is the default. shadow has the module ask Jev on a timer, the heartbeat in an armed session and a timer of its own in an unarmed one, whether each old tool result is kept, cut or dropped, build a plan from those answers, and write to the decision journal what the plan would have kept at each automatic compaction and once per idle stretch past the cache life. It changes no message. live plans the same way and then acts: at an automatic compaction or its precompute it sends the plan's cut message list down to the engine's summary where the plan covers the transcript and leaves no call worse paired than the engine handed it, and otherwise the summary runs over the whole transcript. At an expired cache it starts one marked compaction per idle stretch, only where compactionHandUp reads on and the plan would drop at least 20,000 tokens, and that compaction cuts or skips and never summarizes. off asks nothing and writes nothing. Any other value is read as off, with one decision saying so. Under jevMode off a pass that is not off asks nothing, writes one compaction_pass_disabled line per session, armed or not, and writes no line at a compaction."
+    },
+    "compactionHandUp": {
+      "type": "string",
+      "default": "off",
+      "title": "Compaction hand-up",
+      "description": "on or off, off is the default, and any other value is read as off. on lets a live compaction pass start its marked compaction at an expired cache and answer it with the plan's cut message list, which replaces the conversation with no summary, and it acts only where compactionPass reads live. Under a live pass with the switch off, no marked compaction is started and one that arrives is refused with the reason hand-up-off, so the conversation stands as it was."
     },
     "guards": {
       "type": "string",

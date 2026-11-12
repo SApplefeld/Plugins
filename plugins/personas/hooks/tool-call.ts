@@ -3157,19 +3157,20 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return refuse(`'${shown}' is this session's own persona, whose lever is supervisor_shutdown.`);
     }
     // Each role field is read the way the keeper hands it to the launch.
-    // Build-SupervisorInvocation (bin/keeper-functions.ps1:313-314) skips a
+    // Build-SupervisorInvocation (bin/keeper-functions.ps1:315-316) skips a
     // value that is null or whitespace-only and passes any other value as
     // its string, untrimmed. bin/agentic-common.sh emit_settings_json then
-    // reads an unset COORDINATOR_PERSONA as coordinator (:339), so a blank
-    // coordinatorPersona names coordinator here. architectPersona and
-    // liaisonPersona take no default there, so a blank one names no persona.
+    // reads an unset COORDINATOR_PERSONA as coordinator (:342), so a blank
+    // coordinatorPersona names coordinator here. architectPersona,
+    // liaisonPersona and roadmapPersona take no default there, so a blank one
+    // names no persona.
     // The shell compares the role names with `=`, exact and case-sensitive,
     // so the compare here is too.
     for (const other of existing) {
       if (other === entry || typeof other !== "object" || other === null) continue;
       const fields = other as Record<string, unknown>;
       if (fields.enabled !== true) continue;
-      for (const field of ["coordinatorPersona", "architectPersona", "liaisonPersona"]) {
+      for (const field of ["coordinatorPersona", "architectPersona", "liaisonPersona", "roadmapPersona"]) {
         const value = fields[field];
         const blank = value === null || value === undefined || String(value).trim() === "";
         const omitted = blank && field === "coordinatorPersona";
