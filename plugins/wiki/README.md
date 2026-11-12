@@ -120,13 +120,19 @@ Separation rests on two boundaries, and they are not the same strength:
   later. By that reference, it binds a person's own Claude Code session opened
   inside a KB too, whose file tools reach an outside folder, save the other
   reaches below, only once it is added for that session. Five reaches stay past
-  the block: a tool other than the file tools, such as a shell command or a
-  process it starts, the files Claude Code keeps readable under `~/.claude/`, a
-  folder added to the session, a build below 2.1.257, and a KB not yet updated
-  to an engine carrying the block. Residual 1 of the source repository's
+  the block. The first is a tool other than the file tools, such as a shell
+  command or a process it starts. The second is the files Claude Code keeps
+  readable under `~/.claude/`. The third is a folder added to the session. The
+  fourth is a build below 2.1.257 in a session the run wrapper does not check:
+  a person's own session, a headless run started without the wrapper, or a run
+  in a KB whose wrapper predates the check. The wrapper refuses to start any
+  other run on such a build. Check `claude --version` before starting a
+  session in a KB yourself. The fifth is a KB not yet updated to an engine
+  carrying the block. Residual 1 of the source repository's
   `docs/threat-model.md`, which the published plugin does not include, lists
-  them in full. So between entities, reads are bounded by the Windows account.
-  The one-account invariant is stated in full in
+  them in full. So between
+  entities, reads are bounded by the Windows account. The one-account
+  invariant is stated in full in
   [docs/runbook_automation.md](docs/runbook_automation.md), "The hard invariant,
   restated".
 
@@ -336,8 +342,8 @@ that read where their steps need it:
 pwsh -NoProfile -File tests/Test-ReconcileGate.ps1
 ```
 
-`tests/Test-KbRun.ps1` tests the run wrapper's lock, budget stop and argument
-line against a stub it writes in place of `claude`:
+`tests/Test-KbRun.ps1` tests the run wrapper's lock, budget stop, argument
+line and build check against a stub it writes in place of `claude`:
 
 ```
 pwsh -NoProfile -File tests/Test-KbRun.ps1

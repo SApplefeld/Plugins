@@ -18,11 +18,16 @@ merge; otherwise it leaves the tree as it found it. On a lint run, where
 KBWALK_STUB_LINT is commit the stub makes an empty commit under "Lint:", and
 where it is reconcile one under "Reconcile:" alone. Where KBWALK_STUB_ECHO is
 set the stub prints one line of its own and then that text, as a model's
-output would. No case reaches the real claude.
+output would. Started with --version as its first argument, for the build read
+of the wrapper each wiki runs, the stub does none of that: it records its
+arguments in a file of its own and prints the build KBWALK_STUB_BUILD names,
+or 2.1.257 where the case names none. No case reaches the real claude.
 
 It checks, one case per acceptance bullet: a pass over three wikis calling the
 stub once for the one inbox file, with an empty inbox skipped and an untrusted
-wiki skipped; the lint gate both ways on the seven-day stamp, the due lint's
+wiki skipped; a wiki whose stub build is 2.1.256 reading ingest failed, with
+the wrapper's refusal in the step's note and in the failures list and no stub
+run in the wiki; the lint gate both ways on the seven-day stamp, the due lint's
 model output carrying the wrapper's lock-held prefix on a later line and the
 lint still recorded `run`; a due lint whose run made only a Reconcile: commit,
 and one whose run made none, each recorded skipped: no Lint: commit with no
@@ -295,7 +300,7 @@ function Get-StubRecords {
 }
 
 function Clear-Stub {
-    foreach ($file in @($script:record, $script:afterMarker)) {
+    foreach ($file in @($script:record, $script:afterMarker, $script:buildRecord)) {
         if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force }
     }
 }
@@ -414,6 +419,7 @@ $stubDir = Join-Path $work 'stub'
 $script:stub = Join-Path $stubDir 'claude.cmd'
 $script:record = Join-Path $stubDir 'record.txt'
 $script:afterMarker = Join-Path $stubDir 'after-sleep.txt'
+$script:buildRecord = Join-Path $stubDir 'build-record.txt'
 $resolvedFile = Join-Path $stubDir 'resolved.md'
 $emptyConfig = Join-Path $work 'empty.gitconfig'
 
@@ -558,7 +564,8 @@ function Test-NoticePaths {
 }
 
 # The environment every walker run gets: the test's own account folders, no
-# budget or model-run floor override, and a stub that exits 0 at once, overlaid with the case's values.
+# budget or model-run floor override, a stub that exits 0 at once and answers a
+# build read with its own default build, overlaid with the case's values.
 function Get-RunEnvironment {
     param([hashtable]$Overlay = @{})
     $environment = @{
@@ -572,6 +579,7 @@ function Get-RunEnvironment {
         'KBWALK_STUB_RESOLVED' = $resolvedFile
         'KBWALK_STUB_ECHO'     = $null
         'KBWALK_STUB_LINT'     = $null
+        'KBWALK_STUB_BUILD'    = $null
     }
     foreach ($name in $Overlay.Keys) { $environment[$name] = $Overlay[$name] }
     return $environment
@@ -678,9 +686,12 @@ try {
     # KBWALK_STUB_LINT commit makes an empty commit under Lint:, as a lint that
     # completes does, and reconcile one under Reconcile: alone, as a lint the
     # skill stopped at its live check after reconciling does; unset, the lint
-    # commits nothing.
+    # commits nothing. A build read, which passes --version first, branches
+    # away before the stub writes anything, so the record holds one ARGS: and
+    # CWD: pair per run.
     $stubLines = @(
         '@echo off'
+        'if "%~1"=="--version" goto version'
         ">>`"$script:record`" echo ARGS:%*"
         ">>`"$script:record`" echo CWD:%CD%"
         'if not defined KBWALK_STUB_SLEEP set KBWALK_STUB_SLEEP=0'
@@ -696,6 +707,11 @@ try {
         'if "%~2"=="Use the wiki-lint skill." if "%KBWALK_STUB_LINT%"=="commit" git commit -q --allow-empty -m "Lint: stub check, clean"'
         'if "%~2"=="Use the wiki-lint skill." if "%KBWALK_STUB_LINT%"=="reconcile" git commit -q --allow-empty -m "Reconcile: stub leftovers"'
         ">>`"$script:afterMarker`" echo after"
+        'exit 0'
+        ':version'
+        ">>`"$script:buildRecord`" echo ARGS:%*"
+        'if not defined KBWALK_STUB_BUILD set KBWALK_STUB_BUILD=2.1.257'
+        'echo %KBWALK_STUB_BUILD%'
         'exit 0'
     )
     [System.IO.File]::WriteAllText($script:stub, (($stubLines -join "`r`n") + "`r`n"), (New-Object System.Text.ASCIIEncoding))
@@ -733,6 +749,24 @@ try {
     $walkAfter = Get-TreeSnapshot $listDir
     $whatIfLines = @(Get-Lines $r.Stdout)
     Test-Check '-WhatIf exits 0, prints one would-visit line per listed wiki, starts no stub, and leaves every entry in the walk folder as it was' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($whatIfLines.Count -eq 3) -and (@($whatIfLines | Where-Object { -not $_.StartsWith('kb-walk: would visit ', [StringComparison]::Ordinal) }).Count -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ($walkAfter -ceq $walkBefore))
+
+    # --- A build under the wrapper's floor. The stub's build reaches the wiki's
+    # wrapper through the pass's environment, so the pass lists this wiki
+    # alone. Its inbox holds a file and its lint is stamped yesterday, so the
+    # ingest is the pass's one model run, and the wrapper refuses it: the
+    # step reads failed, its note and the failures entry carry the wrapper's
+    # line, and the stub's record holds no run.
+    $heth = New-Wiki 'heth'
+    [System.IO.File]::WriteAllText((Join-Path $heth 'inbox\drop.md'), "a dropped note`n")
+    Set-List @('heth')
+    Set-State -LastLintAt @{ heth = $yesterday }
+    Clear-Stub
+    $r = Invoke-Walker @{ 'KBWALK_STUB_BUILD' = '2.1.256' }
+    $records = @(Get-StubRecords)
+    $status = Read-Status
+    $hethStep = Get-Step $status 'heth' 'ingest'
+    $hethFailures = @(@($status['failures']) | Where-Object { ($_['name'] -ceq 'heth') -and ($_['step'] -ceq 'ingest') })
+    Test-Check 'a wiki whose stub build is 2.1.256 reads ingest failed with a note holding exited 1, 2.1.256 and is older than 2.1.257, lists one ingest failure holding the same words, and starts no stub run' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and $hethStep.StartsWith('failed: ', [StringComparison]::Ordinal) -and $hethStep.Contains('exited 1') -and $hethStep.Contains('2.1.256') -and $hethStep.Contains('is older than 2.1.257') -and ($hethFailures.Count -eq 1) -and ([string]$hethFailures[0]['note']).Contains('2.1.256') -and ([string]$hethFailures[0]['note']).Contains('is older than 2.1.257') -and ($records.Count -eq 0))
 
     # --- Bullet 2: the lint gate both ways on the seven-day stamp.
     $delta = New-Wiki 'delta'

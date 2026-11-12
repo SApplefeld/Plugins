@@ -324,23 +324,43 @@ and only the open handle is the lock. Windows releases the handle when the
 wrapper's process ends, so a crashed wrapper leaves no lock behind. A second run
 through the wrapper that finds the lock held prints one line on stdout, writes
 nothing and exits 0. Task Scheduler records that as a successful run, and the
-stdout line is the only sign it skipped. A run that takes the lock exits with
-its `claude` child's exit code, and the child writes straight to the wrapper's
-stdout and stderr. Where `.git` under the knowledge base is not a folder, as in
-a clone whose `.git` is a file, the lock cannot be taken, and the wrapper exits
-1 with one stderr line. With `-WhatIf` the wrapper takes no lock and runs
-nothing, and prints the one command it would run. No permission rule grants the
-wrapper, so the agent cannot start one. The wrapper bounds its `claude` child
-with a budget of 6900 seconds, which `KB_RUN_SECONDS` replaces as a whole number
-of seconds from 1 to 99999. Any other value exits 1 with one stderr line before
-`claude` starts. Past the budget it stops the child's whole process tree with
-`taskkill`, waiting at most ten seconds for `taskkill` itself, and exits 1. The child runs inside a Windows job object created with
+stdout line is the only sign it skipped. With the lock held, the wrapper reads
+the Claude Code build before it starts the run. It starts `claude` with the one
+fixed argument `--version`, keeps the three dotted numbers at the start of the
+first line it prints, and compares them as numbers to 2.1.257, the minimum by
+the vendor's page for the read block, the setting that keeps the agent's file
+tools inside the KB, which "The permission and security model" below explains.
+The read is
+bounded at 60 seconds or the run's
+budget, whichever is less. An older build is refused with one stderr line
+naming the build read and the operation, for example
+`kb-run: Claude Code build 2.1.256 is older than 2.1.257; the Ingest run was not started.`
+A build the wrapper cannot read is refused with one stderr line opening
+`kb-run: could not read the Claude Code build:` and naming why: the read
+could not start, did not finish inside its bound, exited non-zero, or printed
+no build. No refusal line carries text the read printed. A run that takes the
+lock exits 1 on any failure the wrapper itself finds: a refusal, a bad budget,
+no `claude` to start, a child that cannot start, or a child that passes its
+budget. A run whose child starts and ends inside the budget exits with
+its child's exit code, and the child writes straight to the wrapper's stdout
+and stderr. Where `.git` under the knowledge base is not a
+folder, as in a clone whose `.git` is a file, the lock cannot be taken, and the
+wrapper exits 1 with one stderr line. With `-WhatIf` the wrapper takes no lock
+and starts no run. It still reads the build, so an older or unreadable build
+exits 1 as on a real run, and otherwise it prints the one command it would run.
+No permission rule grants the wrapper, so the agent cannot start one. The
+wrapper bounds the build read and its `claude` child together with a budget of
+6900 seconds from the read's start, which `KB_RUN_SECONDS` replaces as a whole
+number of seconds from 1 to 99999. Any other value exits 1 with one stderr line
+before `claude` starts. The child waits only for what the read left of the
+budget. Past the budget it stops the child's whole process tree with
+`taskkill`, waiting at most ten seconds for `taskkill` itself, and exits 1. The build read and then the child run inside one Windows job object created with
 kill-on-close, which the wrapper alone holds, so when the wrapper ends, however
 it ends, the operating system ends every process still in the job. That covers
 a process `taskkill` missed and one the child left running after a normal exit.
 A process the child starts in the moment before its assignment to the job is
-outside it. Where the job cannot be made or the child cannot be assigned, the
-run goes on without it, and such a process can outlive the lock. The walker in
+outside it. Where the job cannot be made or a process cannot be assigned, the
+read and the run go on without it, and such a process can outlive the lock. The wrapper writes one stderr line for each such failure, and only once the child has started, so a refusal or a child that cannot start writes its own line alone. The walker in
 turn starts each wrapper inside its own kill-on-close job, so ending the
 walker's task ends every wrapper and its tree. The walker's pass lock,
 `%LOCALAPPDATA%\llm-wiki\walk.lock`, keeps two passes from running at once.
@@ -547,9 +567,15 @@ administrator deploys to a machine, or one a person adds with `/add-dir` or
 `--add-dir`. The page says a directory added only in repository settings does
 not count. Whether the KB's local settings file,
 `.claude/settings.local.json`, counts as repository settings is unobserved.
-The fourth is a build below 2.1.257, the block's minimum by the vendor's page.
-What Claude Code does with the line there is unobserved: it may judge the
-whole settings file invalid and ignore it, deny rules included. The fifth is a
+The fourth is a build below 2.1.257, the block's minimum by the vendor's page,
+in a session the wrapper does not check. A wrapper that holds the check refuses
+to start a run on such a build, as the run lock paragraph states. It does not
+check a session a person starts in the KB, a headless run started without the
+wrapper, or a run in a KB whose wrapper predates the check.
+What Claude Code
+does with the line on such a build is unobserved: it may judge the whole
+settings file invalid and
+ignore it, deny rules included. The fifth is a
 KB whose `.claude/` does not yet hold the line, which reads as before. To see
 whether a KB holds the line, look for `"blockReadsOutsideWorkingDirectories":
 true` in its `.claude/settings.json`.
@@ -835,7 +861,8 @@ files of other folders through Claude Code's file tools. It is a second
 boundary inside the first. Five reaches stay past it, as residual 1 of the
 source repository's [threat-model.md](threat-model.md), which the published
 plugin does not include, lists them, among them a subprocess and a build below
-Claude Code 2.1.257, so two entities still never share an account.
+Claude Code 2.1.257 in a session the run wrapper does not check, so two
+entities still never share an account.
 
 A Claude Code session in any other folder on the account sits outside every
 KB's wall. Beyond creating a KB through `wiki-new`, it reaches existing KBs

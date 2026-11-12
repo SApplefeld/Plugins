@@ -51,7 +51,13 @@ between entities (see the hard invariant at the end). On the owning account:
   outside its knowledge base, save the reaches the README's read-block bullet
   lists, and Claude Code's settings reference says it needs that build. What an
   older build does with the block's setting is unobserved, so where it prints an
-  older version, run `claude update` and check again. Where PowerShell says
+  older version, run `claude update` and check again. The engine's run wrapper,
+  the script that starts each scheduled run, refuses to start one on an older
+  build, or on one whose version it cannot read. The troubleshooting table in
+  [runbook_automation.md](runbook_automation.md) says where the refusal
+  appears and how to fix it. The wrapper does not check a session you start
+  yourself.
+  Where PowerShell says
   `claude` is not recognized, add `%USERPROFILE%\.local\bin` to the account's
   own PATH, since the walker's registrar looks for `claude` on PATH. Then run
   `claude` once and follow the browser prompts to log in. The login needs a paid

@@ -11,8 +11,14 @@ PowerShell host that runs this test. Every run passes the test's own claude.cmd
 stub as -Claude, except the PATH cases, which pass none and set the wrapper's
 PATH. The stub records its arguments and working directory, writes one line to
 stderr, sleeps the seconds KBRUN_STUB_SLEEP names, writes an after-sleep
-marker, and exits with the code KBRUN_STUB_EXIT names. Nothing but the stub
-reads those two variables, and no case reaches the real claude.
+marker, and exits with the code KBRUN_STUB_EXIT names. Started with --version
+as its first argument, for the wrapper's build read, the stub writes none of
+that: it records its arguments in a file of its own, prints the build
+KBRUN_STUB_BUILD names, or 2.1.257 where the case names none, prints the text
+KBRUN_STUB_BUILD_NOISE names as a second line and on stderr, sleeps the seconds
+KBRUN_STUB_BUILD_SLEEP names, and exits with the code KBRUN_STUB_BUILD_EXIT
+names. Nothing but the stub reads those six variables, and no case reaches the
+real claude.
 
 It checks the pinned argument line for Ingest, Lint and Merge, -WhatIf naming
 wiki-merge for Merge, the exit code passed through, the stub's working directory, stderr pass-through, a clean tree and the
@@ -23,6 +29,15 @@ is killed mid-run, the stub gone from the process list after the wrapper alone
 is killed while the stub sleeps, an invalid KB_RUN_SECONDS,
 -WhatIf taking no lock, an -Operation outside the set, and claude resolved from
 PATH or refused when PATH holds none.
+
+For the build read it checks a stub build of 2.1.256 refused and 2.1.257 run,
+2.0.999 and 1.99.999 refused and 2.1.1000, 2.2.0 and 3.0.0 run, the line
+"2.1.322 (Claude Code)" run with --version as the read's one argument, a first
+line holding no build refused with none of the stub's text in the refusal, a
+read that exits non-zero refused, a read that hangs stopped at its bound with
+its process gone, a slow read leaving the run only what remains of the
+budget, -WhatIf refused on an old build while the test holds the
+lock, and a run that finds the lock held reading no build.
 
 The test sets GIT_CONFIG_GLOBAL to an empty file and GIT_CONFIG_NOSYSTEM for its
 own process and restores both when it finishes. It stops every process it
@@ -172,11 +187,12 @@ function Invoke-Git {
     return $result.Stdout
 }
 
-# The environment every wrapper run gets: no budget override and a stub that
-# exits 0 at once, overlaid with the case's own values.
+# The environment every wrapper run gets: no budget override, a stub that
+# exits 0 at once, and a build read the stub answers at once with its own
+# default build, overlaid with the case's own values.
 function Get-RunEnvironment {
     param([hashtable]$Overlay = @{})
-    $environment = @{ 'KB_RUN_SECONDS' = $null; 'KBRUN_STUB_SLEEP' = '0'; 'KBRUN_STUB_EXIT' = '0' }
+    $environment = @{ 'KB_RUN_SECONDS' = $null; 'KBRUN_STUB_SLEEP' = '0'; 'KBRUN_STUB_EXIT' = '0'; 'KBRUN_STUB_BUILD' = $null; 'KBRUN_STUB_BUILD_NOISE' = $null; 'KBRUN_STUB_BUILD_SLEEP' = '0'; 'KBRUN_STUB_BUILD_EXIT' = '0' }
     foreach ($name in $Overlay.Keys) { $environment[$name] = $Overlay[$name] }
     return $environment
 }
@@ -207,9 +223,30 @@ function Get-StubRecords {
 }
 
 function Clear-Stub {
-    foreach ($file in @($script:record, $script:afterMarker)) {
+    foreach ($file in @($script:record, $script:afterMarker, $script:buildRecord)) {
         if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force }
     }
+}
+
+# The argument line of each build read the stub answered, from the stub's own
+# record of them.
+function Get-BuildReads {
+    if (-not (Test-Path -LiteralPath $script:buildRecord)) { return }
+    foreach ($line in [System.IO.File]::ReadAllLines($script:buildRecord)) { $line -replace '^ARGS:', '' }
+}
+
+# True when a run refused over its build exited 1 with nothing on stdout and
+# exactly one stderr line, the wrapper's own, holding each of the given texts,
+# and started no model run, so the stub's record holds no run.
+function Test-BuildRefusal {
+    param($Result, [string[]]$Holds)
+    $lines = @(Get-Lines $Result.Stderr)
+    if ($Result.TimedOut -or ($Result.ExitCode -ne 1) -or ($Result.Stdout.Trim() -ne '') -or ($lines.Count -ne 1)) { return $false }
+    if (-not $lines[0].StartsWith('kb-run: ')) { return $false }
+    foreach ($text in $Holds) {
+        if (-not $lines[0].Contains($text)) { return $false }
+    }
+    return (@(Get-StubRecords).Count -eq 0)
 }
 
 # Holds the KB's lock the way a running wrapper does.
@@ -309,6 +346,7 @@ $stubDir = Join-Path $work 'stub'
 $stub = Join-Path $stubDir 'claude.cmd'
 $script:record = Join-Path $stubDir 'record.txt'
 $script:afterMarker = Join-Path $stubDir 'after-sleep.txt'
+$script:buildRecord = Join-Path $stubDir 'build-record.txt'
 $noClaudeDir = Join-Path $work 'no-claude'
 $emptyConfig = Join-Path $work 'empty.gitconfig'
 $scrubbedPath = "$noClaudeDir;$(Join-Path $env:SystemRoot 'System32')"
@@ -336,9 +374,12 @@ try {
 
     # The stub. ping waits about one second per echo after the first, and is a
     # child process the wrapper's tree stop must end. The record and marker are
-    # outside the KB, so the KB's tree stays clean.
+    # outside the KB, so the KB's tree stays clean. A build read, which passes
+    # --version first, branches away before the stub writes anything, so the
+    # record holds one ARGS: and CWD: pair per run and the marker one line.
     $stubLines = @(
         '@echo off'
+        'if "%~1"=="--version" goto version'
         ">>`"$script:record`" echo ARGS:%*"
         ">>`"$script:record`" echo CWD:%CD%"
         ">&2 echo $stubStderr"
@@ -348,6 +389,17 @@ try {
         'ping -n %KBRUN_STUB_PINGS% 127.0.0.1 >nul'
         ">>`"$script:afterMarker`" echo after"
         'exit %KBRUN_STUB_EXIT%'
+        ':version'
+        ">>`"$script:buildRecord`" echo ARGS:%*"
+        'if not defined KBRUN_STUB_BUILD set KBRUN_STUB_BUILD=2.1.257'
+        'if not defined KBRUN_STUB_BUILD_SLEEP set KBRUN_STUB_BUILD_SLEEP=0'
+        'if not defined KBRUN_STUB_BUILD_EXIT set KBRUN_STUB_BUILD_EXIT=0'
+        'echo %KBRUN_STUB_BUILD%'
+        'if defined KBRUN_STUB_BUILD_NOISE echo %KBRUN_STUB_BUILD_NOISE%'
+        'if defined KBRUN_STUB_BUILD_NOISE >&2 echo %KBRUN_STUB_BUILD_NOISE%'
+        'set /a KBRUN_STUB_PINGS=KBRUN_STUB_BUILD_SLEEP+1'
+        'ping -n %KBRUN_STUB_PINGS% 127.0.0.1 >nul'
+        'exit %KBRUN_STUB_BUILD_EXIT%'
     )
     [System.IO.File]::WriteAllText($stub, (($stubLines -join "`r`n") + "`r`n"), (New-Object System.Text.ASCIIEncoding))
 
@@ -371,7 +423,7 @@ try {
     Test-Check 'a Lint run exits with the stub''s exit code, 0, and passes exactly the pinned lint argument line' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Args -ceq $lintArgs))
 
     # --- A Merge run passes the merge twin and the stub's exit code; -WhatIf
-    # names the merge skill and starts nothing.
+    # names the merge skill and starts no model run.
     Clear-Stub
     $r = Invoke-Wrapper @('-Operation', 'Merge', '-Claude', $stub) @{ 'KBRUN_STUB_EXIT' = '5' }
     $records = @(Get-StubRecords)
@@ -379,7 +431,7 @@ try {
     Clear-Stub
     $r = Invoke-Wrapper @('-Operation', 'Merge', '-Claude', $stub, '-WhatIf')
     $lines = @(Get-Lines $r.Stdout)
-    Test-Check 'Merge -WhatIf exits 0 with one stdout line naming wiki-merge and the merge argument line, and never starts the stub' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($lines.Count -eq 1) -and $lines[0].Contains('wiki-merge') -and $lines[0].Contains($mergeArgs) -and ($r.Stderr.Trim() -eq '') -and (@(Get-StubRecords).Count -eq 0))
+    Test-Check 'Merge -WhatIf exits 0 with one stdout line naming wiki-merge and the merge argument line, and starts no model run' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($lines.Count -eq 1) -and $lines[0].Contains('wiki-merge') -and $lines[0].Contains($mergeArgs) -and ($r.Stderr.Trim() -eq '') -and (@(Get-StubRecords).Count -eq 0))
 
     # --- A foreign handle on the lock refuses the run; once released, a run proceeds.
     Clear-Stub
@@ -484,7 +536,7 @@ try {
         $held.Dispose()
     }
     $lines = @(Get-Lines $r.Stdout)
-    Test-Check '-WhatIf with the lock held exits 0 with one stdout line naming the stub and the lint argument line, and never starts the stub' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($lines.Count -eq 1) -and $lines[0].Contains($stub) -and $lines[0].Contains($lintArgs) -and ($r.Stderr.Trim() -eq '') -and (@(Get-StubRecords).Count -eq 0))
+    Test-Check '-WhatIf with the lock held exits 0 with one stdout line naming the stub and the lint argument line, and starts no model run' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($lines.Count -eq 1) -and $lines[0].Contains($stub) -and $lines[0].Contains($lintArgs) -and ($r.Stderr.Trim() -eq '') -and (@(Get-StubRecords).Count -eq 0))
 
     # --- An operation outside the set is refused by parameter binding.
     Clear-Stub
@@ -499,6 +551,117 @@ try {
     $r = Invoke-Wrapper @('-Operation', 'Ingest') @{ 'PATH' = "$stubDir;$(Join-Path $env:SystemRoot 'System32')" }
     $records = @(Get-StubRecords)
     Test-Check 'with no -Claude and the stub''s folder on PATH, the run starts the stub with the pinned ingest line' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Args -ceq $ingestArgs))
+
+    # --- The floor, both ways. A build one under it is refused before any run
+    # starts, and the refusal leaves the lock free: a run held out by the lock
+    # would exit 0 with no record, so the next run's record shows it took it.
+    Clear-Stub
+    $r = Invoke-Wrapper @('-Operation', 'Ingest', '-Claude', $stub) @{ 'KBRUN_STUB_BUILD' = '2.1.256' }
+    Test-Check 'a stub build of 2.1.256 exits 1 with one stderr line holding 2.1.256, is older than 2.1.257 and Ingest, and starts no model run' (Test-BuildRefusal $r @('2.1.256', 'is older than 2.1.257', 'Ingest'))
+    Clear-Stub
+    $r = Invoke-Wrapper @('-Operation', 'Ingest', '-Claude', $stub) @{ 'KBRUN_STUB_BUILD' = '2.1.257'; 'KBRUN_STUB_EXIT' = '4' }
+    $records = @(Get-StubRecords)
+    Test-Check 'the next run takes the lock and a stub build of 2.1.257 runs: exit 4 from the stub and the pinned ingest line' ((-not $r.TimedOut) -and ($r.ExitCode -eq 4) -and ($records.Count -eq 1) -and ($records[0].Args -ceq $ingestArgs))
+
+    # --- The compare is by number, part by part. Read as text, 2.1.1000 sorts
+    # under 2.1.257, so only it tells a number compare from a text one.
+    # 2.0.999 and 1.99.999 sort under 2.1.257 either way, and show that an
+    # earlier part that is lower decides though a later part is higher.
+    foreach ($build in @('2.0.999', '1.99.999')) {
+        Clear-Stub
+        $r = Invoke-Wrapper @('-Operation', 'Lint', '-Claude', $stub) @{ 'KBRUN_STUB_BUILD' = $build }
+        Test-Check "a stub build of $build exits 1 with one stderr line holding $build, is older than 2.1.257 and Lint, and starts no model run" (Test-BuildRefusal $r @($build, 'is older than 2.1.257', 'Lint'))
+    }
+    foreach ($build in @('2.1.1000', '2.2.0', '3.0.0')) {
+        Clear-Stub
+        $r = Invoke-Wrapper @('-Operation', 'Lint', '-Claude', $stub) @{ 'KBRUN_STUB_BUILD' = $build }
+        $records = @(Get-StubRecords)
+        Test-Check "a stub build of $build runs: exit 0, nothing of the wrapper's on stderr, and the pinned lint line" ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-WrapperErrorLines $r.Stderr).Count -eq 0) -and ($records.Count -eq 1) -and ($records[0].Args -ceq $lintArgs))
+    }
+
+    # --- The line a real build prints. The read is one stub start whose whole
+    # argument line is --version, and the run's line is the pinned one.
+    Clear-Stub
+    $r = Invoke-Wrapper @('-Operation', 'Ingest', '-Claude', $stub) @{ 'KBRUN_STUB_BUILD' = '2.1.322 (Claude Code)' }
+    $records = @(Get-StubRecords)
+    $reads = @(Get-BuildReads)
+    Test-Check 'a stub printing "2.1.322 (Claude Code)" runs with the pinned ingest line, after one build read whose argument line is --version alone' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Args -ceq $ingestArgs) -and ($reads.Count -eq 1) -and ($reads[0] -ceq '--version'))
+
+    # --- A first line with no build at its first character. The stub prints
+    # that line, a second line and a stderr line, and the refusal's one line
+    # holds none of the three texts, nor the numbers after the letter v.
+    Clear-Stub
+    $r = Invoke-Wrapper @('-Operation', 'Ingest', '-Claude', $stub) @{ 'KBRUN_STUB_BUILD' = 'v2.1.300 kbrun-first-line'; 'KBRUN_STUB_BUILD_NOISE' = 'kbrun-noise-line' }
+    $printed = @(@('v2.1.300', '2.1.300', 'kbrun-first-line', 'kbrun-noise-line') | Where-Object { $r.Stderr.Contains($_) -or $r.Stdout.Contains($_) })
+    Test-Check 'a first line of "v2.1.300 kbrun-first-line" exits 1 with one stderr line holding could not read the Claude Code build, holds no build and Ingest, with none of the text the stub printed on either stream of the wrapper' ((Test-BuildRefusal $r @('could not read the Claude Code build', 'holds no build', 'Ingest')) -and ($printed.Count -eq 0))
+
+    # --- A read that exits non-zero is refused on its exit code, though the
+    # build it printed passes the floor.
+    Clear-Stub
+    $r = Invoke-Wrapper @('-Operation', 'Ingest', '-Claude', $stub) @{ 'KBRUN_STUB_BUILD' = '2.1.300'; 'KBRUN_STUB_BUILD_EXIT' = '3' }
+    Test-Check 'a build read that prints 2.1.300 and exits 3 exits 1 with one stderr line holding could not read the Claude Code build, exited 3 and Ingest, and not the build it printed' ((Test-BuildRefusal $r @('could not read the Claude Code build', 'exited 3', 'Ingest')) -and (-not $r.Stderr.Contains('2.1.300')))
+
+    # --- A read that hangs. The stub sleeps 60 seconds in its build read under
+    # a budget of 8, so the read's bound is the budget. The process list is
+    # read while the read sleeps and must show it, or the later read proves
+    # nothing. The read is stopped at the budget's 8 seconds, and the bound on
+    # the wrapper's end includes the tree stop, up to 10 seconds for taskkill
+    # and 5 for the final wait, so the wrapper ends within 28 seconds. A read
+    # bound of 60 seconds, or the stub's own 60-second sleep, cannot. The wait
+    # for the wrapper is 45 seconds, so a slow end is read as its time.
+    Clear-Stub
+    $hung = Start-Wrapper @('-Operation', 'Ingest', '-Claude', $stub) @{ 'KB_RUN_SECONDS' = '8'; 'KBRUN_STUB_BUILD_SLEEP' = '60' }
+    $pollEnd = [DateTime]::UtcNow.AddSeconds(20)
+    while (-not (Test-Path -LiteralPath $script:buildRecord) -and [DateTime]::UtcNow -lt $pollEnd) { Start-Sleep -Milliseconds 100 }
+    $hungReads = @(Get-StubProcesses @($hung.Process.Id))
+    Test-Check 'while a build read sleeps, the process list shows the stub by its command line' ((Test-Path -LiteralPath $script:buildRecord) -and ($hungReads.Count -ge 1))
+    $r = Wait-Captured $hung 45
+    $survivors = @()
+    $pollEnd = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $survivors = @(@(Get-LiveRecorded $hungReads) + @(Get-StubProcesses))
+        if ($survivors.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $pollEnd)
+    Test-Check 'with KB_RUN_SECONDS at 8 and a build read sleeping 60, the wrapper ends within 28 seconds with exit 1 and one stderr line holding could not read the Claude Code build, did not finish and Ingest, and no stub process is left running' ((Test-BuildRefusal $r @('could not read the Claude Code build', 'did not finish', 'Ingest')) -and ($r.Seconds -lt 28) -and ($hungReads.Count -ge 1) -and ($survivors.Count -eq 0))
+    Stop-LiveRecorded $hungReads
+
+    # --- The build read spends the run's budget. Under a budget of 30, the
+    # read sleeps 24 before printing a passing build, and the run sleeps 120.
+    # The run waits only for the 6 seconds the read left, so the wrapper ends
+    # near 30 seconds plus the tree stop, at most 15, which is under 50. A run
+    # that waited the whole budget would end near 54 seconds. The wait for the
+    # wrapper is 70 seconds, so that end is read as its time.
+    Clear-Stub
+    $r = Invoke-Wrapper @('-Operation', 'Ingest', '-Claude', $stub) @{ 'KB_RUN_SECONDS' = '30'; 'KBRUN_STUB_BUILD_SLEEP' = '24'; 'KBRUN_STUB_SLEEP' = '120' } 70
+    $wrapperErrors = @(Get-WrapperErrorLines $r.Stderr)
+    Test-Check 'with KB_RUN_SECONDS at 30, a build read sleeping 24 and a run sleeping 120, the wrapper exits 1 within 50 seconds with one stderr line of its own naming the 30-second budget, after one build read and one run' ((-not $r.TimedOut) -and ($r.ExitCode -eq 1) -and ($r.Seconds -lt 50) -and ($wrapperErrors.Count -eq 1) -and ($wrapperErrors[0] -match 'budget of 30 seconds') -and (@(Get-BuildReads).Count -eq 1) -and (@(Get-StubRecords).Count -eq 1))
+
+    # --- -WhatIf reads the build and takes no lock: with the test holding the
+    # lock, an old build is refused and a passing one prints the command line.
+    Clear-Stub
+    $held = Open-Lock
+    try {
+        $r = Invoke-Wrapper @('-Operation', 'Lint', '-Claude', $stub, '-WhatIf') @{ 'KBRUN_STUB_BUILD' = '2.1.256' }
+        $refused = Test-BuildRefusal $r @('2.1.256', 'is older than 2.1.257', 'Lint')
+        $r = Invoke-Wrapper @('-Operation', 'Lint', '-Claude', $stub, '-WhatIf') @{ 'KBRUN_STUB_BUILD' = '2.1.257' }
+    } finally {
+        $held.Dispose()
+    }
+    $lines = @(Get-Lines $r.Stdout)
+    Test-Check '-WhatIf on a stub build of 2.1.256 with the lock held exits 1 with one stderr line holding 2.1.256, is older than 2.1.257 and Lint, and starts no model run' $refused
+    Test-Check '-WhatIf on a stub build of 2.1.257 with the lock held exits 0 with one stdout line naming the stub and the lint argument line, and starts no model run' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($lines.Count -eq 1) -and $lines[0].Contains($stub) -and $lines[0].Contains($lintArgs) -and ($r.Stderr.Trim() -eq '') -and (@(Get-StubRecords).Count -eq 0))
+
+    # --- The lock comes before the build read: a run that finds the lock held
+    # never starts the stub, even for a read, so an old build is not refused.
+    Clear-Stub
+    $held = Open-Lock
+    try {
+        $r = Invoke-Wrapper @('-Operation', 'Lint', '-Claude', $stub) @{ 'KBRUN_STUB_BUILD' = '2.1.256' }
+    } finally {
+        $held.Dispose()
+    }
+    Test-Check 'a run on a stub build of 2.1.256 while the test holds the lock exits 0 with the lock line, and the stub is never started, for a run or for a build read' ((Test-HeldRefusal $r 'Lint') -and (@(Get-BuildReads).Count -eq 0))
 } finally {
     foreach ($process in $script:started) {
         if (-not $process.HasExited) { Stop-StartedTree $process }
