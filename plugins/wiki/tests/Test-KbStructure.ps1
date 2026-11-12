@@ -25,6 +25,16 @@ command under Bash, and pins permissions.defaultMode to default so a
 bypass-default account still runs under the allow-list, and pins
 permissions.blockReadsOutsideWorkingDirectories to the JSON boolean true.
 
+A check that proves a rule or a key present compares it character for
+character: the entry must be a JSON string holding the pinned spelling by
+character code, so a rule in other letters, a narrowed rule, a list in place
+of a string, or one carrying an invisible character fails it. The three helper
+rules are the one exception: each has two valid spellings, so each is matched
+by a pattern, in the same letters. A check that
+sweeps for a class of rule finds its members in any letter case, so a forbidden
+rule in other letters still fails it, and accepts a member only where it is a
+JSON string in the exact spelling.
+
 Passing this check does not prove a headless run will complete. Claude Code
 ignores permissions.allow entirely in a workspace that has not been trusted,
 so the runbook's trust check is the other half of the guarantee. This script
@@ -89,20 +99,48 @@ function Test-Check {
 # access on a missing member throws, so every read of parsed JSON goes through here.
 # The property collection is enumerated one at a time rather than projected with
 # .Name, because projecting a member off an empty collection throws the same way.
-# The name is matched with regard to case, so a settings key spelled in other
-# letters reads as absent, as a key Claude Code does not recognize would be.
+# The name is compared character for character, so a settings key spelled in
+# other letters or carrying an invisible character reads as absent, as a key
+# Claude Code does not recognize would be. The value is returned whole, since a
+# plain return unrolls a list of one into its member and a type test could not
+# then tell ["default"] from "default"; a caller wanting a list's members
+# enumerates it.
 function Get-JsonProperty {
     param($Object, [string]$Name)
     if ($null -eq $Object) { return $null }
     foreach ($property in $Object.PSObject.Properties) {
-        if ($property.Name -ceq $Name) { return $property.Value }
+        if (Test-ExactString $property.Name $Name) { return ,$property.Value }
     }
     return $null
 }
 
-# True when at least one permission rule matches the pattern.
+# True only where $Value is a string holding the characters of $Expected in the
+# same order, compared by character code. PowerShell's case-sensitive compare
+# operators (-ceq, -ccontains, -cnotcontains) follow the culture's rules, which
+# ignore a soft hyphen, so they are not used. The type is tested first because
+# PowerShell turns a list of one string into that string when a method asks
+# for a string.
+function Test-ExactString {
+    param($Value, [string]$Expected)
+    return ($Value -is [string]) -and [string]::Equals($Value, $Expected, [StringComparison]::Ordinal)
+}
+
+# True when at least one entry of $Rules is the exact string $Expected.
+function Test-RuleListed {
+    param($Rules, [string]$Expected)
+    foreach ($rule in $Rules) {
+        if (Test-ExactString $rule $Expected) { return $true }
+    }
+    return $false
+}
+
+# True when at least one permission rule matches the pattern, without regard to
+# case, so a sweep finds a rule in other letters. With -CaseExact the rule must
+# be a JSON string and the letters' case must match the pattern's too, so a
+# list holding a matching rule never counts as that rule.
 function Test-RuleMatch {
-    param([string[]]$Rules, [string]$Pattern)
+    param($Rules, [string]$Pattern, [switch]$CaseExact)
+    if ($CaseExact) { return [bool]($Rules | Where-Object { ($_ -is [string]) -and ($_ -cmatch $Pattern) }) }
     return [bool]($Rules | Where-Object { $_ -match $Pattern })
 }
 
@@ -208,28 +246,28 @@ if (-not $parsed) {
     foreach ($check in $settingsChecks) { Test-Check -Description $check -Passed $false }
 } else {
     $permissions = Get-JsonProperty $settings 'permissions'
-    $allowRules = @(@(Get-JsonProperty $permissions 'allow') | Where-Object { $_ })
-    $denyRules  = @(@(Get-JsonProperty $permissions 'deny')  | Where-Object { $_ })
+    $allowRules = @(Get-JsonProperty $permissions 'allow' | ForEach-Object { $_ } | Where-Object { $_ })
+    $denyRules  = @(Get-JsonProperty $permissions 'deny'  | ForEach-Object { $_ } | Where-Object { $_ })
 
     Test-Check -Description 'settings.json has permissions.allow array' -Passed ($allowRules.Count -gt 0)
     Test-Check -Description 'settings.json has permissions.deny array'  -Passed ($denyRules.Count -gt 0)
 
     # Each write deny is pinned as its exact string, in the Edit form, compared
-    # with regard to case, so a narrowed or respelled rule fails the check.
-    Test-Check -Description 'deny array blocks writes under sources/' -Passed ($denyRules -ccontains 'Edit(./sources/**)')
-    Test-Check -Description 'deny array blocks writes under inbox/'   -Passed ($denyRules -ccontains 'Edit(./inbox/**)')
-    # Pinned as its exact string, compared with regard to case, so a narrowed
+    # character for character, so a narrowed or respelled rule fails the check.
+    Test-Check -Description 'deny array blocks writes under sources/' -Passed (Test-RuleListed $denyRules 'Edit(./sources/**)')
+    Test-Check -Description 'deny array blocks writes under inbox/'   -Passed (Test-RuleListed $denyRules 'Edit(./inbox/**)')
+    # Pinned as its exact string, compared character for character, so a narrowed
     # or misplaced rule that leaves an inbox source readable fails the check.
-    Test-Check -Description 'deny array blocks reads under inbox/'    -Passed ($denyRules -ccontains 'Read(./inbox/**)')
-    Test-Check -Description 'deny array blocks writes under .git/'    -Passed ($denyRules -ccontains 'Edit(./.git/**)')
-    Test-Check -Description 'deny array blocks writes under .claude/' -Passed ($denyRules -ccontains 'Edit(./.claude/**)')
+    Test-Check -Description 'deny array blocks reads under inbox/'    -Passed (Test-RuleListed $denyRules 'Read(./inbox/**)')
+    Test-Check -Description 'deny array blocks writes under .git/'    -Passed (Test-RuleListed $denyRules 'Edit(./.git/**)')
+    Test-Check -Description 'deny array blocks writes under .claude/' -Passed (Test-RuleListed $denyRules 'Edit(./.claude/**)')
 
     # The allow rule on wiki/ covers every path under it, and Claude Code loads
     # a CLAUDE.md, a CLAUDE.local.md or a .claude/ folder from any folder it
     # works in, and .mcp.json at the project root, so these deny rules keep a
     # page the agent writes from becoming an instruction file the next run
     # follows. Each of the four is pinned as its exact string, in the Edit form,
-    # compared with regard to case, so a missing rule or a respelled pattern
+    # compared character for character, so a missing rule or a respelled pattern
     # fails the check.
     $instructionRules = @(
         'Edit(./wiki/**/CLAUDE.md)',
@@ -237,28 +275,32 @@ if (-not $parsed) {
         'Edit(./wiki/**/.claude/**)',
         'Edit(./wiki/**/.mcp.json)'
     )
-    $missingInstructionRules = @($instructionRules | Where-Object { -not ($denyRules -ccontains $_) })
+    $missingInstructionRules = @($instructionRules | Where-Object { -not (Test-RuleListed $denyRules $_) })
     Test-Check -Description 'deny array blocks instruction files under wiki/' -Passed ($missingInstructionRules.Count -eq 0)
     if ($missingInstructionRules.Count -gt 0) { Write-Host "  missing: $($missingInstructionRules -join ', ')" }
 
     # sources/ immutability and the no-outside-write guarantee hold only if the raw
-    # verbs that could bypass the helpers are denied outright.
+    # verbs that could bypass the helpers are denied outright. Each is pinned as
+    # its exact string, compared character for character: Claude Code matches a
+    # Bash rule's leading text on token boundaries, so a narrowed rule such as
+    # Bash(mv -f:*) or a neighbour such as Bash(mvn:*) does not deny a plain mv.
     Test-Check -Description 'deny array blocks raw shell verbs' -Passed (
-        (Test-RuleMatch $denyRules '^Bash\(mv') -and
-        (Test-RuleMatch $denyRules '^Bash\(rm') -and
-        (Test-RuleMatch $denyRules '^Bash\(cp') -and
-        (Test-RuleMatch $denyRules '^Bash\(ls')
+        (Test-RuleListed $denyRules 'Bash(mv:*)') -and
+        (Test-RuleListed $denyRules 'Bash(rm:*)') -and
+        (Test-RuleListed $denyRules 'Bash(cp:*)') -and
+        (Test-RuleListed $denyRules 'Bash(ls:*)')
     )
 
     # Every raw git verb is denied outright, so the agent reaches git only through
     # the vetted helpers, which run it as a pwsh subprocess the rules do not reach.
     # A prefix rule on git reads (diff, log) could not constrain a --output or a
     # --no-index that turns a read into an arbitrary write or an out-of-repo read.
-    Test-Check -Description 'deny array blocks every raw git verb' -Passed (Test-RuleMatch $denyRules '^Bash\(git:\*\)$')
+    # The rule is pinned as its exact string, compared character for character.
+    Test-Check -Description 'deny array blocks every raw git verb' -Passed (Test-RuleListed $denyRules 'Bash(git:*)')
 
     # Grep's path-scoped deny rules do not bind, so the tool is denied outright; no
-    # skill needs it.
-    Test-Check -Description 'deny array blocks the Grep tool' -Passed ($denyRules -contains 'Grep')
+    # skill needs it. The tool name is compared character for character.
+    Test-Check -Description 'deny array blocks the Grep tool' -Passed (Test-RuleListed $denyRules 'Grep')
 
     # The blockReadsOutsideWorkingDirectories line has Claude Code's file tools
     # refuse a path outside the session's working directories, save the files
@@ -268,7 +310,7 @@ if (-not $parsed) {
     # where the block does not hold. They keep an injected instruction
     # from reading a credential file and writing it into a page that gets pushed.
     # All 21 are anchored at the filesystem root, so they reach every drive letter. Each
-    # is pinned as its exact string, compared with regard to case, so a dropped or
+    # is pinned as its exact string, compared character for character, so a dropped or
     # respelled rule fails the check. The pins hold spelling, not reach. A live
     # probe holds reach.
     $credentialRules = @(
@@ -294,32 +336,38 @@ if (-not $parsed) {
         'Read(//**/UserSecrets/**)',
         'Read(//**/appsettings*.json)'
     )
-    $missingCredentialRules = @($credentialRules | Where-Object { $denyRules -cnotcontains $_ })
+    $missingCredentialRules = @($credentialRules | Where-Object { -not (Test-RuleListed $denyRules $_) })
     Test-Check -Description 'deny array blocks reads of credential files' -Passed ($missingCredentialRules.Count -eq 0)
     if ($missingCredentialRules.Count -gt 0) { Write-Host "  missing: $($missingCredentialRules -join ', ')" }
 
     # Every Read deny is anchored at the filesystem root, save the named inbox rule,
     # which is anchored at the KB on purpose. A read rule in any folder-relative or
     # home-relative form binds under that folder alone, so a credential rule added
-    # later in such a form fails this check without being named. The exemption is
-    # compared as its exact string, with regard to case.
+    # later in such a form fails this check without being named. The sweep
+    # collects every rule opening Read( in any letters, so a rule in other letters
+    # is still read as a member. A member is rooted only where it is a JSON
+    # string opening with exactly Read(//, and the exemption is compared
+    # character for character.
     $readRootExemptions = @('Read(./inbox/**)')
     $unrootedReadRules = @($denyRules | Where-Object {
-        ($_ -match '^Read\(') -and ($_ -notmatch '^Read\(//') -and ($readRootExemptions -cnotcontains $_)
+        $rule = $_
+        ($rule -match '^Read\(') -and -not (($rule -is [string]) -and ($rule -cmatch '^Read\(//')) -and -not ($readRootExemptions | Where-Object { Test-ExactString $rule $_ })
     })
     Test-Check -Description 'deny array anchors every credential read rule at the filesystem root' -Passed ($unrootedReadRules.Count -eq 0)
 
     # A structurally valid allowlist that omits a verb the ingest flow needs leaves an
     # unattended run stalled on a prompt nobody can answer. These assert the minimum set.
-    # Each page rule is pinned as its exact string, compared with regard to case:
+    # Each page rule is pinned as its exact string, compared character for character:
     # an ingest whose page, index or log write is refused stalls on a prompt.
     $pageRules = @('Edit(./wiki/**)', 'Edit(./index.md)', 'Edit(./log.md)')
-    $missingPageRules = @($pageRules | Where-Object { -not ($allowRules -ccontains $_) })
+    $missingPageRules = @($pageRules | Where-Object { -not (Test-RuleListed $allowRules $_) })
     Test-Check -Description 'allow array covers wiki page edits' -Passed ($missingPageRules.Count -eq 0)
     if ($missingPageRules.Count -gt 0) { Write-Host "  missing: $($missingPageRules -join ', ')" }
-    Test-Check -Description 'allow array covers the commit helper' -Passed (Test-RuleMatch $allowRules '^Bash\(pwsh .*kb-commit\.ps1')
-    Test-Check -Description 'allow array covers moving a file out of inbox/' -Passed (Test-RuleMatch $allowRules '^Bash\(pwsh .*kb-move\.ps1')
-    Test-Check -Description 'allow array covers the status helper' -Passed (Test-RuleMatch $allowRules '^Bash\(pwsh .*kb-status\.ps1')
+    # Each helper rule is valid with and without a leading ./, so these stay
+    # patterns, matched with regard to case.
+    Test-Check -Description 'allow array covers the commit helper' -Passed (Test-RuleMatch $allowRules '^Bash\(pwsh .*kb-commit\.ps1' -CaseExact)
+    Test-Check -Description 'allow array covers moving a file out of inbox/' -Passed (Test-RuleMatch $allowRules '^Bash\(pwsh .*kb-move\.ps1' -CaseExact)
+    Test-Check -Description 'allow array covers the status helper' -Passed (Test-RuleMatch $allowRules '^Bash\(pwsh .*kb-status\.ps1' -CaseExact)
 
     # The agent must reach git writes only through the vetted helpers, never a raw verb.
     Test-Check -Description 'allow array grants no raw git write verb' -Passed (
@@ -331,19 +379,26 @@ if (-not $parsed) {
     # run outside the lock and budget, or a fetch of every source. So every Bash
     # rule, a bare Bash rule among them, must be the exact pwsh call on one of
     # the three helpers, and a rule naming any other script, or no script, fails.
+    # The sweep collects Bash rules in any letter case, so a rule in other
+    # letters is still read as a member, and accepts a member only where it is
+    # a JSON string matching the helper pattern in the same letters. The
+    # pattern ends at \z, since $ would also accept a rule ending in a newline.
     $bashRules = @($allowRules | Where-Object { $_ -match '^Bash(\(|$)' })
-    $strayBashRules = @($bashRules | Where-Object { $_ -notmatch '^Bash\(pwsh -NoProfile -File (\./)?\.claude/(kb-move|kb-commit|kb-status)\.ps1:\*\)$' })
+    $strayBashRules = @($bashRules | Where-Object { -not (($_ -is [string]) -and ($_ -cmatch '^Bash\(pwsh -NoProfile -File (\./)?\.claude/(kb-move|kb-commit|kb-status)\.ps1:\*\)\z')) })
     Test-Check -Description 'allow array grants only the three helpers under Bash' -Passed (($bashRules.Count -gt 0) -and ($strayBashRules.Count -eq 0))
 
     # A session in the KB on an account whose own settings default to
     # bypassPermissions would otherwise run with only the deny wall, so it could
     # write .claude/feed.json through a shell verb or run the feeder. Pinning the
-    # mode here holds every session to the allow-list, which grants neither.
-    Test-Check -Description 'permissions.defaultMode is pinned to default' -Passed ((Get-JsonProperty $permissions 'defaultMode') -ceq 'default')
+    # mode here holds every session to the allow-list, which grants neither. It
+    # passes only as a JSON string equal to default, compared character for
+    # character.
+    $defaultMode = Get-JsonProperty $permissions 'defaultMode'
+    Test-Check -Description 'permissions.defaultMode is pinned to default' -Passed (Test-ExactString $defaultMode 'default')
 
     # Read and Glob are allowed unscoped, so this line is what has Claude Code's
     # file tools refuse a path outside the session's working directories. The key
-    # and its parent are matched with regard to case, so a respelled key fails
+    # and its parent are compared character for character, so a respelled key fails
     # like a dropped one. It passes only as the JSON boolean true. The type is
     # tested because PowerShell compares the string "true" as equal to $true.
     # The pin holds the line, not reach. A live probe holds reach.

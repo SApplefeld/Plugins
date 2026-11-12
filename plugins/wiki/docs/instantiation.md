@@ -330,7 +330,7 @@ Claude Code loads, `CLAUDE.md`, `CLAUDE.local.md`, a `.claude/` folder and
 that would bypass the helpers, denies reads under `inbox/` and of the credential
 paths the template names, anchors every read deny but the `inbox/` one at the root above the drive letters, allows the three vetted
 helpers, pins the default permission mode, and pins the read block on as the
-JSON boolean `true`).
+JSON boolean `true`). Each rule and key the check pins must be spelled as the template spells it, letter for letter, so a rule retyped in other letters fails the check.
 
 A green run does not prove a headless run will complete. That also needs
 workspace trust (step 2), which is per account and per path and lives in

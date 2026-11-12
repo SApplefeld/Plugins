@@ -35,7 +35,7 @@ walker. `tests/Test-KbRegistry.ps1` drives the list script, and
 no-remote case against a stub in place of `claude`. `tests/Test-KbTrust.ps1`
 drives the trust writer against a throwaway profile and a stub in place of
 `claude`. `tests/Test-KbStructure.ps1` checks a KB's structure
-and permission allowlist. `tests/Test-FeedInbox.ps1` drives the feeder against
+and permission allowlist. A check that proves a permission rule or key present takes only a JSON string holding the template's spelling, compared by character code. The three helper rules are the exception: each has two valid spellings, so each matches a pattern in the same letters. So a rule in other letters, a narrowed rule, a list in place of a string or a rule carrying an invisible character fails its check. A sweep for a forbidden rule still reads a rule in any letter case. `tests/Test-KbCreate.ps1` holds the controls for these settings checks, each run against a copy of the template. `tests/Test-FeedInbox.ps1` drives the feeder against
 a throwaway repository and KB. `tests/Test-ReconcileGate.ps1` drives the status
 helper's liveness read and a moved source's age-0 read against a throwaway KB, and
 checks that the writing skills emit the liveness read. It also checks that the
