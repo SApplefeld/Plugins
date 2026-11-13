@@ -19,6 +19,9 @@
 // Every decision is journaled, one row each, so a week of rows can be labelled and scored before
 // a threshold decides anything live. A row carries ids, a trigger, an outcome, a probability where
 // a call ran and the lines that were held. No reply text, no key and no token ever enters one.
+// Each message a session's turn closes noted adds a noted row beside them: the message's id, the
+// time, the thread's id and the outcome `noted`, and no text, so the scoring tool can count the
+// judged rows a session read and found nothing to answer in.
 //
 // The delivered event's class is the lowest class present, `operator` only when every buffered
 // message was written from an operator account. A line's prefix is text: a message's own text can
@@ -169,7 +172,8 @@ export const HELD_BUFFERS_FORMAT_VERSION = 1;
  * after its buffer had already gone, which delivers nothing. A judge row records what the call
  * was asked: the id and lines at the time of the ask. The event a verdict delivers carries the
  * buffer as it then stands, lines that arrived during the call included, so a label reads the
- * row's lines and the session may have read one or two more.
+ * row's lines and the session may have read one or two more. The journal also holds `NotedRow`s,
+ * one per message a turn closed noted, told apart by their `outcome` of `noted`.
  */
 export type JournalRow = {
   id: string;
@@ -180,6 +184,19 @@ export type JournalRow = {
   probability?: number;
   outcome: "delivered" | "held" | "stale";
   lines?: readonly string[];
+};
+
+/**
+ * One message a session's turn closed noted, saying it asked nothing of the session. The fields
+ * are closed at these four: the message's own id, which the scoring tool joins to a judged row's
+ * `id`, the time by the gate's clock, the thread, and the outcome. No text, author, session,
+ * trigger or probability.
+ */
+export type NotedRow = {
+  id: string;
+  time: string;
+  threadId: string;
+  outcome: "noted";
 };
 
 /** The judge's settings, present on a host whose gate asks Jev. */
@@ -204,8 +221,11 @@ export type ResponseGateOptions = {
    * which is the shape the router's own tests drive; a host with the gate on always supplies it.
    */
   judge?: ResponseGateJudge;
-  /** Takes one row per decision. A throw out of it is logged and never reaches a delivery. */
-  journal: (row: JournalRow) => void;
+  /**
+   * Takes one row per decision and one per message closed noted. A throw out of it is logged and
+   * never reaches a delivery or the caller.
+   */
+  journal: (row: JournalRow | NotedRow) => void;
   /**
    * True where the gate runs beside an ungated delivery, as it does in `shadow`: nothing it holds
    * is withheld from anyone, so a buffer it drops is not a loss and is not logged as one.
@@ -272,6 +292,12 @@ export type ResponseGate = {
    * secret screen matched anywhere in the whole reply.
    */
   noteReply: (threadId: string, sessionId: string, text: string) => void;
+  /**
+   * A session's turn closed noted over `messageId` in `threadId`: journals one `NotedRow`, its time
+   * read from the gate's clock. A journal that throws loses the row with one log line naming the
+   * thread, and this returns normally.
+   */
+  noteNoted: (threadId: string, messageId: string) => void;
   /**
    * Drops a thread's buffer, its timers, its last-post clock and its last reply, delivering
    * nothing, and returns
@@ -585,7 +611,7 @@ export function createResponseGateJournal(options: {
   file: string;
   maxBytes: number;
   maxFiles: number;
-}): (row: JournalRow) => void {
+}): (row: JournalRow | NotedRow) => void {
   let directoryMade = false;
   const append = (line: string): void => {
     if (!directoryMade) {
@@ -983,6 +1009,16 @@ export function createResponseGate(options: ResponseGateOptions): ResponseGate {
       // Screened whole, before the cut: a secret straddling the cut would lose the prefix the
       // screen anchors on and be sent unscreened.
       lastReply.set(threadId, { sessionId, text: SECRET_SCREEN.test(text) ? null : replyTail(text) });
+    },
+
+    noteNoted(threadId, messageId) {
+      const row: NotedRow = { id: messageId, time: new Date(now()).toISOString(), threadId, outcome: "noted" };
+      try {
+        options.journal(row);
+      } catch {
+        // The thread alone: the row carries nothing else worth naming, and the error is the disk's.
+        log(`routing: the response gate journal lost a noted row for thread ${threadId}`);
+      }
     },
 
     clear(threadId) {

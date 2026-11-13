@@ -126,6 +126,15 @@ export type ReceiptTrackerOptions = {
    * the pacing wait without real time; defaults to a real `setTimeout`.
    */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Told the thread and the message each time a message reaches ☑️, by a noted close or by a
+   * pickup credited late inside one, and never for any other stage. The broker hands the pair to
+   * the response gate, which journals it. Called after the stage is recorded and its reaction
+   * queued, and before the thread's tracked list is rewritten, so a reader of the tracker from
+   * inside it sees the list as it stood. A throw out of it is logged by thread alone, so it
+   * changes neither.
+   */
+  onNoted?: (threadId: string, messageId: string) => void;
 };
 
 export type ReceiptTracker = {
@@ -234,6 +243,19 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
     if (recorded.size > MAX_TRACKED_PER_THREAD) {
       const oldest = recorded.keys().next().value;
       if (oldest !== undefined) recorded.delete(oldest);
+    }
+  }
+
+  /**
+   * Hands one message that has just reached ☑️ to `onNoted`. A throw is logged naming the thread
+   * and never the error, whose text is the far side's, and the caller's loop carries on.
+   */
+  function tellNoted(threadId: string, messageId: string): void {
+    if (options.onNoted === undefined) return;
+    try {
+      options.onNoted(threadId, messageId);
+    } catch {
+      options.log(`receipts: a noted mark in thread ${threadId} could not be handed on`);
     }
   }
 
@@ -408,6 +430,7 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
           // it, and ☑️ would say none were.
           reached(threadId, entry.messageId, "noted");
           enqueue(threadId, transition(threadId, entry, STAGE_EMOJI.noted));
+          tellNoted(threadId, entry.messageId);
           continue;
         }
         entry.pickedUpAt = at;
@@ -465,6 +488,7 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
         }
         reached(threadId, entry.messageId, "noted");
         enqueue(threadId, transition(threadId, entry, STAGE_EMOJI.noted));
+        tellNoted(threadId, entry.messageId);
       }
       threads.set(threadId, remaining);
     },

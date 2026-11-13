@@ -1578,9 +1578,10 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       const located = locate(processToken);
       // Rebuilt rather than passed along, for the reason `reply` rebuilds it.
       if ("status" in located) return { status: located.status };
-      // The receipt mark is the whole of a noted close. Nothing posts, so nothing is recorded for
-      // the mirror's dedup and no tap is fed: each tap carries words that reached the thread, and
-      // here there are none.
+      // The receipt mark is all a noted close makes here, and the tracker also tells the response
+      // gate each message it marks, which the gate journals in `shadow` and `live`. Nothing posts,
+      // so nothing is recorded for the mirror's dedup and no tap is fed: each tap carries words
+      // that reached the thread, and here there are none.
       //
       // The instant is read as the close arrives, and the mark waits its turn on the thread's chain,
       // so every reply already posting there makes its answered mark first and its messages read

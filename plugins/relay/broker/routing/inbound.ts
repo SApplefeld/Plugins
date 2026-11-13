@@ -58,6 +58,7 @@ import type {
   BufferedMessage,
   HeldBuffer,
   JournalRow,
+  NotedRow,
   Quote,
   ResponseGate,
   ResponseGateJudge,
@@ -466,8 +467,11 @@ export type ResponseGateSettings = {
   maxWaitMs: number;
   /** The judge's window, threshold and key. Absent, the gate has its certain triggers alone. */
   judge?: ResponseGateJudge;
-  /** Takes one row per gate decision, in `shadow` and `live` alike. */
-  journal: (row: JournalRow) => void;
+  /**
+   * Takes one row per gate decision and one per message a turn closed noted, in `shadow` and
+   * `live` alike.
+   */
+  journal: (row: JournalRow | NotedRow) => void;
   /**
    * Where the held buffers are kept across a broker restart, and the floor a restored buffer's
    * age cap is re-armed to, the window a relay is given to reconnect after a restart. Read and
@@ -666,6 +670,11 @@ export type InboundRouter = {
    * Never throws.
    */
   noteReply: (sessionId: string, text: string) => void;
+  /**
+   * A session's turn closed noted over `messageId` in `threadId`, as the receipt tracker marked
+   * it. Hands the pair to the gate, which journals it. A no-op with the gate off. Never throws.
+   */
+  noteNoted: (threadId: string, messageId: string) => void;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -2382,6 +2391,11 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       if (gate === null) return;
       const threadId = options.threadFor(sessionId);
       if (threadId !== null) gate.noteReply(threadId, sessionId, text);
+    },
+
+    noteNoted(threadId, messageId) {
+      if (gate === null) return;
+      gate.noteNoted(threadId, messageId);
     },
   };
 }

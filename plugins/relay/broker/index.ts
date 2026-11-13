@@ -2033,8 +2033,16 @@ export async function startBroker(
     messenger = transport;
     // The receipt tracker, built once the transport it paints reactions through exists. Every seam
     // wired above this point reaches it through the mutable `receipts` closure, which starts
-    // answering as soon as this assignment runs.
-    receipts = createReceiptTracker({ reactions: transport, log: note, now: Date.now, describe });
+    // answering as soon as this assignment runs. Each message it marks noted goes to the response
+    // gate's journal, read through the closure for the reason the outbound router's `gate` seam
+    // reads it: the inbound router, which builds the gate, is assigned further down.
+    receipts = createReceiptTracker({
+      reactions: transport,
+      log: note,
+      now: Date.now,
+      describe,
+      onNoted: (threadId, messageId) => inbound?.noteNoted(threadId, messageId),
+    });
     const surface = createSurface({
       transport,
       now: Date.now,
