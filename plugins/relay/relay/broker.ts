@@ -341,11 +341,12 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
    * The announcing's state. The timer is its own and never the reconnect's. `connection` counts
    * the streams this client has held and lost, so an answer that arrives after its stream dropped
    * decides nothing for the next one. `unreadableLogged` holds the unreadable session file to one
-   * log line a connection.
+   * log line a connection, and `refusedLogged` does the same for the broker's refusal.
    */
   let announceTimer: NodeJS.Timeout | null = null;
   let connection = 0;
   let unreadableLogged = false;
+  let refusedLogged = false;
 
   /** Ends the announcing for the stream that was held: no timer, and no late answer acted on. */
   function endAnnouncing(): void {
@@ -369,11 +370,12 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
    * broker registers a session whose hooks never reached it from this, and gives one registered
    * from a hook post its launch directory.
    *
-   * Four statuses and two HTTP codes are final for the stream held: the broker took the
+   * Three statuses and two HTTP codes are final for the stream held: the broker took the
    * announcement or will never take it, so asking again would only repeat the answer. Anything
    * else is tried again after the delay, since it may be the one request that reaches a session
-   * with no thread: no usable file yet, a refused key, no answer, or an answer this client cannot
-   * read. No line written here holds the session id, the folder or a path.
+   * with no thread: no usable file yet, a refused key, no answer, an answer this client cannot
+   * read, or a `refused` answer, since the record that holds the session id under another token
+   * may end. No line written here holds the session id, the folder or a path.
    */
   async function announce(): Promise<void> {
     let read: SessionFileRead | undefined;
@@ -410,7 +412,11 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
     } else if (answer.status === "filled") {
       log("relay: the broker took this session's launch directory from the relay's announcement");
     } else if (answer.status === "refused") {
-      log("relay: the broker refused the announcement, since another process holds the announced session");
+      if (!refusedLogged) {
+        refusedLogged = true;
+        log("relay: the broker refused the announcement, since another process holds the announced session; it tries again until the broker answers otherwise");
+      }
+      scheduleAnnouncement();
     } else if (answer.status !== "held") {
       scheduleAnnouncement();
     }
@@ -436,6 +442,7 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
       // the last one was told. A hello that issued no key gives no standing to announce, so no
       // attempt is scheduled that could only be refused locally.
       unreadableLogged = false;
+      refusedLogged = false;
       if (replyKey !== null) scheduleAnnouncement();
       return;
     }
