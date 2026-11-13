@@ -50,13 +50,15 @@ foreach ($entry in [Environment]::GetEnvironmentVariables('Process').GetEnumerat
 $restoredKeys = @{}
 
 # Turns a message into one broker.log line's text. Replaces the class broker/sanitize.ts's
-# isInvisible strips, the Arabic letter mark U+061C among its bidirectional controls, plus U+0085,
-# U+2028 and U+2029, which a log reader may take as line breaks: the class
+# isInvisible strips, the Arabic letter mark U+061C and the variation selectors among it, plus the
+# tab, plus U+0085, U+2028 and U+2029, which a log reader may take as line breaks: the class
 # install/ensure-dependencies.mjs's appendLog replaces, copied because this script cannot import it.
-# The supplementary range U+E0000 to U+E007F is written as its surrogate pairs for .NET.
+# Three supplementary ranges are written as their surrogate pairs for .NET, and each pair becomes
+# one space: U+1BCA0 to U+1BCA3 as \uD82F[\uDCA0-\uDCA3], U+1D173 to U+1D17A as
+# \uD834[\uDD73-\uDD7A], and U+E0000 to U+E0FFF as [\uDB40-\uDB43][\uDC00-\uDFFF].
 function ConvertTo-BrokerLogText {
     param([string]$Message)
-    return $Message -replace '[\u0000-\u001f\u007f\u0085\u00ad\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufe00-\ufe0f\ufeff]|\uDB40[\uDC00-\uDC7F]', ' '
+    return $Message -replace '[\u0000-\u001f\u007f\u0085\u00ad\u034f\u061c\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufe00-\ufe0f\ufeff\ufff0-\ufff8]|\uD82F[\uDCA0-\uDCA3]|\uD834[\uDD73-\uDD7A]|[\uDB40-\uDB43][\uDC00-\uDFFF]', ' '
 }
 
 # Appends one line to the log file CHANNEL_BROKER_LOG_FILE names, where it names one, in broker.log's

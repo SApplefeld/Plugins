@@ -2398,16 +2398,22 @@
 
   /**
    * The code points the broker strips from a line before its ring copy, `isInvisible` in
-   * `broker/sanitize.ts`: C0 but the tab, DEL, the soft hyphen, the Arabic letter mark, the
-   * zero-width family and the bidi marks, the bidi embeddings and isolates, the word joiner family, the variation selectors, the
-   * byte order mark and the tag block. A phone's emoji keyboard adds a variation selector to many
-   * emoji, so the typed words and the ring's copy differ until both pass through this.
+   * `broker/sanitize.ts`, in the same ranges: C0 but the tab, DEL, and every code point that
+   * carries Unicode's `Default_Ignorable_Code_Point` property and is not a letter. The soft hyphen,
+   * the Arabic letter mark, the zero-width family, the bidi controls, every variation selector, the
+   * byte order mark and the tag block are among them. The four Hangul fillers U+115F, U+1160,
+   * U+3164 and U+FFA0 are the property's letters and stay, as the replacement character U+FFFD
+   * does. Written as numbers, since a phone's browser and the broker can hold different Unicode
+   * versions. A phone's emoji keyboard adds a variation selector to many emoji, so the typed words
+   * and the ring's copy differ until both pass through this.
    */
   function invisibleCode(code) {
-    return (code <= 0x1f && code !== 0x09) || code === 0x7f || code === 0x00ad || code === 0x061c ||
+    return (code <= 0x1f && code !== 0x09) || code === 0x7f || code === 0x00ad || code === 0x034f ||
+      code === 0x061c || (code >= 0x17b4 && code <= 0x17b5) || (code >= 0x180b && code <= 0x180f) ||
       (code >= 0x200b && code <= 0x200f) || (code >= 0x202a && code <= 0x202e) ||
-      (code >= 0x2060 && code <= 0x2064) || (code >= 0x2066 && code <= 0x2069) ||
-      (code >= 0xfe00 && code <= 0xfe0f) || code === 0xfeff || (code >= 0xe0000 && code <= 0xe007f);
+      (code >= 0x2060 && code <= 0x206f) || (code >= 0xfe00 && code <= 0xfe0f) || code === 0xfeff ||
+      (code >= 0xfff0 && code <= 0xfff8) || (code >= 0x1bca0 && code <= 0x1bca3) ||
+      (code >= 0x1d173 && code <= 0x1d17a) || (code >= 0xe0000 && code <= 0xe0fff);
   }
 
   /**

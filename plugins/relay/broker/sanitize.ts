@@ -86,12 +86,23 @@ export function clean(value: string): string {
 /**
  * Code points that can reorder or hide text with no visual trace.
  *
- * The class covers C0 but the tab, DEL, the soft hyphen, the Arabic letter mark, the bidirectional
- * overrides and isolates, the zero-width family, the word joiner, the variation selectors, the byte
- * order mark, and the Unicode tag block, which encodes a full hidden copy of ASCII that renders as
- * nothing at all and is the standard way text is smuggled past a reader. It is a class of what
- * renders as nothing on every surface, the rule `docs/security-model.md` states for it, not of what
- * is merely unusual: a homoglyph, a right-to-left script, and an emoji are all legible and all stay.
+ * The class covers C0 but the tab, DEL, and every code point that carries Unicode's
+ * `Default_Ignorable_Code_Point` property and is not a letter: the soft hyphen, the combining
+ * grapheme joiner, the Arabic letter mark, the bidirectional controls, the zero-width family, the
+ * word joiner, every variation selector, the byte order mark and the Unicode tag block are among
+ * them, with the code points Unicode reserves for characters of this kind. The tag block encodes a
+ * full hidden copy of ASCII that renders as nothing at all and is the standard way text is smuggled
+ * past a reader, and a run of variation selectors can stand for a run of byte values the same way.
+ * It is a class of what renders as nothing on every surface, the rule `docs/security-model.md`
+ * states for it, not of what is merely unusual: a homoglyph, a right-to-left script, and an emoji
+ * are all legible and all stay.
+ *
+ * Five blanks are outside it. The Hangul fillers U+115F, U+1160, U+3164 and U+FFA0 carry the
+ * property and are its only letters, so they stay as letters: `docs/security-model.md` accepts the
+ * Hangul filler as a printable blank, and the two jamo fillers stand for a missing part of a Korean
+ * syllable block, so dropping one changes how the letters beside it draw. The Braille blank U+2800 does not carry the property and is a printable pattern.
+ * U+FFF9 to U+FFFD sit just past a range below and must stay out too: U+FFFD is the
+ * visible mark `shown` writes for a lone surrogate half, so a range that took it would undo that.
  *
  * The tab is outside it because it has a width on every surface: a Discord message inside a fence
  * and outside one, a terminal, and the text the model reads. It moves the next character along the
@@ -119,17 +130,34 @@ export function isInvisible(code: number): boolean {
     code === 0x7f ||
     // Soft hyphen: renders as nothing until a line break falls on it.
     code === 0x00ad ||
+    // Combining grapheme joiner.
+    code === 0x034f ||
     // Arabic letter mark: a bidirectional control outside the two ranges below, which steers the
     // order of the right-to-left text around it and draws as nothing.
     code === 0x061c ||
+    // Two Khmer inherent vowels.
+    (code >= 0x17b4 && code <= 0x17b5) ||
+    // The Mongolian variation selectors and vowel separator.
+    (code >= 0x180b && code <= 0x180f) ||
+    // The zero-width family and the direction marks.
     (code >= 0x200b && code <= 0x200f) ||
+    // The bidirectional embeddings and overrides.
     (code >= 0x202a && code <= 0x202e) ||
-    (code >= 0x2060 && code <= 0x2064) ||
-    (code >= 0x2066 && code <= 0x2069) ||
+    // The word joiner, the invisible operators, the isolates, six deprecated format controls and
+    // the one code point Unicode reserves among them.
+    (code >= 0x2060 && code <= 0x206f) ||
+    // Variation selectors 1 to 16.
     (code >= 0xfe00 && code <= 0xfe0f) ||
     code === 0xfeff ||
-    // The tag block. Every printable ASCII character has a copy here that renders as nothing.
-    (code >= 0xe0000 && code <= 0xe007f)
+    // Reserved. The range ends at U+FFF8, and U+FFFD past it is the mark `shown` writes.
+    (code >= 0xfff0 && code <= 0xfff8) ||
+    // The shorthand format controls.
+    (code >= 0x1bca0 && code <= 0x1bca3) ||
+    // The musical format controls.
+    (code >= 0x1d173 && code <= 0x1d17a) ||
+    // The tag block, variation selectors 17 to 256 and the reserved code points around them. Every
+    // printable ASCII character has a copy in the tag block that renders as nothing.
+    (code >= 0xe0000 && code <= 0xe0fff)
   );
 }
 

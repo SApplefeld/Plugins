@@ -41,12 +41,13 @@ function failureLine(error) {
     // A thrown value whose fields cannot be read still ends the process with a line naming that.
     message = "the thrown value could not be described";
   }
-  // The class broker/sanitize.ts's isInvisible strips, the Arabic letter mark U+061C among its
-  // bidirectional controls, plus the tab, since a log line is read in a terminal where a tab
-  // misaligns columns, plus U+0085, U+2028 and U+2029, which a log reader may take as line breaks.
-  // Inlined because this file cannot import TypeScript.
+  // The class broker/sanitize.ts's isInvisible strips, range for range: the ASCII controls and
+  // every code point Unicode marks ignorable in drawing but the four Hangul fillers, the Arabic
+  // letter mark U+061C and the variation selectors among them. Plus the tab, since a log line is
+  // read in a terminal where a tab misaligns columns, plus U+0085, U+2028 and U+2029, which a log
+  // reader may take as line breaks. Inlined because this file cannot import TypeScript.
   const clean = `${code} ${message}`.replace(
-    /[\u0000-\u001f\u007f\u0085\u00ad\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufe00-\ufe0f\ufeff\u{e0000}-\u{e007f}]/gu,
+    /[\u0000-\u001f\u007f\u0085\u00ad\u034f\u061c\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufe00-\ufe0f\ufeff\ufff0-\ufff8\u{1bca0}-\u{1bca3}\u{1d173}-\u{1d17a}\u{e0000}-\u{e0fff}]/gu,
     " ",
   );
   return `${new Date().toISOString()} [error] broker: failed while loading: ${clean}\n`;
