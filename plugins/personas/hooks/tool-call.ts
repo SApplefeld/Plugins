@@ -170,6 +170,13 @@ export interface ToolCallContext extends SharedHandlerState {
   setCompactionReminderAt: (value: number) => void;
   lastBreakInCheckAt: () => number;
   setLastBreakInCheckAt: (value: number) => void;
+  // The binding of the routine's turn now running or continued, or null in
+  // every other turn.
+  routineHold: () => RoutineHold | null;
+  // Whether $.agent.list() or the spawn map names the agent id, false where
+  // the list read throws or answers no array. Read by the routine hold on
+  // its refusing path alone.
+  agentIdNamed: (agentId: string) => Promise<boolean>;
 }
 
 // What a goal tool's store write came to: true where it landed, false where
@@ -329,6 +336,44 @@ function awaitingAdmittedByText(awaitingAbove: GoalNode | undefined, entry: Expe
     : `; admitted by origin ${originKind}`;
 }
 
+// The binding of a routine's turn to the persona that stored the routine's
+// note: the routine's id, that persona, and whether the turn now running has
+// its routine_withheld row. hooks/index.ts sets it at the start of the turn a
+// routine's entry opens, keeps it through each continued turn after it, and
+// clears it at the next turn that opens with text of its own.
+export type RoutineHold = { id: string; persona: string; rowWritten: boolean };
+
+// The refusal a routine's turn answers a tool call with while the session
+// holds `heldPersona`, or null where no binding stands or the session holds
+// the persona that stored the note. The test is the persona held at the
+// call, never one taken at the turn's start, so a switch before the turn
+// opens and a switch inside it are both refused. The text names the
+// routine's id and the two personas, each the plugin's own value, and
+// carries none of the note.
+export function routineHoldRefusal(hold: RoutineHold | null, heldPersona: string): string | null {
+  if (hold === null || hold.persona === heldPersona) return null;
+  return `Refused: this turn is routine ${hold.id}'s, whose note persona '${hold.persona}' stored, and the session holds persona '${heldPersona}'. A routine's note runs tools only under the persona that stored it. No tool runs in this turn.`;
+}
+
+// The one routine_withheld row of a held turn, pushed on the state the
+// session holds where the binding's persona is not the session's and the
+// turn has no row yet. Returns whether it pushed, so the caller saves. The
+// detail names the routine's id and the storing persona and none of the note.
+// While a switch is mid-way, sess.persona naming the new persona and the
+// state still the old one's, it pushes nothing and leaves the turn without a
+// row, so the next refused call writes it on the state the session then holds.
+export function noteRoutineWithheld(sess: Pick<ToolCallContext["sess"], "persona" | "state">, hold: RoutineHold): boolean {
+  if (hold.rowWritten || hold.persona === sess.persona || sess.state.persona !== sess.persona) return false;
+  hold.rowWritten = true;
+  sess.state.decisions.push({
+    timestamp: Date.now(),
+    loop: "monitor",
+    action: "routine_withheld",
+    detail: `[ROUTINE] turn of ${hold.id}, stored by persona '${hold.persona}', held with the session on another persona; its tool calls are refused`,
+  });
+  return true;
+}
+
 // The served body: what the handler's try block in hooks/index.ts answered
 // with before the served answer's scrub, from the off-arming path to the
 // break-in scan.
@@ -350,6 +395,29 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       } catch { /* the window stands as it was; the result stands */ }
     }
     return offGuarded.r;
+  }
+  // The hold on a routine's turn, ahead of every count, tool and guard
+  // below: a call the model made in the main loop is refused while the
+  // session holds a persona other than the one that stored the routine's
+  // note. A call carrying an agent id that $.agent.list() or the spawn map
+  // names belongs to a subagent or teammate loop and goes on, since the
+  // plugin cannot tell a loop the held turn started from one an earlier
+  // turn left running. A call whose agent id neither names, or whose list
+  // read fails, is refused as a main-loop call is. The lookup runs only
+  // where the persona test refuses, so no ordinary call reads the list. A
+  // call whose origin is not the engine's is not the model's, so it is not
+  // the note's act and goes on. The turn's row is written at its first
+  // refused call where the turn's start did not write it, and saved as
+  // bookkeeping: a save that fails leaves the row in memory for the next
+  // write.
+  const routineHold = ctx.routineHold();
+  const heldRoutineRefusal = originIsEngine() ? routineHoldRefusal(routineHold, sess.persona) : null;
+  const namedLoop = heldRoutineRefusal !== null && typeof e.agentId === "string" && e.agentId.length > 0 && await ctx.agentIdNamed(e.agentId);
+  if (routineHold !== null && heldRoutineRefusal !== null && !namedLoop) {
+    if (noteRoutineWithheld(sess, routineHold)) {
+      try { await persist(); } catch { /* persist could not read or write the store; the row waits in memory */ }
+    }
+    return { deny: heldRoutineRefusal };
   }
   // A reply the plugin sends through $.tool.call, an hour line the tick
   // sends while a turn is open among them, re-enters this hook under the

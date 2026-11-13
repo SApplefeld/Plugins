@@ -247,7 +247,7 @@ import { addGoalEntry as addGoalEntryFromModule, closeTurnRecordAtTurnEnd as clo
 import { drainAskBriefOwed as drainAskBriefOwedFromModule, drainMemoryOwed as drainMemoryOwedFromModule, drainPairDraftOwed as drainPairDraftOwedFromModule, drainOrphanSweep as drainOrphanSweepFromModule, drainBoxNotices as drainBoxNoticesFromModule, drainSupervisorMailbox as drainSupervisorMailboxFromModule, noteMemoryOwedDropped as noteMemoryOwedDroppedFromModule, noteMemoryWrite as noteMemoryWriteFromModule, notePairDraftsDropped as notePairDraftsDroppedFromModule, writeMemoryRecord as writeMemoryRecordFromModule, type DrainsDeps } from "./drains";
 import { recallInjection as recallInjectionFromModule, recognitionAsk as recognitionAskFromModule, recognitionScopeRetry as recognitionScopeRetryFromModule, settleRecallOutcomes as settleRecallOutcomesFromModule, settleRecognitionOutcomes as settleRecognitionOutcomesFromModule, startRecognitionLoad as startRecognitionLoadFromModule, type RecallDeps } from "./recall";
 import { controllerTick, drainInbox, heartbeatTick, type DrainChoice, type DrainOverrun, type TickContext } from "./controller-tick";
-import { persistAnswering, serveToolCall, type EffortAct, type ToolCallContext } from "./tool-call";
+import { noteRoutineWithheld, persistAnswering, routineHoldRefusal, serveToolCall, type EffortAct, type RoutineHold, type ToolCallContext } from "./tool-call";
 import { serveTurnComplete, type TurnCompleteContext } from "./turn-complete";
 import { channelBodyOf, readMidTurnMessages, repromptText, noteRepromptQueued, noteRepromptRefused, noteRepromptNoLine, coverRepromptThroughTurnEnd, liftHeldAsksForReprompt, repromptIsOwed, closeRepromptWindow, type MidTurnMessage } from "./mid-turn-reprompt";
 import { OPERATOR_LINE_PAUSED_TEXT, OPERATOR_LINE_RESUMED_TEXT } from "./effort-texts";
@@ -1001,6 +1001,22 @@ async function guardContextOf(dp: any, agentId: unknown, spawnTypes: SpawnTypes)
     else agentType = spawnTypeOf(spawnTypes, agentId);
   }
   return { cwd, ...(agentType === undefined ? {} : { agentType }), host: guardHostOf(dp) };
+}
+
+// Whether `agentId` names a subagent or teammate loop the session knows: a
+// row of $.agent.list() with that id, or an id the agent.spawn hook recorded
+// in `spawnTypes`. A list read that throws or answers no array names
+// nothing. The hold on a routine's turn reads it, on its refusing path alone.
+async function agentIdNamed(dp: any, agentId: string, spawnTypes: SpawnTypes): Promise<boolean> {
+  let list: unknown;
+  try {
+    list = await dp.agent.list();
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(list)) return false;
+  if ((list as { id?: unknown }[]).some((a) => a && a.id === agentId)) return true;
+  return spawnTypeOf(spawnTypes, agentId) !== undefined;
 }
 
 // One guard event line. The detail is flat, as the journal's event line
@@ -4273,6 +4289,14 @@ export const register: Register = async (on, options) => {
   let currentTurnAuthor = "";
   let currentTurnEntry: ExpectedTurn | null = null;
   let currentGateTurnId: string | null = null;
+  // The binding of a routine's turn to the persona that stored its note, set
+  // at turn.start where the turn matched a routine's entry and read by the
+  // tool.call handler, which refuses the model's calls while the session
+  // holds another persona. Unlike the six above it outlives its turn's
+  // completion: a turn that starts with no text continues the turn before it
+  // and keeps the binding, and only a main-loop turn that opens with text of
+  // its own replaces or clears it.
+  let routineHold: RoutineHold | null = null;
   // The id of the proposal turn whose proposal agentic_say has already
   // ledgered, so only the first call to the coordinator persona inside a
   // proposal turn is recorded.
@@ -6612,10 +6636,15 @@ export const register: Register = async (on, options) => {
       // line of its own. The note is text the persona stored, so it passes
       // through bracketSafeText and its line is quoted, and it cannot read as
       // a label or a line the plugin wrote. The id is the plugin's own: an
-      // add composes it and a load keeps only the id shape.
+      // add composes it and a load keeps only the id shape. The entry carries
+      // the id and the persona of the state the session holds at the submit,
+      // read before the first await. That state is the one the tick stamped
+      // and checked, and its own persona field names the persona that stored
+      // the note even where agentic_identity has already moved sess.persona
+      // and has not yet replaced the state.
       submitRoutine: async (id, text) => {
         const routineText = quoteContinuationLines(`[ROUTINE id=${id}] ${ROUTINE_LEAD_TEXT}\n${bracketSafeText(text)}`);
-        const routineOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", text: routineText }));
+        const routineOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", routineId: id, routinePersona: sess.state.persona, text: routineText }));
         return routineOutcome;
       },
       expectProposalTurn: () => {
@@ -7489,6 +7518,17 @@ export const register: Register = async (on, options) => {
     // unclassified and not priming where none carries that text.
     currentGateTurnId = e.turnId;
     currentTurnEntry = matched ?? null;
+    // A turn that opens with text of its own takes the binding of the
+    // routine's entry it matched, or none. A turn that opens with no text
+    // continues the turn before it, so it keeps that turn's binding and may
+    // take a routine_withheld row of its own.
+    if (e.text !== "") {
+      routineHold = matched?.kind === "plugin" && matched.routineId !== undefined && matched.routinePersona !== undefined
+        ? { id: matched.routineId, persona: matched.routinePersona, rowWritten: false }
+        : null;
+    } else if (routineHold !== null) {
+      routineHold.rowWritten = false;
+    }
     currentTurnOriginKind = "unclassified";
     currentTurnIsPriming = false;
     currentTurnSenderClass = "operator";
@@ -7649,6 +7689,14 @@ export const register: Register = async (on, options) => {
       }
     }
 
+    // A routine's turn that starts with the session on a persona other than
+    // the one that stored its note takes its routine_withheld row here, on
+    // the state the session holds. Attempted rather than depended on, as at
+    // the withheld stamp above.
+    if (routineHold !== null && noteRoutineWithheld(sess, routineHold)) {
+      try { await persist($); } catch { /* persist could not read or write the store; the row waits in memory */ }
+    }
+
     // The follow-up entries the opening prompt listed are this turn's to
     // show, so this turn's end reads their outcome.
     if (typeof e.turnId === "string") await markFollowUpsShownAtTurnStart($, followUpsShownHere.map((o) => o.id), e.turnId);
@@ -7748,6 +7796,8 @@ export const register: Register = async (on, options) => {
         currentTurnAuthor: () => currentTurnAuthor,
         turnLeafId: () => turnLeafId,
         currentTurnEntry: () => currentTurnEntry,
+        routineHold: () => routineHold,
+        agentIdNamed: (agentId) => agentIdNamed($, agentId, spawnTypes),
         currentGateTurnId: () => currentGateTurnId,
         compactionHeld: () => compactionHeld,
         proposalLedgeredTurnId: () => proposalLedgeredTurnId,
@@ -7789,7 +7839,10 @@ export const register: Register = async (on, options) => {
     // call naming the guards. Under live, a failure before the guard phase on
     // a call that never reached next(e) refuses it where any before guard
     // matches, since the replay would run the tool unjudged; a matcher that
-    // throws refuses it too, journaled under its guard's name. Any other failure, or any mode but live,
+    // throws refuses it too, journaled under its guard's name. In any mode, a
+    // failure on a call that never reached next(e) refuses it where the hold
+    // on a routine's turn refuses the model's call, with the hold's own text.
+    // Any other failure, or any mode but live,
     // journals the failure and replays next(e). The replay is safe whenever
     // it falls: the engine's Caught contract makes this handler's next
     // replay-safe, so where the handler had called next(e), the replay
@@ -7825,6 +7878,21 @@ export const register: Register = async (on, options) => {
         try { refusal = await bodyFileRefusal(e, { read: (p) => $.fs.read(p) }, next.budget.remainingMs); } catch { return withheldToolResult(); }
       }
       if (refusal !== null) return { deny: refusal };
+    }
+    // Where the handler fell before it called next(e), the hold on a
+    // routine's turn may not have run either, so it runs here with the test
+    // serveToolCall makes: a call the model made is refused while the session
+    // holds a persona other than the one that stored the note, unless it
+    // carries an agent id $.agent.list() or the spawn map names. The turn's
+    // row is pushed in memory alone, since the grace may not cover a save,
+    // and a push that throws still refuses the call.
+    if (!next.called && next.origin?.plugin === "engine") {
+      const heldRoutineRefusal = routineHoldRefusal(routineHold, sess.persona);
+      const namedLoop = heldRoutineRefusal !== null && typeof e.agentId === "string" && e.agentId.length > 0 && await agentIdNamed($, e.agentId, spawnTypes);
+      if (routineHold !== null && heldRoutineRefusal !== null && !namedLoop) {
+        try { noteRoutineWithheld(sess, routineHold); } catch { /* the state could not take the row; the call is refused all the same */ }
+        return { deny: heldRoutineRefusal };
+      }
     }
     // The replay reaches the tool, so a live placeholder it carried down as
     // written earns its one notice here, as servedAnswer gives it.

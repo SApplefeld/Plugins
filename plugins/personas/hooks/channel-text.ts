@@ -70,7 +70,18 @@ export function targetPersonaOf(arg: unknown, own: string): { persona: string } 
 // turn that matched it stands as the operator's own for the effort gate, the
 // autonomy tool and the ask lift; every other consumer of the kind treats it
 // as a plugin entry.
-export type ExpectedTurn = { text: string; settledText?: string } & ({ kind: "delivery"; recordId: string; ground: string; seatLead: boolean; startedLead: boolean; queueLead: boolean; deliveredTo: string; answersAsk?: true } | { kind: "nudge" } | { kind: "plugin" } | { kind: "proposal" } | { kind: "memoryCheck"; goalId: string; goalIds: string[] } | { kind: "reprompt"; coveredAt: number[]; senderClass: "operator" });
+//
+// A routine's entry is the [ROUTINE] turn the tick queues for a due routine.
+// It is a plugin entry that also carries `routineId`, the routine's id, and
+// `routinePersona`, the persona of the state the session held when the entry
+// was queued, the state the tick stamped for the routine, so it names the
+// persona that stored the routine's note. The tool.call handler
+// refuses the model's calls in the turn the entry opens while the session
+// holds any other persona, a test it makes at each call against the persona
+// held then, since agentic_identity can change it before the turn opens and
+// inside it. Every other plugin entry carries neither field and binds its
+// turn to no persona.
+export type ExpectedTurn = { text: string; settledText?: string } & ({ kind: "delivery"; recordId: string; ground: string; seatLead: boolean; startedLead: boolean; queueLead: boolean; deliveredTo: string; answersAsk?: true } | { kind: "nudge" } | { kind: "plugin"; routineId?: string; routinePersona?: string } | { kind: "proposal" } | { kind: "memoryCheck"; goalId: string; goalIds: string[] } | { kind: "reprompt"; coveredAt: number[]; senderClass: "operator" });
 
 // Whether a turn's opening text is the text an entry was submitted with, on
 // either of the entry's two keys. An empty turn text (a continuation) and an
