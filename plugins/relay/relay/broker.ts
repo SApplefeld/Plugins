@@ -11,6 +11,7 @@ import {
   RELAY_REPLY_IDLE_MS,
 } from "../broker/config.ts";
 import type { PermissionVerdict } from "./permission.ts";
+import type { SessionFileRead } from "./session-file.ts";
 
 /**
  * Who wrote an inbound message, as the broker names them, how many messages the text gathers when
@@ -130,6 +131,20 @@ export type BrokerClientOptions = {
   replyIdleMs?: number;
   /** The ceiling below, overridable so a test does not have to wait out the real one. */
   replyCeilingMs?: number;
+  /**
+   * Reads the session this relay serves, as Claude Code's session file names it, or the reason it
+   * could not be read. Called afresh at each announcement. Left unset by a client that announces
+   * nothing.
+   */
+  announcement?: () => SessionFileRead;
+  /**
+   * How long after a stream's `hello` the client announces its session, and how long it waits
+   * before each further attempt. The default is the reconnect ceiling the broker times its
+   * unannounced line by, so the relay announces as the broker's 30 seconds run out, almost always
+   * ahead of the heartbeat that would write that line, and a session's own hooks have that long to
+   * register it first.
+   */
+  announceDelayMs?: number;
 };
 
 export type BrokerClient = {
@@ -204,6 +219,13 @@ const DEFAULT_RECONNECT_DELAY_MS = 1_000;
  * covers is one loopback round trip; it is the permission prompt's wait for the same reason.
  */
 const RESTART_TIMEOUT_MS = 15_000;
+
+/**
+ * How long an announcement's POST may go with no byte on it before it is read as unanswered and
+ * tried again. The broker decides an announcement at once, so this covers one loopback round trip,
+ * as the restart's wait does.
+ */
+const ANNOUNCE_TIMEOUT_MS = 15_000;
 
 /**
  * How long a permission prompt's POST may go unanswered before the prompt is reported as not taken.
@@ -304,6 +326,7 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
   const readTimeoutMs = options.readTimeoutMs ?? RELAY_READ_TIMEOUT_MS;
   const replyIdleMs = options.replyIdleMs ?? RELAY_REPLY_IDLE_MS;
   const replyCeilingMs = options.replyCeilingMs ?? REPLY_CEILING_MS;
+  const announceDelayMs = options.announceDelayMs ?? RELAY_MAX_RECONNECT_DELAY_MS;
   let stopped = false;
   let delay = baseDelay;
   let request: http.ClientRequest | null = null;
@@ -314,6 +337,84 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
    * the operator's thread; holding the pipe is, and this is the proof of that.
    */
   let replyKey: string | null = null;
+  /**
+   * The announcing's state. The timer is its own and never the reconnect's. `connection` counts
+   * the streams this client has held and lost, so an answer that arrives after its stream dropped
+   * decides nothing for the next one. `unreadableLogged` holds the unreadable session file to one
+   * log line a connection.
+   */
+  let announceTimer: NodeJS.Timeout | null = null;
+  let connection = 0;
+  let unreadableLogged = false;
+
+  /** Ends the announcing for the stream that was held: no timer, and no late answer acted on. */
+  function endAnnouncing(): void {
+    if (announceTimer !== null) clearTimeout(announceTimer);
+    announceTimer = null;
+    connection += 1;
+  }
+
+  /** Starts the wait ahead of the next announcement on the stream now held. */
+  function scheduleAnnouncement(): void {
+    if (options.announcement === undefined) return;
+    if (announceTimer !== null) clearTimeout(announceTimer);
+    announceTimer = setTimeout(() => {
+      announceTimer = null;
+      void announce();
+    }, announceDelayMs);
+  }
+
+  /**
+   * Tells the broker which session this relay serves, from the session file as it reads now. The
+   * broker registers a session whose hooks never reached it from this, and gives one registered
+   * from a hook post its launch directory.
+   *
+   * Four statuses and two HTTP codes are final for the stream held: the broker took the
+   * announcement or will never take it, so asking again would only repeat the answer. Anything
+   * else is tried again after the delay, since it may be the one request that reaches a session
+   * with no thread: no usable file yet, a refused key, no answer, or an answer this client cannot
+   * read. No line written here holds the session id, the folder or a path.
+   */
+  async function announce(): Promise<void> {
+    let read: SessionFileRead | undefined;
+    try {
+      read = options.announcement?.();
+    } catch {
+      // A reader that throws is an attempt with no usable file, tried again after the delay.
+      // Uncaught, the throw would end the relay from a timer and take the session's channel with it.
+      scheduleAnnouncement();
+      return;
+    }
+    if (read === undefined) return;
+    if ("reason" in read) {
+      if (!unreadableLogged) {
+        unreadableLogged = true;
+        log(`relay: cannot announce this session to the broker (${read.reason}); it tries again until the broker answers`);
+      }
+      scheduleAnnouncement();
+      return;
+    }
+    const held = connection;
+    const answer = await post(
+      "/relay/announce",
+      read.cwd === undefined ? { sessionId: read.sessionId } : { sessionId: read.sessionId, cwd: read.cwd },
+      ANNOUNCE_TIMEOUT_MS,
+    );
+    if (held !== connection) return;
+    if (answer.statusCode === 404) {
+      log("relay: the broker does not know the announce route, so this relay stops announcing on this connection");
+    } else if (answer.statusCode === 400) {
+      log("relay: the broker could not read the announcement, so this relay stops announcing on this connection");
+    } else if (answer.status === "registered") {
+      log("relay: the broker registered this session from the relay's announcement");
+    } else if (answer.status === "filled") {
+      log("relay: the broker took this session's launch directory from the relay's announcement");
+    } else if (answer.status === "refused") {
+      log("relay: the broker refused the announcement, since another process holds the announced session");
+    } else if (answer.status !== "held") {
+      scheduleAnnouncement();
+    }
+  }
 
   function handle(line: string): void {
     let event: unknown;
@@ -331,6 +432,11 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
       // so resetting on the status code alone would make a relay that lost the pipe race retry
       // every second for the life of the session, writing a broker log line each time.
       delay = baseDelay;
+      // Each stream announces for itself, since a broker that restarted holds no record of what
+      // the last one was told. A hello that issued no key gives no standing to announce, so no
+      // attempt is scheduled that could only be refused locally.
+      unreadableLogged = false;
+      if (replyKey !== null) scheduleAnnouncement();
       return;
     }
     if (fields.type === "refused") {
@@ -408,6 +514,7 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
   function reconnect(): void {
     if (stopped || retry !== null) return;
     replyKey = null;
+    endAnnouncing();
     // The broker is restarted by its scheduled task and can be down for any part of a twelve-hour
     // session. A
     // relay that gave up would leave the session running and permanently unreachable, with its
@@ -480,13 +587,23 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
    * `idleMs` is silence on the socket rather than elapsed time, and the waits are the caller's:
    * the two routes cost different work on the broker's side, and only a reply, which is answered
    * across a whole paced run, also carries an absolute ceiling.
+   *
+   * `statusCode` is the answer's HTTP status, present once a whole response arrived and absent
+   * where none did. It is for the one caller whose route an older broker does not know.
    */
   function post(
     path: string,
     body: Record<string, unknown>,
     idleMs: number,
     ceilingMs?: number,
-  ): Promise<{ status: string; error?: string; reason?: string; unresolved?: string[]; quieted?: true }> {
+  ): Promise<{
+    status: string;
+    error?: string;
+    reason?: string;
+    unresolved?: string[];
+    quieted?: true;
+    statusCode?: number;
+  }> {
     if (replyKey === null) {
       // No pipe, so no standing to write. Reported locally rather than attempted, because the
       // broker would refuse it and the model is waiting on the answer either way.
@@ -506,6 +623,7 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
         reason?: string;
         unresolved?: string[];
         quieted?: true;
+        statusCode?: number;
       }): void => {
         if (settled) return;
         settled = true;
@@ -563,9 +681,14 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
                     ? (unresolved as string[])
                     : undefined,
                 quieted: parsed.quieted === true ? true : undefined,
+                statusCode: response.statusCode,
               });
             } catch {
-              finish({ status: "failed", error: "the broker's answer was not JSON" });
+              finish({
+                status: "failed",
+                error: "the broker's answer was not JSON",
+                statusCode: response.statusCode,
+              });
             }
           });
         },
@@ -603,6 +726,7 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
       if (retry !== null) clearTimeout(retry);
       retry = null;
       replyKey = null;
+      endAnnouncing();
       request?.destroy();
       request = null;
     },

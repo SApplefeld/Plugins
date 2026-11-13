@@ -62,6 +62,21 @@
 //     the broker stops and closes every connection, this one included. A caller left hanging would
 //     read a restart as a failure and ask again.
 //
+//   POST /relay/announce
+//     the same two headers
+//     body: {"sessionId": "...", "cwd": "<absolute path>"}, the session id and the launch folder
+//        the relay read from Claude Code's file for its process, the folder left off when the
+//        relay read none
+//     -> 200 {"status": "registered" | "filled" | "held" | "refused"}: a record was created for
+//        the session, a record took its launch directory, nothing changed because the token's
+//        records stand as they are, or the session named is one another process token holds
+//     -> 400 when the body is not JSON or names no usable sessionId
+//     -> 403 on the same terms as a reply
+//
+//     A session whose SessionStart never reached the broker and which posts nothing is registered
+//     from this, since its relay is the one part of it that runs on its own clock. The name and
+//     the lineage of the record come from the stream's own headers, never from this body.
+//
 // Two things about that shape are deliberate. The body carries no chat_id: routing by session is
 // the design, and the way to make that true rather than merely intended is to give the wire no
 // field to route by. And the reply key exists because a process token is not a credential: every
@@ -78,6 +93,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RestartAnswer } from "../index.ts";
 import { isMentionList } from "../../relay/protocol.ts";
 import { isAllowedHost, isLoopback, requestHeaders, sessionIdentity } from "../intake.ts";
+import type { AnnounceResult } from "../intake.ts";
 import type { PermissionDesk } from "../security/permission.ts";
 import type { OutboundRouter } from "./outbound.ts";
 import type { RelayConnection, RelayEvent, RelayHub } from "./relays.ts";
@@ -112,6 +128,14 @@ export type RelayRoutesOptions = {
    * the token is ever resolved to a session, so this layer never reads the registry to do it.
    */
   restart: (processToken: string) => RestartAnswer;
+  /**
+   * Decides the announcement a relay makes of its session, on behalf of the process holding the
+   * pipe. It takes the process token and the parsed body's fields unread: which field names the
+   * session, and whether the folder beside it may be kept, are the intake's to read, through the
+   * readers a hook post's fields go through. It answers one of the four statuses, or the mark that
+   * the body named no usable session.
+   */
+  announce: (processToken: string, fields: Record<string, unknown>) => AnnounceResult;
   /** Hard cap on a reply body. A reply longer than a Discord message cannot be posted anyway. */
   maxBodyBytes: number;
   /**
@@ -193,7 +217,8 @@ export function createRelayRoutes(
       route !== "/relay/stream" &&
       route !== "/relay/reply" &&
       route !== "/relay/permission" &&
-      route !== "/relay/restart"
+      route !== "/relay/restart" &&
+      route !== "/relay/announce"
     ) {
       return false;
     }
@@ -319,6 +344,18 @@ export function createRelayRoutes(
         typeof payload === "object" && payload !== null && !Array.isArray(payload)
           ? (payload as Record<string, unknown>)
           : {};
+
+      if (route === "/relay/announce") {
+        // A body naming no usable session is a final answer and not a retry: the relay asks once
+        // per connection, so a session id the broker cannot use is not asked for every half minute.
+        const answer = options.announce(processToken, fields);
+        if (answer === "no-session-id") {
+          send(response, 400, { error: "body has no sessionId" });
+          return;
+        }
+        send(response, 200, { status: answer });
+        return;
+      }
 
       if (route === "/relay/permission") {
         const request_id = fields.request_id;

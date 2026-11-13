@@ -4,13 +4,18 @@
 // `meta` bag it authors itself, and nothing anywhere in it carries a session ID or a name; a
 // channel is a child of the *process*, so a `/clear` mints a new session underneath it without its
 // knowing. That is the whole reason identity travels over hooks instead, and the reason this
-// process joins the broker by the CHANNEL_PROCESS_TOKEN it inherited from the launch wrapper.
+// process joins the broker by the CHANNEL_PROCESS_TOKEN it inherited from the launch wrapper. The
+// relay also reads the session file Claude Code keeps for its process and tells the broker which
+// session it serves, for a session whose hooks never reached the broker; identity still reaches the
+// broker over hooks first.
 //
 // Nothing is written to stdout: stdout is the protocol pipe. Diagnostics go to stderr.
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import os from "node:os";
+import path from "node:path";
 import { DEFAULT_PORT } from "../broker/config.ts";
 import { runDirectly } from "../broker/entrypoint.ts";
 import { createBrokerClient, holdsControlCharacter } from "./broker.ts";
@@ -30,6 +35,7 @@ import {
   channelNotification,
   isMentionList,
 } from "./protocol.ts";
+import { claudeProcessId, readSessionFile } from "./session-file.ts";
 
 /** The longest file path a reply may name, the same bound the broker reads a path under. */
 const MAX_FILE_PATH_LENGTH = 1024;
@@ -357,6 +363,11 @@ export async function startRelay(env: NodeJS.ProcessEnv = process.env): Promise<
     },
   );
 
+  // The claude process this relay serves, whose session file Claude Code keeps under `.claude` in
+  // the home folder. The plugin's launcher passes the process id, since it stands between that
+  // process and this one; a relay registered directly is the claude process's own child.
+  const claudePid = claudeProcessId(env.CHANNEL_CLAUDE_PID, process.ppid);
+
   const broker = createBrokerClient({
     port: port(env),
     processToken: processToken ?? "",
@@ -379,6 +390,18 @@ export async function startRelay(env: NodeJS.ProcessEnv = process.env): Promise<
       });
     },
     log: (message) => process.stderr.write(`${message}\n`),
+    // Read afresh at each announcement, so the client tells the broker what the file says then. The
+    // home folder is resolved here too, so an account with none fails an attempt and never the
+    // relay's start, and reads as no file, so the client still writes its once-per-connection line.
+    announcement: () => {
+      let home: string;
+      try {
+        home = os.homedir();
+      } catch {
+        return { reason: "no file" };
+      }
+      return readSessionFile(claudePid, path.join(home, ".claude", "sessions"));
+    },
   });
 
   if (processToken) {

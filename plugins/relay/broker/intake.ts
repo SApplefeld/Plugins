@@ -705,6 +705,8 @@ function registerLate(
     sessionId: post.sessionId,
     sessionName,
     lineage: stream.lineage,
+    // A hook post's `cwd` is wherever a tool call moved the shell, so it names no launch directory.
+    workdir: null,
   });
   if ("refused" in outcome) {
     if (outcome.refused !== "impostor") return "tested";
@@ -722,6 +724,98 @@ function registerLate(
       "until the session restarts",
   );
   return "tested";
+}
+
+/**
+ * What the broker answers the relay's announcement with. `registered` is a record created from it,
+ * `filled` a record given its launch directory, `held` an announcement that changed nothing because
+ * the token's records stand as they are, and `refused` one naming a session another token holds.
+ */
+export type AnnounceAnswer = "registered" | "filled" | "held" | "refused";
+
+/** An announcement's answer, or the mark that its body named no usable session. */
+export type AnnounceResult = AnnounceAnswer | "no-session-id";
+
+/**
+ * Decides the relay's announcement, `POST /relay/announce`: the session id and the launch folder
+ * a relay read from Claude Code's session file, sent under the reply key, so the caller has
+ * already established that the request came from the process holding the stream. It is the second
+ * source of the late registration docs/security-model.md states, beside a hook post, and the one
+ * that registers a session which posts nothing.
+ *
+ * The two fields are read here, through the readers the hook route reads a `session_id` and a
+ * SessionStart's `cwd` with, so an announced id is cleaned and bounded as a posted one is, and an
+ * announced folder that is over length, not absolute or a UNC path is no folder at all. A body
+ * naming no usable session is marked and changes nothing. Otherwise the first case that matches
+ * gives the answer:
+ *
+ *   1. The token holds a current record. Where that record names the announced session and holds
+ *      no launch directory, and the announcement carries a usable one, the record takes it:
+ *      `filled`. In every other case `held`, so no session id and no directory a record holds is
+ *      ever replaced.
+ *   2. The token holds only ended records: `held`. A session the broker ended stays ended.
+ *   3. The token holds no record. The stream's identity is read, and where the stream dropped after
+ *      its key was checked there is none: `held`, with nothing created, since a record made now
+ *      would be a live session with no pipe that nothing would end. Then the spooled
+ *      announcement's take-in runs, as it does ahead of a hook post's late registration, since a
+ *      spool is the hook's real announcement. Where a record now holds the token: `held`.
+ *   4. The registry registers the session late, under the name and lineage the stream gave when it
+ *      attached, never under anything the session file says. Its impostor refusal, a session id a
+ *      record that is not ended holds under another token, is `refused`, with a line of its own
+ *      and nothing created. Its other refusal cannot follow the cases above, and is `held`.
+ *
+ * No transcript path is learned: the session file holds none, and the session's next hook post
+ * teaches it. Each line written carries the session id, and the refusal's the stream's name. None
+ * carries the token, the lineage or the folder.
+ */
+export function announceSession(
+  registry: Registry,
+  late: LateRegistration,
+  log: Logger | undefined,
+  refusals: RefusalLog,
+  processToken: string,
+  fields: Record<string, unknown>,
+): AnnounceResult {
+  const sessionId = payloadString(fields, "sessionId");
+  if (sessionId === null) return "no-session-id";
+  const workdir = pathField(fields, "cwd");
+
+  if (registry.current(processToken) !== null) {
+    if (workdir === null || !registry.fillWorkdir(processToken, sessionId, workdir)) return "held";
+    log?.info(`relay: session ${sessionId} took its launch directory from its relay's announcement`);
+    return "filled";
+  }
+  if (registry.list().some((record) => record.processToken === processToken)) return "held";
+
+  const stream = late.identity(processToken);
+  if (stream === null) return "held";
+  late.takeIn(processToken);
+  if (registry.current(processToken) !== null) return "held";
+
+  const outcome = registry.registerLate({
+    processToken,
+    sessionId,
+    sessionName: stream.sessionName,
+    lineage: stream.lineage,
+    workdir,
+  });
+  if ("refused" in outcome) {
+    if (outcome.refused !== "impostor") return "held";
+    refusals.warn(
+      "relay announcement naming a session another process token holds",
+      `session=${sessionId} name=${stream.sessionName ?? "none"} ` +
+        "(refused; the session stays with the token that announced it)",
+    );
+    return "refused";
+  }
+  log?.info(
+    `relay: session ${outcome.record.sessionId} registered from its relay's announcement, since no ` +
+      "SessionStart and no hook post registered it" +
+      (outcome.record.workdir === null
+        ? "; it holds no launch directory, so a reply cannot attach a file until the session restarts"
+        : ""),
+  );
+  return "registered";
 }
 
 function send(response: ServerResponse, status: number, body: unknown): void {
@@ -842,7 +936,10 @@ export type HandlerOptions = {
    * The relay hub, for the late registration: a session whose SessionStart never reached the
    * broker is registered from the first tool, stop or prompt post under its token, once its relay
    * has attached. Optional on the terms the logger is: with none wired no post but a SessionStart
-   * creates a record, and a mirror post under a token no session holds is dropped unread.
+   * creates a record, and a mirror post under a token no session holds is dropped unread. The
+   * relay's announcement is the late registration's other source. It arrives on the relay's own
+   * route and is decided by `announceSession`, which is handed the hub by its own caller, so it
+   * registers a session whether or not this option is wired.
    */
   lateRegistration?: LateRegistration;
   /**

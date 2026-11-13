@@ -386,8 +386,10 @@ the kit at `docs/archive/claude-kit_core-module_spec_v1.md`, closed its section 
 on 2026-10-05. The operator chose on 2026-10-28 to have the adapter built, and the kit carries that
 work as a relay adapter plan of its own, which is written and not yet built. That plan would add
 `relayAdapter` as a persona plugin option that ships `off`. So every host stays on `settings`. A
-host switched to `plugin` today has no hook of this project's anywhere, so no session on it is
-announced and no question in it is answerable from Discord.
+host switched to `plugin` today has no hook of this project's anywhere, so no hook announces a
+session on it. Each session there gets its thread only from its relay's announcement, about 30
+seconds after its relay connects, and the thread shows no activity. No question in it is
+answerable from Discord.
 
 Three things here carry the word plugin, and they are separate. `plugin` is a value of the hook
 owner. The relay plugin, under `plugins/relay` in this repository, carries the relay's MCP server
@@ -424,18 +426,22 @@ A `plugin` host would also rely on the adapter for a session's start directory. 
 from the `cwd` field of the `SessionStart` post that launches the session, never a compaction's,
 and it bounds the one file a session's reply may carry
 ("A session can send one file" in `operations.md`). Where the adapter's `SessionStart` post carries
-no `cwd`, every file a session names is refused as `this session's working directory is not recorded
-or no longer exists`, and the reply's text is not posted either.
+no `cwd`, the relay's announcement fills the directory from the file Claude Code keeps for the
+session, about 30 seconds after the relay connects. Where neither names one, every file a session
+names is refused as `this session's working directory is not recorded or no longer exists`, and
+the reply's text is not posted either.
 
 **Switch a host only when the persona plugin is known to carry the hooks.** Today it carries none.
-Removing them first leaves every session started afterwards unannounced, with no question answerable
-from Discord. A kit plan closes each finished section with a Chapter appended at its end, recording
-what the section delivered. The conditions below read the section 5 Chapter of the kit's core module
-plan, archived in the kit at `docs/archive/claude-kit_core-module_spec_v1.md`, where the hook
-entries an adapter took over would be recorded. That plan closed section 5 by a ruling with nothing
-built and wrote no section 5 Chapter, so the Chapter does not exist and condition 1 holds on every
-host. When the kit's relay adapter plan ships, this repository takes a plan of
-its own that rewrites these conditions against the real adapter. Read these conditions in order:
+Removing them first leaves every session started afterwards with no hook to announce it or report
+its activity. Its relay's announcement still gives it a thread, which shows no activity, and no
+question in it is answerable from Discord. A kit plan closes each finished section with a Chapter
+appended at its end, recording what the section delivered. The conditions below read the section 5
+Chapter of the kit's core module plan, archived in the kit at
+`docs/archive/claude-kit_core-module_spec_v1.md`, where the hook entries an adapter took over would
+be recorded. That plan closed section 5 by a ruling with nothing built and wrote no section 5
+Chapter, so the Chapter does not exist and condition 1 holds on every host. When the kit's relay
+adapter plan ships, this repository takes a plan of its own that rewrites these conditions against
+the real adapter. Read these conditions in order:
 
 1. Keep the default `settings` until the kit's core module plan has merged and its section 5 Chapter
    names which of the six the adapter took.
@@ -1093,7 +1099,10 @@ ships a shim instead, `plugins/relay/launch.mjs`. It reads
 `%LOCALAPPDATA%\sapplefeld-channels\relay-mcp.json`, the registration the wrapper rewrites on every
 launch, and runs the relay named there with the MCP conversation passed straight through. The relay
 serving the channel is therefore always the one in the checkout that launched the session, and a
-checkout that moves needs no reinstall. Before it starts the relay, the shim heals that checkout's
+checkout that moves needs no reinstall. The shim also hands the relay the claude process's id, its
+own parent's, since the shim stands between that process and the relay. The relay finds the
+session it serves in the file Claude Code keeps for that process, and announces the session to the
+broker from it. Before it starts the relay, the shim heals that checkout's
 dependencies. It passes the dependency store only when the checkout sits inside the marketplace
 clone its own cache copy came from, mapping `<plugins>\cache\<marketplace>\relay\<version>\` to
 `<plugins>\marketplaces\<marketplace>\`, so a development checkout installs in place as before. A

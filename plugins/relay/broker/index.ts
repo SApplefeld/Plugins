@@ -17,7 +17,7 @@ import {
 } from "./config.ts";
 import type { BrokerConfig } from "./config.ts";
 import { createAnnounceSpool } from "./announce-spool.ts";
-import { createHandler } from "./intake.ts";
+import { announceSession, createHandler, createRefusalLog } from "./intake.ts";
 import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
 import { createRegistry, liveByLineage } from "./registry.ts";
@@ -1714,6 +1714,10 @@ export async function startBroker(
     waiting: () => new Set<string>(),
     pendingFor: () => [],
   };
+  // The announce route's own refusal limiter, as the spooled announcement's take-in holds its own:
+  // a run of refused announcements is counted under its own reason and cannot be what suppresses a
+  // hook post's refusal line.
+  const announceRefusals = createRefusalLog(logger, now);
   const relayRoutes = createRelayRoutes({
     relays,
     outbound,
@@ -1731,6 +1735,11 @@ export async function startBroker(
       const asker = record === null ? "a relay with no announced session" : `session ${record.sessionId}`;
       return restart(`${asker} asked through its relay`);
     },
+    // A relay's announcement of its session, decided where a hook post's late registration is. The
+    // hub answers what the stream named for the session and runs the spool's take-in ahead of the
+    // registration, the two answers the hook route's late registration is handed.
+    announce: (processToken, fields) =>
+      announceSession(registry, relays, logger, announceRefusals, processToken, fields),
     maxBodyBytes: config.maxBodyBytes,
     streamIdleMs: RELAY_READ_TIMEOUT_MS,
     replyHeartbeatMs: REPLY_HEARTBEAT_MS,

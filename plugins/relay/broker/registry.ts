@@ -304,9 +304,11 @@ export type SessionRecord = {
    * it. Each SessionStart but a compaction's writes it, a start naming none clearing it, and every
    * other event leaves it as it was. A compaction never records one: it fires inside the running
    * process wherever a tool call has moved the shell, so it is no launch. It leaves a refreshed
-   * record's directory as it was, and a record it opens holds none. It is an instruction to open a
-   * directory, as a transcript path is an instruction to open a file: it is never rendered, never
-   * logged and never published on `GET /sessions`.
+   * record's directory as it was, and a record it opens holds none. The relay's announcement is the
+   * second source, under the same reader: it sets the directory of a record it creates, fills the
+   * record of the session it names where that record holds none, and never replaces one a record
+   * holds. It is an instruction to open a directory, as a transcript path is an instruction to open
+   * a file: it is never rendered, never logged and never published on `GET /sessions`.
    * Persisted, because a restart keeps a live session and must still know where its files may come
    * from.
    */
@@ -359,16 +361,27 @@ export type HookIntake = {
 };
 
 /**
- * A post a late registration is asked of: the fields of a tool, stop or prompt post that name its
- * session, with the lineage and the fallback name the session's relay gave when it attached.
+ * What a late registration is asked of. From a hook post, it is the fields of a tool, stop or
+ * prompt post that name its session. From the relay's announcement, it is the session the relay
+ * read from Claude Code's session file. Either way the lineage and the fallback name are the ones
+ * the session's relay gave when it attached.
  */
 export type LatePost = {
   processToken: string;
   sessionId: string;
-  /** The post's own `X-Channel-Session-Name`, or the name the relay's stream gave where it has none. */
+  /**
+   * A hook post's own `X-Channel-Session-Name`, or the name the relay's stream gave where the post
+   * has none. An announcement carries no name, so its name is the stream's.
+   */
   sessionName: string | null;
-  /** The lineage the relay's stream gave. A post that is not a SessionStart carries none of its own. */
+  /** The lineage the relay's stream gave. Neither a later post nor an announcement carries one. */
   lineage: string | null;
+  /**
+   * The launch directory, after the absolute-local-path reader. The relay's announcement carries
+   * the one its session file names, or null where that one was missing or refused. A hook post
+   * passes null: its `cwd` is wherever a tool call moved the shell, which vouches for no launch.
+   */
+  workdir: string | null;
 };
 
 /**
@@ -410,24 +423,36 @@ export type Registry = {
   /** Applies a hook event. Returns the touched record, or null when the event was ignored. */
   apply: (intake: HookIntake) => SessionRecord | null;
   /**
-   * Creates the record of a session whose SessionStart never reached the broker, from a later post
-   * under its process token. This is the late registration docs/security-model.md states, and the
-   * one way besides a SessionStart that a record is created. The caller has already established
-   * that a relay stream is attached under the token, which is the proof a live session holds it,
-   * that the post is a main-thread post naming a session, and that no spooled announcement was
-   * there to take in instead. Two rules are held here, because they are the registry's to read:
+   * Creates the record of a session whose SessionStart never reached the broker. This is the late
+   * registration docs/security-model.md states. It has two sources, a later hook post under the
+   * session's process token and the announcement the session's relay makes on its own stream, and
+   * the two are the only ways a record is created without a SessionStart. The caller has already
+   * established that a relay stream is attached under the token, which is the proof a live session
+   * holds it, that the post is a main-thread post naming a session or the announcement names one,
+   * and that no spooled announcement was there to take in instead. Two rules are held here, because
+   * they are the registry's to read:
    *
    *   - The token holds no record at all, an ended one included. A token whose only record is ended
    *     belongs to a session that did announce and was ended, and it stays ended.
    *   - No record that is not ended holds the session id under another token, the impostor rule a
-   *     SessionStart is held to, so a post cannot take a running session over by naming it.
+   *     SessionStart is held to, so neither source can take a running session over by naming it.
    *
-   * The record is the one a SessionStart would create, with no source and no launch directory, since
-   * a later post's `cwd` is wherever a tool call moved the shell, and with its relay liveness
-   * stamped, since the attached stream is why it exists. A later SessionStart from the same session
-   * refreshes it through `apply` and fills both.
+   * The record is the one a SessionStart would create, with no source, the launch directory the
+   * caller passed, and its relay liveness stamped, since the attached stream is why it exists. A
+   * hook post passes no launch directory and the relay's announcement passes the one it read, so a
+   * record made from a hook post holds none until `fillWorkdir` or a SessionStart supplies it. A
+   * later SessionStart from the same session refreshes the record through `apply`, and writes its
+   * own source and launch directory.
    */
   registerLate: (post: LatePost) => LateOutcome;
+  /**
+   * Gives the token's current record its launch directory, from the relay's announcement, where
+   * that record names the given session and holds no launch directory. True where it was written.
+   * False, with nothing changed, in every other case: the token holds no current record, the record
+   * names another session, or it already holds a directory. So it never replaces a directory or a
+   * session id a record holds.
+   */
+  fillWorkdir: (processToken: string, sessionId: string, workdir: string) => boolean;
   /**
    * True when this SessionStart is a subprocess announcing itself under a token a relayed session
    * already holds, which `apply` declines to register.
@@ -826,7 +851,8 @@ export function createRegistry(options: RegistryOptions): Registry {
       // It is also the one event that creates a record through this function, whether it was
       // posted to /hook or taken in from the file the hook spooled while the broker was down
       // (announce-spool.ts): the spool is that same announcement applied late through this
-      // function, under the same checks. The one other way a record is created is `registerLate`.
+      // function, under the same checks. The one other way a record is created is `registerLate`,
+      // from a later hook post or from the relay's announcement.
       if (intake.sessionId === null) return null;
       const record = start(intake, intake.sessionId);
       if (record === null) return null;
@@ -836,7 +862,8 @@ export function createRegistry(options: RegistryOptions): Registry {
 
     // Every other event needs a session that already holds a record. Without this a stray or
     // replayed post would conjure a session record for a process that may not exist. A post under
-    // an attached relay's token is the caller's to take to `registerLate`, never this function's.
+    // an attached relay's token is the caller's to take to `registerLate`, never this function's,
+    // as that relay's own announcement is.
     const record = route(intake);
     if (!record) return null;
 
@@ -935,14 +962,25 @@ export function createRegistry(options: RegistryOptions): Registry {
       turnActiveAt: null,
       harnessNotice: null,
       title: null,
-      // A later post's directory vouches for no launch, as a compaction's does not.
-      workdir: null,
+      // The caller's reading of the launch: null from a hook post, whose directory vouches for no
+      // launch, as a compaction's does not, and the session file's from the relay's announcement.
+      workdir: post.workdir,
     };
     sessions.set(post.sessionId, record);
     // A fresh record starts fresh announcement bookkeeping, as one a SessionStart opens does.
     modelSides.delete(post.sessionId);
     mutated();
     return { record };
+  }
+
+  function fillWorkdir(processToken: string, sessionId: string, workdir: string): boolean {
+    const record = current(processToken);
+    if (record === null || record.sessionId !== sessionId || record.workdir !== null) return false;
+    record.workdir = workdir;
+    // Persisted, as the directory a SessionStart reports is: a restart keeps the session and must
+    // still know where its files may come from.
+    mutated();
+    return true;
   }
 
   /** The session a transcript reading belongs to, or null when nothing unended holds that ID. */
@@ -1250,6 +1288,7 @@ export function createRegistry(options: RegistryOptions): Registry {
   return {
     apply,
     registerLate,
+    fillWorkdir,
     subprocessStart,
     impostorStart,
     engage,

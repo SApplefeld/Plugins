@@ -145,7 +145,16 @@ if (root !== undefined) {
 // stdio is inherited rather than piped: this process is a pass-through, and the MCP conversation on
 // stdin and stdout has to reach the relay byte for byte. No shell, so a checkout path containing a
 // space stays one argument instead of becoming a command line to re-parse.
-const child = spawn(entry.command, entry.args, { stdio: "inherit", shell: false });
+//
+// The relay gets this process's environment with CHANNEL_CLAUDE_PID set to this process's parent,
+// which is the claude process: the relay reads that process's session file to learn its session, and
+// its own parent is this shim. An inherited value is dropped first under every casing Windows reads
+// as the same name, so the relay never holds one this process did not set.
+const env = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => fold(key) !== fold("CHANNEL_CLAUDE_PID")),
+);
+env.CHANNEL_CLAUDE_PID = String(process.ppid);
+const child = spawn(entry.command, entry.args, { stdio: "inherit", shell: false, env });
 
 child.on("error", (error) => {
   fail(`could not start the relay with '${entry.command}' (${error.message}).`);

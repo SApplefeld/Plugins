@@ -83,7 +83,8 @@ export type RelayConnection = {
 /**
  * What a relay said of its session when it opened its stream: the `CHANNEL_SESSION` name and the
  * `CHANNEL_LINEAGE` its process inherited, each null where the stream named none. Kept for a late
- * registration alone, which has no SessionStart to read them from. They authorize nothing: whoever
+ * registration alone, from a hook post or from the relay's own announcement of its session, since
+ * neither has a SessionStart to read them from. They authorize nothing: whoever
  * holds the pipe already holds the token, and a token holder can claim any name and lineage on a
  * SessionStart of its own.
  */
@@ -175,7 +176,8 @@ export type RelayHubOptions = {
    * inside that gap finds nothing at the attach. The retry stops when a record lands under the
    * token, whatever wrote it, or when `warnUnannounced` says the hook never reached the broker.
    * The late registration tells it once more at any later time, for a hook or mirror post under
-   * an unannounced pipe's token, before it registers the session from that post.
+   * an unannounced pipe's token and for that pipe's own announcement of its session, before it
+   * registers the session from either.
    * A throw out of it is logged, undoes no attach and stops no heartbeat.
    */
   takeIn?: (processToken: string) => void;
