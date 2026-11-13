@@ -385,7 +385,11 @@ function Get-ChannelDependencyState {
         }
     }
     if ($code -eq 2) {
-        $quote = { param($value) "'" + ($value -replace "'", "''") + "'" }
+        # Each path goes in as a single-quoted literal, where the only escape is a doubled quote.
+        # PowerShell reads five characters as a single quote, the ASCII apostrophe and U+2018
+        # through U+201B, and each of them is doubled in place, since any one left single would
+        # close the literal early. The regex engine reads the \u escapes, so this file stays ASCII.
+        $quote = { param($value) "'" + ($value -replace "['\u2018-\u201B]", '$0$0') + "'" }
         $helperCommand = "& $(& $quote $NodeExe) $(& $quote $helper) --root $(& $quote $RepoRoot) --store $(& $quote $Store)"
         return [pscustomobject]@{
             Ok     = $false

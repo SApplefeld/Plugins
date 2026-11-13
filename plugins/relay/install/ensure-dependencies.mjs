@@ -448,9 +448,14 @@ export function createNpmRunner(
   };
 }
 
-/** A PowerShell single-quoted literal, so a pasted command keeps a path's spaces and quotes. */
+/**
+ * A PowerShell single-quoted literal, so a pasted command keeps a path's spaces and quotes. The only
+ * escape in such a literal is a doubled quote. PowerShell reads five characters as a single quote,
+ * the ASCII apostrophe and U+2018 through U+201B, and each of them is doubled in place, since any one
+ * left single would close the literal early.
+ */
 function psQuote(value) {
-  return `'${value.replaceAll("'", "''")}'`;
+  return `'${value.replace(/['\u2018-\u201B]/g, "$&$&")}'`;
 }
 
 /**
