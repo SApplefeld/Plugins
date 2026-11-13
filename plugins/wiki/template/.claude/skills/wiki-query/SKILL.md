@@ -97,9 +97,21 @@ commit nothing, do not touch `log.md` and do not push. Tell the user the answer
 was not filed because another run is live, naming each path and its minutes,
 and that they can ask again once that run finishes. The answer itself stands.
 If it prints nothing, every dirty path outside `inbox/` is an older leftover.
-Files waiting in `inbox/` are pending drops, not leftovers: leave them. If the
-tree carries recovered work, meaning a modified `index.md`, `log.md` or
-`wiki/` page, or an untracked `wiki/` page, commit it alone first, and only
+Files waiting in `inbox/` are pending drops, not leftovers: leave them. A
+line of the `-What Porcelain` listing whose first column is `A` and whose
+path is under `sources/`, which may sit inside double quotes as git writes
+a name it must quote, is a source an ingest run staged and never committed.
+Do not file the answer: write nothing, make no kb-commit call and do not
+push.
+`-Reconcile` refuses while a source is staged, and any other kb-commit call
+commits the whole index, which would put the staged source under your
+`Query:` subject. Tell the user the answer was not filed, name the staged
+source as the listing shows it, and say the next ingest run commits it, or,
+where more than one source is staged, that a person commits them or
+unstages all but one, since the next ingest stops on them too. The answer
+itself stands. Otherwise, if the tree carries recovered work, meaning a
+modified `index.md`, `log.md` or `wiki/` page, or an untracked `wiki/`
+page, commit it alone first, and only
 then file the answer. Emit exactly:
 
     pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Reconcile -Message '<body>'

@@ -279,7 +279,11 @@ deletes the inbox file only once its copy is whole, so the copy may be
 partial. The run leaves it uncommitted and names the pair in its report for a
 person to reconcile. All of this runs before the inbox is touched.
 Lint and query each commit stray edits by `-Reconcile` before doing their own
-work. The merge skill has no reconcile step: it runs on the tree a conflicting pull left mid-merge, and its one commit completes that merge.
+work. Where a source is staged, each makes no further commit: a lint stops,
+and a query answers without filing its answer. The reason is that
+`-Reconcile` refuses while a source is staged, and any other commit call
+takes the whole index. The next ingest commits the source, or stops for a
+person where more than one is staged. The merge skill has no reconcile step: it runs on the tree a conflicting pull left mid-merge, and its one commit completes that merge.
 
 The reconcile step reads liveness before it recovers anything. Where the tree
 is dirty, the skill runs `kb-status.ps1 -What Live`, which lists each dirty path

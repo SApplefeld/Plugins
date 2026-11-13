@@ -50,6 +50,19 @@ next scheduled lint, or one run by hand, checks the wiki instead. If it prints
 nothing, every dirty path outside `inbox/` is an older leftover, so recover it
 as follows.
 
+First look for a staged source. A line of the `-What Porcelain` listing
+whose first column is `A` and whose path is under `sources/`, which may sit
+inside double quotes as git writes a name it must quote, is a source an
+ingest run staged and never committed, because it died inside kb-commit.
+Stop the whole run now: run no check, write nothing, make no kb-commit
+call, do not touch `log.md` and do not push. `-Reconcile` refuses while a
+source is staged, and any other kb-commit call commits the whole index,
+which would put the staged source and its pages under this run's subject.
+Report the staged source as the listing shows it, and that the next ingest
+run commits it in its first step. Where more than one source is staged, the
+next ingest stops on them too, so report that a person commits them or
+unstages all but one.
+
 If `index.md`, `log.md`, or any
 `wiki/` page is modified, or a `wiki/` page is untracked, those are the
 recovered edits of a run that died before committing. Commit them alone,
@@ -193,9 +206,15 @@ made a `Reconcile:` commit, the report also gives the number of files it
 reconciled. That number is the `<n>` in the `Reconcile: <n> files` subject on
 the commit line kb-commit printed. A
 `Reconcile:` commit this run already made stays, and the next run that pushes
-flushes it. If it prints nothing, any dirty path outside `inbox/` is an older
-leftover: commit it under `Reconcile:` exactly as the reconcile step above
-does, but run no check over it, then go on.
+flushes it. If it prints nothing, a staged source in the listing, read as
+the reconcile step reads it, stops the run here, before any further
+kb-commit call. Apply no fix, write nothing, do not touch `log.md` and do
+not push. A `Reconcile:` commit this run already made stays. The report
+names the staged source and what comes next as the reconcile step's does,
+and gives the counts found and any reconciled count as above.
+Otherwise any dirty path outside `inbox/` is an older leftover: commit it
+under `Reconcile:` exactly as the reconcile step above does, but run no
+check over it, then go on.
 
 Then, as one stretch, apply every recorded fix whose condition still holds,
 append the lint report to `log.md`, and commit. Each recorded fix names the
@@ -245,9 +264,9 @@ quotes, which pass every byte but an apostrophe unchanged. An apostrophe
 would end the quote before kb-commit runs, so write the summary without one. This is the run's own commit
 and it carries `-Push`, which also flushes any earlier `Reconcile:` commit. Even
 a clean run makes it, so a lint pass always leaves an auditable trace in git.
-The one exception is a run that stopped because another run is live, at the
-reconcile step or the write pass: it makes no `Lint:` commit, and its report
-is its only trace.
+The exception is a run that stopped before this commit, whatever stopped
+it: it makes no `Lint:` commit. Its report, and any `Reconcile:` commit it
+made first, are its only trace.
 
 A lint that dies inside its write pass leaves leftovers the next run reconciles
 once they have gone untouched past the thirty-minute window. A failed push is

@@ -10,7 +10,11 @@ no one is present to answer a prompt or notice a stall, so follow it
 exactly. CLAUDE.md is the schema; it owns the page types, slug derivation,
 the new-page-versus-edit heuristic, the contradiction rule, linking,
 citations, and the index.md and log.md formats. This file owns only the
-sequence and its invariants.
+sequence and its invariants. It also owns its command lines. The schema's
+section on moving and committing shows two forms the helpers keep for a
+person at the keyboard, `kb-move.ps1 -Name` and a `sources/` path in
+`-Path`. Where a line there differs from a line in this file, emit this
+file's line.
 
 ## 1. Reconcile any leftovers from an interrupted run
 
@@ -93,8 +97,11 @@ its first column, is the same orphan, left by a run that died inside
 kb-commit after it staged the source and before it committed. Recover it
 before anything else in this step: `-Reconcile` refuses while a source is
 staged. If more than one file under `sources/` is staged, stop the whole run
-and report them, since one commit would carry both. Otherwise its pages are
-already staged, so write nothing and emit only its handle and a body, with
+and report them, since one commit would carry both. Make no kb-commit call
+and do not push, not even with step 5's push-only call: every kb-commit
+commit takes the whole index, so it would carry them under its own subject.
+Otherwise its pages are already staged, so write nothing and emit only its
+handle and a body, with
 no `-Path`:
 
     pwsh -NoProfile -File ./.claude/kb-commit.ps1 -SourceHandle '<handle>' -Message '<body>'
@@ -103,7 +110,11 @@ The commit takes the index as it stands, which holds what the interrupted
 kb-commit staged, so another run's unstaged edits to the same files stay
 out of it. Then commit any other recovered work by `-Reconcile`, then
 finish any untracked orphan. If `-Reconcile` refuses on a staged path, stop
-the whole run and report the refusal, as step 4b does for a refused move.
+the whole run and report the refusal and the path it names, for a person to
+commit or unstage. Make no further kb-commit call and do not push, not even
+with step 5's push-only call, which would commit that staged path under its
+own subject. A commit this run already made stays, and the next run that
+pushes flushes it.
 A refusal whose line opens
 `kb-commit: path names an instruction file Claude Code loads` means a
 recovered or staged path names an instruction file. On `-Reconcile` it
@@ -321,6 +332,18 @@ and do not touch a page the source has nothing to say about. A source that
 touches nothing but itself is legitimate: it gets a summary page and an
 index entry and revises nothing.
 
+An existing page whose path holds an apostrophe is left as it is. Step g
+names every revised page in `-Path`, inside single quotes, and an
+apostrophe would end the quote and hand the rest of the path to the shell.
+The schema's file names hold none, so such a page is one the schema did
+not name, most likely one a person placed.
+It may still be read, since reading names no path on a shell line. Make no
+edit to it and leave it out of `-Path`. Name it in this source's `log.md`
+entry and in the report as a page this run left unrevised, for a person to
+rename. An untracked orphan that step 1 finishes takes the same rule. A
+staged one takes none, since step 1 writes nothing for it and names no
+`-Path`.
+
 **e. Update `index.md`** per the schema: an entry for every page you
 created, under the right category, removing that category's `_(none yet)_`
 placeholder if this is its first entry.
@@ -349,7 +372,8 @@ alone: a short text listing the pages revised, with no subject line, since
 the helper writes the subject. Both values take single quotes, as the move
 does, so a `$` or a backtick in a path or the body reaches kb-commit
 unchanged. Neither may hold an apostrophe, which would end the quote before
-kb-commit runs, so write the body without one. Every operation prefixes its
+kb-commit runs, so write the body without one, and step d keeps a page
+whose path holds one out of `-Path`. Every operation prefixes its
 subject the same way (`Ingest:`, `Lint:`, `Query:`, `Reconcile:`), which is
 what makes each one findable on its own in `git log`.
 
@@ -360,9 +384,11 @@ The final source's kb-commit call, and only that one, carries `-Push`:
     pwsh -NoProfile -File ./.claude/kb-commit.ps1 -SourceHandle '<handle>' -Path '<pages>|index.md|log.md' -Message '<body>' -Push
 
 One push per run. A run that stopped at step 1 or step 4b because another run
-is live makes no push at all, whatever it committed: the rest of this step
-does not apply to it. `-Push` pushes even when its own call had nothing to
-commit, so an earlier source's commit never strands locally. If the run
+is live, or at step 1 because more than one source is staged or because
+`-Reconcile` refused on a staged path, makes no push at all, whatever it
+committed: the rest of this step does not apply to it. `-Push` pushes even
+when its own call had nothing to commit, so an earlier source's commit
+never strands locally. If the run
 made commits, counting step 1's, but ended without one (a last source that
 was a removed duplicate, left under a taken name or skipped, or any other
 early stop), still push, with a call that stages nothing new:
@@ -403,6 +429,7 @@ noted as staying in `inbox/`, how many sources were processed, how many
 commits were made, anything skipped for a bad name (naming the file and
 that a human must rename it), how many duplicates kb-move removed, each
 file left under a name `sources/` already holds (naming the file and that
-a human must rename it), anything else that was refused or could not be
-read, and whether the push succeeded. In a headless run this text is the
-only signal a human ever sees.
+a human must rename it), each existing page left unrevised because its
+path holds an apostrophe, by name, anything else that was refused or could
+not be read, and whether the push succeeded. In a headless run this text
+is the only signal a human ever sees.
