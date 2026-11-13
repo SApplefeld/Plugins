@@ -1,7 +1,7 @@
 # Keeps one process keeper alive per enabled roster entry. This is the script the AgentFleet
 # scheduled task runs at boot, one per machine, under Windows PowerShell 5.1:
 #
-#   powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File bin\Start-Fleet.ps1 [-Roster <path>] [-EnvFile <path>] [-TickSeconds <n>] [-RetireBoundSeconds <n>] [-CloneBoundSeconds <n>] [-KeeperLauncher <path>]
+#   powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File bin\Start-Fleet.ps1 [-Roster <path>] [-EnvFile <path>] [-TickSeconds <n>] [-RetireBoundSeconds <n>] [-CloneBoundSeconds <n>] [-StartsPerTick <n>] [-DeferredTickSeconds <n>] [-KeeperLauncher <path>]
 #
 # Every tick the fleet supervisor reads the roster, reads the machine's process list once, and
 # decides one thing per entry through Get-FleetDecision (bin/keeper-functions.ps1). It starts a
@@ -14,6 +14,20 @@
 # than starting a second one beside each. An adoption after a crash records the roster's run
 # directory, which a rundir edit made while the fleet supervisor was down moves away from the
 # keeper's, so a retire of that keeper never reaches the directory it runs on.
+#
+# A tick starts at most -StartsPerTick keepers, 5 by default. The entries are walked in roster
+# order, so the roster's order is the start order. An entry whose start falls past the cap is left
+# exactly as the tick found it, with no state record written, no marker removed and no clone run,
+# and the next tick reaches the same start for it. Only a keeper started takes a place: an
+# adoption, a retire or any other action takes none, and neither does a start whose release, clone
+# or launch failed. A tick that left any start writes one fleet.log line naming those entries in
+# the order the tick met them:
+#
+#   deferred <n> of <m> starts to later ticks, -StartsPerTick <k>: <name>, <name>
+#
+# where <n> counts the entries left and <m> is <n> plus the keepers the tick started. The next
+# tick then comes after -DeferredTickSeconds, 20 by default, or after -TickSeconds where that is
+# shorter. A tick that left nothing writes no such line and waits -TickSeconds.
 #
 # A retire is a request, never a kill: the fleet supervisor writes <rundir>/shutdown.request, which
 # the supervisor's poll loop honors and the keeper turns into keeper.hold at the exit 0 it leads
@@ -84,6 +98,12 @@ param(
     # Seconds a git clone may run before it is killed and recorded clone-failed.
     [ValidateRange(1, 604800)]
     [int]$CloneBoundSeconds = 1800,
+    # The most keepers one tick starts; an entry past it is started on a later tick.
+    [ValidateRange(1, 1000)]
+    [int]$StartsPerTick = 5,
+    # Seconds to the next tick after a tick that left a start for later, capped at -TickSeconds.
+    [ValidateRange(1, 86400)]
+    [int]$DeferredTickSeconds = 20,
     # The script started per entry. Defaults to the sibling Start-Persona.ps1; the installed route
     # passes its launcher root's Start-InstalledPersona.ps1.
     [string]$KeeperLauncher,
@@ -142,6 +162,10 @@ $script:Handles = @{}
 # The process ids already logged as unknown, so a keeper no roster entry and no state record
 # names costs one line per fleet supervisor run rather than one per tick.
 $script:UnknownLogged = New-Object 'System.Collections.Generic.HashSet[int]'
+
+# The number of starts the last tick left for a later tick, which the main loop reads to choose
+# its wait. Every tick sets it, a tick that ends early included.
+$script:FleetDeferredCount = 0
 
 <#
 .SYNOPSIS
@@ -891,8 +915,12 @@ notBefore the ladder sets, which the next ticks wait out before trying again. Th
 when a clone returns, since a clone can hold the tick up to -CloneBoundSeconds: the wait counts from
 the clone's end, and every entry handled after it is stamped no earlier than that end. The state is written
 once at the end where any record changed, and once more after a clone, before the start it leads to.
+A start decided once StartsPerTick keepers have started this tick is left untouched, before any
+record, release or clone, and its name goes into one deferred line written after the pass; the
+count it leaves is set in FleetDeferredCount for the main loop's wait.
 #>
 function Invoke-FleetTick {
+    $script:FleetDeferredCount = 0
     $now = [DateTime]::UtcNow
     try {
         $entries = Read-FleetRoster -Path $Roster
@@ -965,6 +993,9 @@ function Invoke-FleetTick {
     $bootTime = $null
     $bootRead = $false
     $changed = $false
+    # The keepers this tick has started, and the names of the entries whose start it left for later.
+    $startedCount = 0
+    $deferred = New-Object System.Collections.Generic.List[string]
     foreach ($key in $keys) {
         if ($faulted.Contains($key)) { continue }
         $want = $wanted[$key]
@@ -1003,6 +1034,12 @@ function Invoke-FleetTick {
             -Record $record -LiveProcessId $livePid -HoldPresent $holdPresent -RetiredPresent $retiredPresent -RequestPresent $requestPresent -BootCurrent $bootCurrent `
             -UptimeSeconds $uptime -Now $now -RetireBoundSeconds $RetireBoundSeconds
         if ($decision.Action -eq 'none') { continue }
+        # Past the cap the entry is left as found: no record, no release, no clone, no start. Its
+        # markers, record and keeper are unchanged, so the next tick decides the same start.
+        if ($decision.Action -eq 'start' -and $startedCount -ge $StartsPerTick) {
+            $deferred.Add($name)
+            continue
+        }
 
         $isNew = $null -eq $record
         if ($isNew) {
@@ -1069,6 +1106,7 @@ function Invoke-FleetTick {
                 $record.fingerprint = $fingerprint; $record.rundir = $runDir
                 $record.nextDelaySeconds = $decision.NextDelaySeconds; $record.delaySeconds = $null; $record.notBefore = $null; $record.retireRequestedAt = $null
                 Write-FleetLog "started $name pid=$($started.ProcessId) launcher=$KeeperLauncher`: $($decision.Reason)"
+                $startedCount++
             }
             'adopted' {
                 if ($decision.ClearRetired) { [void](Remove-FleetMarker -Path (Join-Path $keeperDir 'fleet.retired')) }
@@ -1117,6 +1155,10 @@ function Invoke-FleetTick {
         }
         $changed = $true
     }
+    if ($deferred.Count -gt 0) {
+        $script:FleetDeferredCount = $deferred.Count
+        Write-FleetLog "deferred $($deferred.Count) of $($deferred.Count + $startedCount) starts to later ticks, -StartsPerTick $StartsPerTick`: $($deferred -join ', ')"
+    }
     if ($changed) { Write-FleetState -Records $records }
 }
 
@@ -1131,6 +1173,9 @@ if (-not (Test-Path -LiteralPath $KeeperLauncher -PathType Leaf)) {
 while ($true) {
     Invoke-FleetTick
     if ($Once) { break }
-    Start-Sleep -Seconds $TickSeconds
+    # A tick that left starts for later is followed sooner, so the next batch starts in seconds.
+    $wait = $TickSeconds
+    if ($script:FleetDeferredCount -gt 0) { $wait = [Math]::Min($DeferredTickSeconds, $TickSeconds) }
+    Start-Sleep -Seconds $wait
 }
 exit 0

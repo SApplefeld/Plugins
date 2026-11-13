@@ -28,7 +28,7 @@
 # (keeper-functions.ps1, the exit-2 row) until the old supervisor has ended. Stop the old one the
 # way the README's stop procedure says to move the persona over at once.
 #
-# The fleet supervisor starts every enabled entry's keeper in one tick, and bin/Start-InstalledFleet.ps1
+# The fleet supervisor starts up to five keepers in one tick, and bin/Start-InstalledFleet.ps1
 # takes its own snapshot under the same runtime root, so several launchers can build one snapshot at
 # the same moment. Install-PluginSnapshot (bin/installed-plugin-functions.ps1) copies into a
 # temporary folder per process and renames it into place, so one copy wins and the others use it.
