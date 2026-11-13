@@ -481,12 +481,14 @@ export type RunningRow = { name: string; state: WorkerState; title: string | nul
 export type FinishedRow = { name: string; title: string | null; plan: string; at: string };
 
 /**
- * The Today page's view: the line above the list, the items waiting on the operator in the order
+ * The Today page's view: the count sentence above the list and the time of the oldest item that
+ * names one, from which the page draws the age, the items waiting on the operator in the order
  * acting on them unblocks the most, the workers running, the plans finished in the last 48 hours,
  * and the capacity verdict's word.
  */
 export type TodayView = {
   lede: string;
+  oldestAt: string | null;
   first: TodayItem[];
   running: RunningRow[];
   finished: FinishedRow[];
@@ -1817,17 +1819,6 @@ export const NOTHING_NEEDS_YOU = "Nothing needs you.";
 /** The longest blocked reason an unblock item's effect quotes, in code points, as the Dismiss line cuts one. */
 export const MAX_STOPPED_REASON = 200;
 
-/** A duration in the short form the page draws: 40s, 40m, 3h, 2d, as the shell's own `span` writes it. */
-function shortSpan(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${String(seconds)}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${String(minutes)}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${String(hours)}h`;
-  return `${String(Math.floor(hours / 24))}d`;
-}
-
 /**
  * A worker-written blocked reason as an unblock item's effect quotes it: one line with the invisible
  * class dropped, its quotation marks made single and a run of them made one, its closing stops
@@ -1844,16 +1835,24 @@ function cameUpAt(item: Item | ReviewItem): number | null {
   return Number.isFinite(at) ? at : null;
 }
 
-/** The line above the Today list: how many items wait and how old the oldest is, or that nothing does. */
-function ledeOf(items: readonly { item: Item | ReviewItem }[], now: number): string {
+/**
+ * The count sentence above the Today list: how many items wait, or that nothing does. The page
+ * adds the oldest item's age from `oldestOf` as clock text, so an age that moves is not a change
+ * of this sentence.
+ */
+function ledeOf(items: readonly { item: Item | ReviewItem }[]): string {
   if (items.length === 0) return NOTHING_NEEDS_YOU;
-  const count = items.length === 1 ? "1 thing needs you." : `${String(items.length)} things need you.`;
+  return items.length === 1 ? "1 thing needs you." : `${String(items.length)} things need you.`;
+}
+
+/** The time the oldest Today item came up, as `cameUpAt` reads each, as an ISO string; null where no item names a time. */
+function oldestOf(items: readonly { item: Item | ReviewItem }[]): string | null {
   let oldest: number | null = null;
   for (const { item } of items) {
     const at = cameUpAt(item);
     if (at !== null && (oldest === null || at < oldest)) oldest = at;
   }
-  return oldest === null ? count : `${count} Oldest ${shortSpan(now - oldest)}.`;
+  return iso(oldest);
 }
 
 /**
@@ -1951,7 +1950,8 @@ export function todayView(readings: Readings): TodayView {
     .map(({ name, state, title, step, lastTurnAt }): RunningRow => ({ name, state, title, step, lastTurnAt }));
 
   return {
-    lede: ledeOf(ranked, readings.now),
+    lede: ledeOf(ranked),
+    oldestAt: oldestOf(ranked),
     first: ranked,
     running,
     finished: finishedOf(readings, repos),

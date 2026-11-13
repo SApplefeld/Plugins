@@ -4433,6 +4433,21 @@
   }
 
   /**
+   * The line above the Today list: the server's count sentence, then " Oldest ", the oldest item's
+   * age as clock text and "." where `oldestAt` reads as a time, then the swipe hint. The age sits
+   * alone under its own key, so an age that moves updates without the flag, and the patch never
+   * pairs it with the hint when it appears or goes. A reading with no `oldestAt`, as an older broker
+   * sends with the age already in `lede`, draws `lede` as sent.
+   */
+  function todayLede(view, now) {
+    const lede = h("p", "sub td-lede", txt(view.lede), "lede");
+    const oldest = parse(view.oldestAt);
+    if (oldest !== null) lede.append(" Oldest ", clockText("span", null, span(now - oldest), "lede-age"), ".");
+    lede.append(h("span", "nm-swipe-hint", " Swipe a card left to dismiss it, or to mark an approve item done."));
+    return lede;
+  }
+
+  /**
    * The Today list pane: the heading with its as-of time, the lede, the numbered Do first cards, the
    * batch Agree row, Running, Finished, the health line linking to the health screen, and the read
    * times. An item whose line was delivered from this reading draws its words in its place, and an item
@@ -4445,9 +4460,7 @@
     const row = h("div", "top-row");
     row.append(h("h1", null, "Today"), stamp(view));
     top.append(row);
-    const lede = h("p", "sub td-lede", txt(view.lede), "lede");
-    lede.append(h("span", "nm-swipe-hint", " Swipe a card left to dismiss it, or to mark an approve item done."));
-    top.append(lede);
+    top.append(todayLede(view, now));
     out.append(top);
 
     const first = h("section", "section", null, "first");
@@ -6088,13 +6101,14 @@
     enter(at);
   }
 
-  // The patch, the router, the version check and the act words are the members the script exposes,
-  // so a node test drives each on its own, as `markdown.js` exposes its renderer; the page itself
-  // reads nothing off them.
+  // The patch, the router, the version check, the act words and the Today line's builder are the
+  // members the script exposes, so a node test drives each on its own, as `markdown.js` exposes its
+  // renderer; the page itself reads nothing off them.
   window.patch = patch;
   window.route = routeOf;
   window.heardPageVersion = heardPageVersion;
   window.actWords = actWords;
+  window.todayLede = todayLede;
 
   start();
 })();
