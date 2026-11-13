@@ -1830,9 +1830,9 @@ function shortSpan(ms: number): string {
 
 /**
  * A worker-written blocked reason as an unblock item's effect quotes it: one line with the invisible
- * class dropped and its quotation marks made single, its closing stops dropped so the sentence ends
- * once, and cut to `MAX_STOPPED_REASON` code points, so the text reads as the worker's words and
- * never as the page's own.
+ * class dropped, its quotation marks made single and a run of them made one, its closing stops
+ * dropped so the sentence ends once, and cut to `MAX_STOPPED_REASON` code points, so the text
+ * reads as the worker's words and never as the page's own.
  */
 function stoppedReason(text: string): string {
   return fit(oneLine(text).replace(/[.!?\s]+$/u, ""), MAX_STOPPED_REASON);

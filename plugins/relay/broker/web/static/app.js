@@ -2411,13 +2411,18 @@
   }
 
   /**
-   * A line's words as the match compares them: the invisible class gone and the ends trimmed. The
-   * three odd line breaks U+0085, U+2028 and U+2029 go too, because the broker turns each into a
-   * newline before the ring copy and the newline goes here as a control, so the typed line must lose
-   * them as well or it never pairs with its copy.
+   * A line's words as the match compares them: each lone surrogate half made U+FFFD, the invisible
+   * class gone and the ends trimmed. The three odd line breaks U+0085, U+2028 and U+2029 go too,
+   * because the broker turns each into a newline before the ring copy and the newline goes here as a
+   * control, so the typed line must lose them as well or it never pairs with its copy. The half is
+   * replaced before the class is dropped, as the broker's copy of the line has it: two halves on
+   * either side of a dropped character would otherwise join into one character the copy never held.
    */
   function matchWords(text) {
-    return Array.from(text).filter((character) => {
+    return Array.from(text).map((character) => {
+      const code = character.codePointAt(0);
+      return code >= 0xd800 && code <= 0xdfff ? "\ufffd" : character;
+    }).filter((character) => {
       const code = character.codePointAt(0);
       return !invisibleCode(code) && code !== 0x85 && code !== 0x2028 && code !== 0x2029;
     }).join("").trim();
@@ -3757,10 +3762,12 @@
    * each control character and line break made a space, each lone surrogate made U+FFFD in the pass
    * that drops the invisible class, so two halves cannot meet and pair into a hidden one, runs of
    * whitespace made one, the ends trimmed, every character that carries Unicode's `Quotation_Mark`
-   * property made a single ASCII quote, then cut to `QUOTED_POINTS` with the ellipsis paid out of the
-   * bound, in code points and in UTF-16 units alike. Set inside one pair of double quotes, it can
-   * neither leave them nor start a line. A character that only resembles a quotation mark, such as
-   * the double prime, stays as written.
+   * property made a single ASCII quote, each run of two or more of those quotes made one, since two
+   * side by side read as the double quote that ends a quotation, then cut to `QUOTED_POINTS` with the
+   * ellipsis paid out of the bound, in code points and in UTF-16 units alike. Set inside one pair of
+   * double quotes, it can neither leave them nor start a line. A character that only resembles a
+   * quotation mark, such as the double prime, stays as written, and so does an apostrophe inside a
+   * word.
    */
   function quotedText(text) {
     const flat = Array.from(txt(text).replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/g, " "))
@@ -3772,7 +3779,8 @@
       .join("")
       .replace(/\s+/g, " ")
       .trim()
-      .replace(/\p{Quotation_Mark}/gu, "'");
+      .replace(/\p{Quotation_Mark}/gu, "'")
+      .replace(/'{2,}/g, "'");
     if (Array.from(flat).length <= QUOTED_POINTS && flat.length <= QUOTED_POINTS) return flat;
     let kept = Array.from(flat).slice(0, QUOTED_POINTS - 1);
     while (kept.join("").length + 1 > QUOTED_POINTS && kept.length > 0) kept = kept.slice(0, -1);

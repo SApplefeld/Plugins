@@ -35,6 +35,14 @@ export type Attribution = {
  */
 export const MAX_EVENT_ATTACHMENTS = 200;
 
+/**
+ * The two reasons the broker gives for refusing a stream: another pipe already holds the session's
+ * process token, or the broker holds its limit of relays. The broker writes them in
+ * broker/routing/relays.ts and this is the relay's own copy. A refused line's reason reaches the
+ * log only where it is exactly one of these, with no trimming and no change of case.
+ */
+export const STREAM_REFUSAL_REASONS: readonly string[] = ["already attached", "too many relays"];
+
 export type InboundHandler = (text: string, chatId: string, attribution: Attribution) => void;
 
 /** The operator's answer to one tool prompt, as it arrives down the stream. */
@@ -326,10 +334,22 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
       return;
     }
     if (fields.type === "refused") {
-      // Another pipe already holds this process token. Refusing rather than promoting is what stops
-      // a subprocess of this session from taking over the operator's channel, so the honest thing
-      // is to stay quiet rather than to keep racing for it.
-      log(`relay: the broker refused the stream (${String(fields.reason ?? "no reason given")})`);
+      // The broker refused the stream. Where another pipe already holds this process token,
+      // refusing rather than promoting is what stops a subprocess of this session from taking over
+      // the operator's channel, so the honest thing is to stay quiet rather than to keep racing for
+      // it.
+      //
+      // The reason is a peer's text, and the line's length and line count are not that peer's to
+      // choose. `already attached` and `too many relays` are the broker's own two reasons, so the
+      // line names the reason only where the field is exactly one of them, and it is written from
+      // the relay's copy. Any other value, a missing field among them, is logged in fixed words:
+      // the value never enters the line.
+      const known = STREAM_REFUSAL_REASONS.find((reason) => reason === fields.reason);
+      log(
+        known === undefined
+          ? "relay: the broker refused the stream, for a reason this relay does not know"
+          : `relay: the broker refused the stream (${known})`,
+      );
       return;
     }
     if (fields.type === "permission") {

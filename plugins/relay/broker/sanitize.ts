@@ -106,6 +106,11 @@ export function clean(value: string): string {
  * different texts is the whole problem. Written as numbers rather than as a regular expression
  * because a literal control character in source is invisible to review, and an escape for one is
  * easy to get silently wrong.
+ *
+ * A lone surrogate half is outside the class and is not this function's to answer for: two halves
+ * are the two parts of one character, and the tag block's are among them. `shown` below is the one
+ * caller outside the tests, and it makes each lone half a visible mark in the pass that drops the
+ * class.
  */
 export function isInvisible(code: number): boolean {
   return (
@@ -129,7 +134,30 @@ export function isInvisible(code: number): boolean {
 }
 
 /**
- * Strips the invisible class while keeping line structure.
+ * A text with every member of the invisible class dropped and every lone surrogate half made
+ * U+FFFD, in one walk over its code points.
+ *
+ * The one strip `withoutInvisible`, `visible` and `oneLine` share, so the three cannot come to
+ * disagree. The two steps are one pass because apart they undo each other: a high half and a low
+ * half on either side of a dropped character would stand side by side once it was gone and be one
+ * character, and the two halves of a tag character make a member of the class this strip removes.
+ * A replaced half is a visible character that pairs with nothing, so no output holds a member of
+ * the class or a lone half, and a second pass returns the same text. A whole two-part character is
+ * one code point to the walk and is kept or dropped as itself.
+ */
+function shown(text: string): string {
+  let kept = "";
+  for (const character of text) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code >= 0xd800 && code <= 0xdfff) kept += "\ufffd";
+    else if (!isInvisible(code)) kept += character;
+  }
+  return kept;
+}
+
+/**
+ * Strips the invisible class while keeping line structure, and makes each lone surrogate half
+ * U+FFFD in the same pass, as `shown` above states it.
  *
  * Line by line, because the newline is itself in the C0 range: one pass over the whole string would
  * silently join a multi-line message into a single line, which changes what the text says.
@@ -139,12 +167,7 @@ export function isInvisible(code: number): boolean {
  * pass that reads line starts downstream sees every one of them.
  */
 export function withoutInvisible(value: string): string {
-  return value
-    .replace(/\r\n?/g, "\n")
-    .replace(ODD_BREAKS, "\n")
-    .split("\n")
-    .map((line) => [...line].filter((character) => !isInvisible(character.codePointAt(0) ?? 0)).join(""))
-    .join("\n");
+  return value.replace(/\r\n?/g, "\n").replace(ODD_BREAKS, "\n").split("\n").map(shown).join("\n");
 }
 
 /**
@@ -236,44 +259,44 @@ export function cleanWellFormed(value: string): string | null {
  * line at one, and a field that is one line by construction carries no line. The class itself is
  * shared with the path that carries text to the model, so the two cannot come to disagree about
  * which characters are allowed to be invisible.
+ *
+ * The strip is `shown` above, so a lone surrogate half comes back as U+FFFD: two halves cannot join
+ * into a hidden character, and what this returns is well-formed, which the UTF-8 of a request body
+ * needs.
  */
 export function visible(value: string): string {
-  return [...value]
-    .filter((character) => !isInvisible(character.codePointAt(0) ?? 0))
-    .join("")
-    .replace(ODD_BREAKS, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return shown(value).replace(ODD_BREAKS, " ").replace(/\s+/g, " ").trim();
 }
 
 /**
  * Text another author wrote, made one line for a line the broker writes around it: each control
  * character and line break made a space, the invisible class dropped, runs of whitespace made one
- * space, the ends trimmed, and every character that carries Unicode's `Quotation_Mark` property made
- * a single ASCII quote, so text set inside one pair of double quotes can neither leave them nor start
- * a line.
+ * space, the ends trimmed, every character that carries Unicode's `Quotation_Mark` property made a
+ * single ASCII quote, and each run of those quotes made one, so text set inside one pair of double
+ * quotes can neither leave them nor start a line.
  *
  * The class is Unicode's own and closed: the curly quotes, the guillemets, the CJK corner brackets
  * and the fullwidth forms are in it, and a character that only resembles a quotation mark, such as
  * the double prime, is not and stays as written. A curly apostrophe becomes the ASCII one.
  *
- * The class is dropped in one pass over code points, after every break is a space. The same pass
- * makes each lone surrogate U+FFFD, so two halves that sat on either side of a dropped character
- * cannot meet and pair into a hidden one. The class goes before the whitespace collapse, so a
- * hidden character between two spaces leaves one space, and a text this function made comes back
- * unchanged from a second pass.
+ * The class is dropped by `shown` above, the strip the two functions above share, after every break
+ * is a space. That pass makes each lone surrogate U+FFFD, so two halves that sat on either side of
+ * a dropped character cannot meet and pair into a hidden one. The class goes before the whitespace
+ * collapse, so a hidden character between two spaces leaves one space, and a text this function
+ * made comes back unchanged from a second pass.
+ *
+ * The last step makes each run of two or more single quotes one. Two side by side read as the
+ * double quote that ends a quotation, and the step before makes that pair itself from an empty pair
+ * of quotation marks or a doubled one. It runs after every mark is a single quote and after the
+ * class is dropped, so marks of two kinds, or two with a hidden character between them, are one run.
+ * A quote with anything else beside it, an apostrophe inside a word among them, stays as written.
  */
 export function oneLine(text: string): string {
-  return [...text.replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/g, " ")]
-    .map((character) => {
-      const code = character.codePointAt(0) ?? 0;
-      return code >= 0xd800 && code <= 0xdfff ? "\ufffd" : character;
-    })
-    .filter((character) => !isInvisible(character.codePointAt(0) ?? 0))
-    .join("")
+  return shown(text.replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/g, " "))
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/\p{Quotation_Mark}/gu, "'");
+    .replace(/\p{Quotation_Mark}/gu, "'")
+    .replace(/'{2,}/g, "'");
 }
 
 /**
@@ -314,11 +337,10 @@ export function fit(value: string, limit: number): string {
  * three call this rather than composing the same steps themselves, so the value a live read
  * produces and the value a restart restores cannot drift into two different readings of the bound.
  *
- * An ill-formed value is refused outright, ahead of every strip. A lone surrogate is in no
- * character class any of the steps below reach: `isInvisible` covers none of `0xd800` through
- * `0xdfff`, `visible` spreads by code point and keeps it whole, and `clean` strips only C0 and
- * DEL. Nothing legitimate writes one, so refusing rather than repairing keeps a surface's current
- * value rather than painting a replacement character onto it.
+ * An ill-formed value is refused outright, ahead of every strip. Left to the steps below, a lone
+ * surrogate would be repaired rather than refused: `visible` makes each one U+FFFD, and no step
+ * behind it refuses that mark. Nothing legitimate writes one, so refusing rather than repairing
+ * keeps a surface's current value rather than painting a replacement character onto it.
  *
  * Every bound sits behind every strip, and the order is the whole substance of this function.
  * `visible` runs first: it strips the invisible class and collapses runs of whitespace to one

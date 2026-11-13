@@ -11,7 +11,9 @@
 //     -> 200, newline-delimited JSON, held open for the life of the Claude Code process.
 //        The first line is a `hello` carrying the reply key. Each later line is a RelayEvent.
 //        The response closing, and staying closed, is the session's death signal.
-//     -> 409 when this token already holds a pipe, or the broker is at its relay ceiling.
+//     -> 200 with one line, {"type": "refused", "reason": "already attached" | "too many relays"},
+//        and then the end of the response, when this token already holds a pipe or the broker is
+//        at its relay ceiling.
 //
 //   POST /relay/reply
 //     X-Channel-Process-Token: the same token

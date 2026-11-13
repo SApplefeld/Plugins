@@ -102,30 +102,18 @@ export const MAX_CARD_LENGTH = 1_900;
 const MARKDOWN = /[\\`*_~|<>#[\]()]/g;
 
 /**
- * A surrogate with no partner: a high one not followed by a low, or a low one not preceded by a
- * high. Matched on UTF-16 units, which is what a regular expression without the `u` flag walks.
- *
- * Written out rather than called as `String.prototype.toWellFormed`, for the reason `isWellFormed`
- * in `../sanitize.ts` gives: the method is typed only from the `es2024` library, and moving the
- * compiler target for one call is a larger change than this replacement is worth.
- */
-const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
-
-/**
  * Untrusted text for the body of a message: visible, with every lone surrogate replaced by U+FFFD,
  * and with markdown escaped so it renders as the characters it contains rather than as syntax.
  * `@everyone` and `@here` survive as text on purpose; the transport's `allowed_mentions` is what
  * stops them pinging anyone.
  *
- * The surrogate replacement is here, at the one escape every card's text crosses, rather than in
- * whichever renderer first met one: a lone surrogate cannot be encoded as the UTF-8 a request body
- * is sent as, nothing downstream refuses it, and a guard on what reaches the channel belongs to the
- * channel's boundary rather than to one producer.
+ * The surrogate replacement is `visible`'s, made in the pass that strips the invisible class, so
+ * every escape built on `visible` carries it and none makes its own: a lone surrogate cannot be
+ * encoded as the UTF-8 a request body is sent as, nothing downstream refuses it, and a guard on
+ * what reaches the channel belongs to the channel's boundary rather than to one producer.
  */
 export function inertText(value: string): string {
-  return visible(value)
-    .replace(LONE_SURROGATE, "\uFFFD")
-    .replace(MARKDOWN, (character) => `\\${character}`);
+  return visible(value).replace(MARKDOWN, (character) => `\\${character}`);
 }
 
 /**
@@ -171,8 +159,8 @@ export function spacedRunEnds(value: string): string {
 
 /**
  * Text the kit measured, for a line of its decision brief: visible, with every lone surrogate
- * replaced by U+FFFD as `inertText` does, and escaped with `KIT_BRIEF_MARKDOWN` outside every
- * `KIT_BRIEF_URL_RUN`, which is left as it is.
+ * replaced by U+FFFD, which is `visible`'s own step here as it is in `inertText`, and escaped with
+ * `KIT_BRIEF_MARKDOWN` outside every `KIT_BRIEF_URL_RUN`, which is left as it is.
  *
  * The kit counts a brief part in relay units, every UTF-16 unit once and `<` and `>` twice, and
  * holds each part under its bound before the card sees it. An escape here that the kit did not
@@ -182,7 +170,7 @@ export function spacedRunEnds(value: string): string {
  * The card's other fields keep `inertText`, which escapes the parentheses too.
  */
 export function inertKitText(value: string): string {
-  const text = visible(spacedRunEnds(value)).replace(LONE_SURROGATE, "\uFFFD");
+  const text = visible(spacedRunEnds(value));
   const escaped = (run: string): string => run.replace(KIT_BRIEF_MARKDOWN, (character) => `\\${character}`);
   let drawn = "";
   let at = 0;
