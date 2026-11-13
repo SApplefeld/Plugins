@@ -12,7 +12,10 @@ and the kb-run.ps1 run wrapper.
 Also checks the permission allowlist, which is load-bearing: a headless run
 cannot answer a permission prompt, so a missing allow rule stalls an
 unattended ingest and a missing deny rule lets it damage sources/ or read a
-secret. The checks confirm settings.json parses, denies writes under
+secret. The checks confirm settings.json parses, that permissions.allow and
+permissions.deny hold only JSON strings of one character or more,
+since a member of any other type may void the whole settings file, and
+that it denies writes under
 sources/, inbox/, .git/ and .claude/, denies reads under inbox/, so a source
 is readable only once it has moved, denies Write and Edit on an instruction
 file (CLAUDE.md, CLAUDE.local.md, a .claude/ folder, .mcp.json) at any depth
@@ -208,6 +211,7 @@ Test-Check -Description $quoteDescription -Passed ($doubleQuoted.Count -eq 0)
 $settingsChecks = @(
     'settings.json has permissions.allow array'
     'settings.json has permissions.deny array'
+    'allow and deny arrays hold only JSON strings'
     'deny array blocks writes under sources/'
     'deny array blocks writes under inbox/'
     'deny array blocks reads under inbox/'
@@ -251,6 +255,26 @@ if (-not $parsed) {
 
     Test-Check -Description 'settings.json has permissions.allow array' -Passed ($allowRules.Count -gt 0)
     Test-Check -Description 'settings.json has permissions.deny array'  -Passed ($denyRules.Count -gt 0)
+
+    # The filtered lists above unroll a member that is a list and drop one that
+    # is null, false, zero or an empty string, so this check reads each list's
+    # members as the JSON holds them. A foreach statement enumerates one level
+    # and keeps each member whole, where a pipeline would unroll a nested list.
+    # A member of a list inside a list is not read: the outer list fails first.
+    # An absent list holds no member, so it passes here and fails the array
+    # checks above.
+    $entriesAreStrings = $true
+    foreach ($listName in @('allow', 'deny')) {
+        $listValue = Get-JsonProperty $permissions $listName
+        if ($null -eq $listValue) { continue }
+        foreach ($entry in $listValue) {
+            # PowerShell 7 reads a date-shaped JSON string as a datetime, which
+            # only a JSON string becomes, so it counts as a string here.
+            $isString = (($entry -is [string]) -and ($entry.Length -gt 0)) -or ($entry -is [datetime])
+            if (-not $isString) { $entriesAreStrings = $false }
+        }
+    }
+    Test-Check -Description 'allow and deny arrays hold only JSON strings' -Passed $entriesAreStrings
 
     # Each write deny is pinned as its exact string, in the Edit form, compared
     # character for character, so a narrowed or respelled rule fails the check.

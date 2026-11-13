@@ -35,7 +35,7 @@ walker. `tests/Test-KbRegistry.ps1` drives the list script, and
 no-remote case against a stub in place of `claude`. `tests/Test-KbTrust.ps1`
 drives the trust writer against a throwaway profile and a stub in place of
 `claude`. `tests/Test-KbStructure.ps1` checks a KB's structure
-and permission allowlist. A check that proves a permission rule or key present takes only a JSON string holding the template's spelling, compared by character code. The three helper rules are the exception: each has two valid spellings, so each matches a pattern in the same letters. So a rule in other letters, a narrowed rule, a list in place of a string or a rule carrying an invisible character fails its check. A sweep for a forbidden rule still reads a rule in any letter case. `tests/Test-KbCreate.ps1` holds the controls for these settings checks, each run against a copy of the template. `tests/Test-FeedInbox.ps1` drives the feeder against
+and permission allowlist. A check that proves a permission rule or key present takes only a JSON string holding the template's spelling, compared by character code. The three helper rules are the exception: each has two valid spellings, so each matches a pattern in the same letters. So a rule in other letters, a narrowed rule, a list in place of a string or a rule carrying an invisible character fails its check. A sweep for a forbidden rule still reads a rule in any letter case. One check reads each member of `permissions.allow` and `permissions.deny` as the JSON holds it, before the filters the other checks use, and fails any member that is not a JSON string of one character or more, such as a number, a null, an object, a nested list or an empty string. `tests/Test-KbCreate.ps1` holds the controls for these settings checks, each run against a copy of the template. `tests/Test-FeedInbox.ps1` drives the feeder against
 a throwaway repository and KB. `tests/Test-ReconcileGate.ps1` drives the status
 helper's liveness read and a moved source's age-0 read against a throwaway KB, and
 checks that the writing skills emit the liveness read. It also checks that the
@@ -791,7 +791,13 @@ takes seven steps: trust, engine update, pull, feed, ingest, lint and push.
   which starts no model run. A merge the skill does not finish, as where a
   conflicted path is outside what it may join, is aborted and the KB recorded
   deferred. Three deferred passes running make a KB stuck, and its merge run
-  then starts at most once a day.
+  then starts at most once a day. Each merge run the walker starts is
+  recorded as a `merge` step before the pull. It reads `failed` where the KB
+  holds no `kb-run.ps1` or the run did not exit 0, with the wrapper's exit code
+  and first error line, or the stop where the run did not finish. It reads
+  `ran` where the run exited 0, and a first output line reporting the run lock
+  held goes in its note rather than reading `skipped`. No `merge` step is
+  recorded where no merge run started.
 - **Feed** runs `feed-inbox.ps1` where the KB holds `.claude/feed.json`.
 - **Ingest** runs where `inbox/` holds a file other than `.gitkeep`.
 - **Lint** runs where the KB's last successful lint is absent or more than

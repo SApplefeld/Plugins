@@ -27,7 +27,10 @@ It checks, one case per acceptance bullet: a pass over three wikis calling the
 stub once for the one inbox file, with an empty inbox skipped and an untrusted
 wiki skipped; a wiki whose stub build is 2.1.256 reading ingest failed, with
 the wrapper's refusal in the step's note and in the failures list and no stub
-run in the wiki; the lint gate both ways on the seven-day stamp, the due lint's
+run in the wiki; a conflicting pull in such a wiki reading merge failed with
+the same refusal in its note and in the failures list, no stub run, and the
+pull still deferred: conflict with its path, passes 1, no merge left and HEAD
+as before; the lint gate both ways on the seven-day stamp, the due lint's
 model output carrying the wrapper's lock-held prefix on a later line and the
 lint still recorded `run`; a due lint whose run made only a Reconcile: commit,
 and one whose run made none, each recorded skipped: no Lint: commit with no
@@ -41,14 +44,15 @@ attempt a year ahead calling the stub; a due ingest under a
 KB_WALK_MODEL_FLOOR_SECONDS over
 the remaining budget skipped for budget with no stub call while its pull and
 push run; a fast-forward
-pull with no stub call, a conflicting pull joined by the stub and pushed with
-its note naming the restore point, a
+pull with no stub call and no merge step, a conflicting pull joined by the
+stub and pushed with its note naming the restore point and its merge step
+ran, a
 conflicting pull whose merge run the model-run floor refuses after the fetch,
-aborted with no later step, deferral or count, and
-a conflicting pull the stub leaves, aborted and deferred across two passes
-with the pass count rising, then joined on a third and its count cleared,
-a conflict on .claude/settings.json deferred with no stub call at all and
-stuck from its first pass; a fetched commit changing wiki/page.md alone
+aborted with no merge step, later step, deferral or count, and
+a conflicting pull the stub leaves, its merge step ran, aborted and deferred
+across two passes with the pass count rising, then joined on a third and its
+count cleared, a conflict on .claude/settings.json deferred with no stub call
+and no merge step at all and stuck from its first pass; a fetched commit changing wiki/page.md alone
 fast-forwarded, one changing .claude/feed.json alone and one changing
 CLAUDE.md alone each stopped before any merge with HEAD as before, no stub
 call and the wiki deferred with reason engine change, that path and stuck
@@ -61,8 +65,8 @@ stopped the same way on that path, and a fetched commit restoring one
 shipped engine file to the installed engine's bytes fast-forwarded with no
 stop; and a wiki whose conflict the stub never joins
 driven through three deferred passes to stuck, its fourth pass fetching a
-commit origin gained meanwhile, starting no stub and naming when the run is
-held until, and a fifth pass a day after the
+commit origin gained meanwhile, starting no stub, recording no merge step and
+naming when the run is held until, and a fifth pass a day after the
 last run starting the stub again;
 the engine update committed with feed.json kept, a live tree deferred, and a
 missing git identity recorded; two clones of one wiki updated to one engine,
@@ -76,7 +80,9 @@ lock is gone, which then ingests and lints; an engine update whose copy throws
 on a read-only vendored file, recorded failed with the same two skips; a page edited seconds ago holding
 off a wiki's ingest and due lint as deferred: live, with a standing conflict
 in a second such wiki still listed as the conflict; a lint and a feed whose run lock
-another run holds recorded skipped: run lock held, with no stamp; -WhatIf
+another run holds recorded skipped: run lock held, with no stamp, and a
+conflicting pull whose run lock is held reading merge ran: first output line
+reports the run lock held, its pull deferred: conflict; -WhatIf
 printing the wikis it would visit and writing nothing in the walk folder; a
 diverged pull in a wiki with no git identity recorded failed with no merge
 started; a merge left in progress aborted by the pull, in a wiki with an
@@ -768,6 +774,42 @@ try {
     $hethFailures = @(@($status['failures']) | Where-Object { ($_['name'] -ceq 'heth') -and ($_['step'] -ceq 'ingest') })
     Test-Check 'a wiki whose stub build is 2.1.256 reads ingest failed with a note holding exited 1, 2.1.256 and is older than 2.1.257, lists one ingest failure holding the same words, and starts no stub run' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and $hethStep.StartsWith('failed: ', [StringComparison]::Ordinal) -and $hethStep.Contains('exited 1') -and $hethStep.Contains('2.1.256') -and $hethStep.Contains('is older than 2.1.257') -and ($hethFailures.Count -eq 1) -and ([string]$hethFailures[0]['note']).Contains('2.1.256') -and ([string]$hethFailures[0]['note']).Contains('is older than 2.1.257') -and ($records.Count -eq 0))
 
+    # The same refusal on a merge run. teth's pull conflicts on wiki/page.md
+    # and the wrapper refuses its Merge run on the old build: the merge step
+    # reads failed with the wrapper's line, listed under failures, while the
+    # pull still reads deferred: conflict as for a run that joined nothing.
+    $tethBare = Join-Path $remotesDir 'teth.git'
+    $null = Invoke-Git $remotesDir @('init', '-q', '--bare', '-b', 'main', $tethBare)
+    $teth = New-Wiki 'teth'
+    $tethPage = Join-Path $teth 'wiki\page.md'
+    [System.IO.File]::WriteAllText($tethPage, "base line`n")
+    $null = Invoke-Git $teth @('add', '-A')
+    $null = Invoke-Git $teth @('commit', '-q', '-m', 'Add page')
+    $null = Invoke-Git $teth @('remote', 'add', 'origin', $tethBare)
+    $null = Invoke-Git $teth @('push', '-q', '-u', 'origin', 'main')
+    $tethOther = Join-Path $remotesDir 'teth-other'
+    $null = Invoke-Git $remotesDir @('clone', '-q', $tethBare, $tethOther)
+    $null = Invoke-Git $tethOther @('config', 'user.name', 'other side')
+    $null = Invoke-Git $tethOther @('config', 'user.email', 'other@test.invalid')
+    [System.IO.File]::WriteAllText((Join-Path $tethOther 'wiki\page.md'), "remote line`n")
+    $null = Invoke-Git $tethOther @('commit', '-q', '-a', '-m', 'Remote edit')
+    $null = Invoke-Git $tethOther @('push', '-q', 'origin', 'main')
+    [System.IO.File]::WriteAllText($tethPage, "local line`n")
+    $null = Invoke-Git $teth @('commit', '-q', '-a', '-m', 'Local edit')
+    $tethHeadBefore = (Invoke-Git $teth @('rev-parse', 'HEAD')).Trim()
+    Set-List @('teth')
+    Set-State -LastLintAt @{ teth = $yesterday }
+    Clear-Stub
+    $r = Invoke-Walker @{ 'KBWALK_STUB_BUILD' = '2.1.256' }
+    $records = @(Get-StubRecords)
+    $status = Read-Status
+    $tethStep = Get-Step $status 'teth' 'merge'
+    $tethFailures = @(@($status['failures']) | Where-Object { ($_['name'] -ceq 'teth') -and ($_['step'] -ceq 'merge') })
+    $tethDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'teth' })
+    $tethPaths = @(if ($tethDeferred.Count -eq 1 -and $tethDeferred[0].ContainsKey('paths')) { @($tethDeferred[0]['paths']) } else { @() })
+    $tethMergeHeadGone = (Invoke-Captured 'git' @('-C', $teth, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).ExitCode -ne 0
+    Test-Check 'a conflicting pull in a wiki whose stub build is 2.1.256 reads merge failed with a note holding exited 1, 2.1.256 and is older than 2.1.257, lists one merge failure holding the same words, starts no stub run, and leaves the pull deferred: conflict with its path, passes 1, MERGE_HEAD gone and HEAD as before' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and $tethStep.StartsWith('failed: ', [StringComparison]::Ordinal) -and $tethStep.Contains('exited 1') -and $tethStep.Contains('2.1.256') -and $tethStep.Contains('is older than 2.1.257') -and ($tethFailures.Count -eq 1) -and ([string]$tethFailures[0]['note']).Contains('exited 1') -and ([string]$tethFailures[0]['note']).Contains('2.1.256') -and ([string]$tethFailures[0]['note']).Contains('is older than 2.1.257') -and ($records.Count -eq 0) -and ((Get-Step $status 'teth' 'pull') -ceq 'deferred: conflict') -and ($tethDeferred.Count -eq 1) -and ($tethDeferred[0]['reason'] -ceq 'conflict') -and ($tethPaths.Count -eq 1) -and ($tethPaths[0] -ceq 'wiki/page.md') -and ($tethDeferred[0]['passes'] -eq 1) -and $tethMergeHeadGone -and ((Invoke-Git $teth @('rev-parse', 'HEAD')).Trim() -ceq $tethHeadBefore))
+
     # --- Bullet 2: the lint gate both ways on the seven-day stamp.
     $delta = New-Wiki 'delta'
     Set-List @('delta', 'beta')
@@ -929,7 +971,7 @@ try {
     $status = Read-Status
     $remoteHead = (Invoke-Git $bare @('rev-parse', 'main')).Trim()
     $localHead = (Invoke-Git $epsilon @('rev-parse', 'HEAD')).Trim()
-    Test-Check 'a wiki whose origin holds a commit it lacks is fast-forwarded to it with no stub call, and nothing is pushed' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ($localHead -ceq $remoteHead) -and ((Get-Step $status 'epsilon' 'pull') -ceq 'ran: fast-forward') -and ((Get-Step $status 'epsilon' 'push') -ceq 'skipped: nothing to push'))
+    Test-Check 'a wiki whose origin holds a commit it lacks is fast-forwarded to it with no stub call and no merge step, and nothing is pushed' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ($localHead -ceq $remoteHead) -and ((Get-Step $status 'epsilon' 'pull') -ceq 'ran: fast-forward') -and ((Get-Step $status 'epsilon' 'push') -ceq 'skipped: nothing to push') -and ((Get-Step $status 'epsilon' 'merge') -ceq ''))
 
     [System.IO.File]::WriteAllText((Join-Path $other 'wiki\page.md'), "remote line one`nline two`n")
     $null = Invoke-Git $other @('commit', '-q', '-a', '-m', 'Remote edit')
@@ -947,7 +989,7 @@ try {
     $parents = @((Invoke-Git $epsilon @('rev-list', '--parents', '-n', '1', 'HEAD')).Trim() -split ' ')
     $mergeHeadGone = (Invoke-Captured 'git' @('-C', $epsilon, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).ExitCode -ne 0
     Test-Check 'a conflicting pull runs the stub with the merge argument line in the wiki' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $epsilon) -and ($records[0].Args -ceq $mergeArgs))
-    Test-Check 'where the stub resolves the page and commits, the merge commit has two parents, MERGE_HEAD is gone, the pull reads merged by model with the restore point the pre-merge HEAD, and the pass pushes it' (($parents.Count -eq 3) -and $mergeHeadGone -and ((Get-Step $status 'epsilon' 'pull') -ceq "ran: merged by model, restore point $epsilonHeadBefore") -and ($parents[1] -ceq $epsilonHeadBefore) -and ((Get-Step $status 'epsilon' 'push') -ceq 'ran') -and ($localHead -ceq $remoteHead) -and (@(Get-Deferred $status).Count -eq 0))
+    Test-Check 'where the stub resolves the page and commits, the merge commit has two parents, MERGE_HEAD is gone, the merge step reads ran, the pull reads merged by model with the restore point the pre-merge HEAD, and the pass pushes it' (($parents.Count -eq 3) -and $mergeHeadGone -and ((Get-Step $status 'epsilon' 'pull') -ceq "ran: merged by model, restore point $epsilonHeadBefore") -and ($parents[1] -ceq $epsilonHeadBefore) -and ((Get-Step $status 'epsilon' 'push') -ceq 'ran') -and ($localHead -ceq $remoteHead) -and (@(Get-Deferred $status).Count -eq 0) -and ((Get-Step $status 'epsilon' 'merge') -ceq 'ran'))
 
     $null = Invoke-Git $other @('pull', '-q', 'origin', 'main')
     [System.IO.File]::WriteAllText((Join-Path $other 'wiki\page.md'), "remote line one and local line one`nremote line two`n")
@@ -975,7 +1017,7 @@ try {
     $epsilonStatus = Get-WikiStatus $status 'epsilon'
     $epsilonFetched = (Invoke-Git $epsilon @('rev-parse', 'refs/remotes/origin/main')).Trim()
     $mergeHeadGone = (Invoke-Captured 'git' @('-C', $epsilon, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).ExitCode -ne 0
-    Test-Check 'a conflicting pull whose merge run the model-run floor refuses after the fetch reads skipped: budget with no stub call, aborts the merge with HEAD as before, records no feed, ingest, lint or push, lists no deferral or failure, keeps the result visited, and leaves the state with no conflictPasses or lastMergeRunAt' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'epsilon' 'pull') -ceq 'skipped: budget') -and ($epsilonFetched -cne $epsilonFetchedBefore) -and ($epsilonFetched -ceq (Invoke-Git $bare @('rev-parse', 'main')).Trim()) -and $mergeHeadGone -and ((Invoke-Git $epsilon @('rev-parse', 'HEAD')).Trim() -ceq $headBefore) -and (-not $epsilonStatus['steps'].ContainsKey('feed')) -and (-not $epsilonStatus['steps'].ContainsKey('ingest')) -and (-not $epsilonStatus['steps'].ContainsKey('lint')) -and (-not $epsilonStatus['steps'].ContainsKey('push')) -and (@(@($status['deferred']) | Where-Object { $_['name'] -ceq 'epsilon' }).Count -eq 0) -and (@($status['failures']).Count -eq 0) -and ($epsilonStatus['result'] -ceq 'visited') -and (-not $state['wikis']['epsilon'].ContainsKey('conflictPasses')) -and (-not $state['wikis']['epsilon'].ContainsKey('lastMergeRunAt')))
+    Test-Check 'a conflicting pull whose merge run the model-run floor refuses after the fetch reads skipped: budget with no stub call and no merge step, aborts the merge with HEAD as before, records no feed, ingest, lint or push, lists no deferral or failure, keeps the result visited, and leaves the state with no conflictPasses or lastMergeRunAt' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'epsilon' 'pull') -ceq 'skipped: budget') -and ($epsilonFetched -cne $epsilonFetchedBefore) -and ($epsilonFetched -ceq (Invoke-Git $bare @('rev-parse', 'main')).Trim()) -and $mergeHeadGone -and ((Invoke-Git $epsilon @('rev-parse', 'HEAD')).Trim() -ceq $headBefore) -and (-not $epsilonStatus['steps'].ContainsKey('feed')) -and (-not $epsilonStatus['steps'].ContainsKey('ingest')) -and (-not $epsilonStatus['steps'].ContainsKey('lint')) -and (-not $epsilonStatus['steps'].ContainsKey('push')) -and (@(@($status['deferred']) | Where-Object { $_['name'] -ceq 'epsilon' }).Count -eq 0) -and (@($status['failures']).Count -eq 0) -and ($epsilonStatus['result'] -ceq 'visited') -and (-not $state['wikis']['epsilon'].ContainsKey('conflictPasses')) -and (-not $state['wikis']['epsilon'].ContainsKey('lastMergeRunAt')) -and ((Get-Step $status 'epsilon' 'merge') -ceq ''))
 
     Clear-Stub
     $r = Invoke-Walker
@@ -987,7 +1029,7 @@ try {
     $deferredEntry = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'epsilon' })
     $deferredPaths = @(if ($deferredEntry.Count -eq 1) { @($deferredEntry[0]['paths']) } else { @() })
     Test-Check 'where the stub leaves the markers, the merge is aborted: MERGE_HEAD is gone, HEAD and the page are as before, and the stub ran once with Merge' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Args -ceq $mergeArgs) -and $mergeHeadGone -and ((Invoke-Git $epsilon @('rev-parse', 'HEAD')).Trim() -ceq $headBefore) -and ($pageText -ceq $localText))
-    Test-Check 'the status lists the wiki under deferred with reason conflict, the path wiki/page.md, passes 1 and stuck false, its result deferred, and no later step recorded' (($deferredEntry.Count -eq 1) -and ($deferredEntry[0]['reason'] -ceq 'conflict') -and ($deferredPaths.Count -eq 1) -and ($deferredPaths[0] -ceq 'wiki/page.md') -and ($deferredEntry[0]['passes'] -eq 1) -and ($deferredEntry[0]['stuck'] -eq $false) -and ($epsilonStatus['result'] -ceq 'deferred') -and ((Get-Step $status 'epsilon' 'pull') -ceq 'deferred: conflict') -and (-not $epsilonStatus['steps'].ContainsKey('ingest')) -and (-not $epsilonStatus['steps'].ContainsKey('push')))
+    Test-Check 'the status lists the wiki under deferred with reason conflict, the path wiki/page.md, passes 1 and stuck false, its result deferred, the merge step ran, and no later step recorded' (($deferredEntry.Count -eq 1) -and ($deferredEntry[0]['reason'] -ceq 'conflict') -and ($deferredPaths.Count -eq 1) -and ($deferredPaths[0] -ceq 'wiki/page.md') -and ($deferredEntry[0]['passes'] -eq 1) -and ($deferredEntry[0]['stuck'] -eq $false) -and ($epsilonStatus['result'] -ceq 'deferred') -and ((Get-Step $status 'epsilon' 'pull') -ceq 'deferred: conflict') -and (-not $epsilonStatus['steps'].ContainsKey('ingest')) -and (-not $epsilonStatus['steps'].ContainsKey('push')) -and ((Get-Step $status 'epsilon' 'merge') -ceq 'ran'))
     Test-Check 'the wiki deferred on a conflict for one pass appends no notice, and the notices file holds no record naming it' (@(Get-Notices 'epsilon').Count -eq 0)
     Clear-Stub
     $r = Invoke-Walker
@@ -1039,7 +1081,7 @@ try {
     $lambdaMergeHeadGone = (Invoke-Captured 'git' @('-C', $lambda, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).ExitCode -ne 0
     $lambdaDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'lambda' })
     $lambdaPaths = @(if ($lambdaDeferred.Count -eq 1) { @($lambdaDeferred[0]['paths']) } else { @() })
-    Test-Check 'a conflict on .claude/settings.json makes no stub call, and the pass defers the wiki with that path, stuck true on its first pass with passes 1, MERGE_HEAD gone and HEAD as before' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ($lambdaDeferred.Count -eq 1) -and ($lambdaDeferred[0]['reason'] -ceq 'conflict') -and ($lambdaPaths -ccontains '.claude/settings.json') -and ($lambdaDeferred[0]['passes'] -eq 1) -and ($lambdaDeferred[0]['stuck'] -eq $true) -and ((Get-Step $status 'lambda' 'pull') -ceq 'deferred: conflict') -and $lambdaMergeHeadGone -and ((Invoke-Git $lambda @('rev-parse', 'HEAD')).Trim() -ceq $lambdaHeadBefore))
+    Test-Check 'a conflict on .claude/settings.json makes no stub call and records no merge step, and the pass defers the wiki with that path, stuck true on its first pass with passes 1, MERGE_HEAD gone and HEAD as before' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ($lambdaDeferred.Count -eq 1) -and ($lambdaDeferred[0]['reason'] -ceq 'conflict') -and ($lambdaPaths -ccontains '.claude/settings.json') -and ($lambdaDeferred[0]['passes'] -eq 1) -and ($lambdaDeferred[0]['stuck'] -eq $true) -and ((Get-Step $status 'lambda' 'pull') -ceq 'deferred: conflict') -and $lambdaMergeHeadGone -and ((Invoke-Git $lambda @('rev-parse', 'HEAD')).Trim() -ceq $lambdaHeadBefore) -and ((Get-Step $status 'lambda' 'merge') -ceq ''))
     $lambdaNotices = @(Get-Notices 'lambda')
     $lambdaStuckText = 'lambda is stuck: its pull from origin conflicts on .claude/settings.json, which no headless run may attempt; a session or a person must resolve the conflict in the wiki, and the walker resumes once a pull lands.'
     Test-Check 'the settings-file conflict appends one stuck record on its first pass, source wiki-walk, its text naming .claude/settings.json and carrying no pass count' (($lambdaNotices.Count -eq 1) -and ([string]$lambdaNotices[0]['id']).StartsWith('lambda:stuck:', [StringComparison]::Ordinal) -and ($lambdaNotices[0]['source'] -ceq 'wiki-walk') -and ($lambdaNotices[0]['text'] -ceq $lambdaStuckText) -and (-not ([string]$lambdaNotices[0]['text']).Contains('passes')))
@@ -1289,7 +1331,7 @@ try {
     $phiPaths = @(if ($phiDeferred.Count -eq 1 -and $phiDeferred[0].ContainsKey('paths')) { @($phiDeferred[0]['paths']) } else { @() })
     $phiTracking = (Invoke-Git $phi @('rev-parse', 'refs/remotes/origin/main')).Trim()
     $phiMergeHeadGone = (Invoke-Captured 'git' @('-C', $phi, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).ExitCode -ne 0
-    Test-Check 'the stuck wiki''s fourth pass inside the day fetches the commit origin gained meanwhile, starts no stub, lists it deferred with passes 4, stuck true and its path, HEAD as before and no merge left, and the log names the time its run is held until' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and $phiLastRunStamped -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'phi' 'pull') -ceq 'deferred: conflict') -and ($phiDeferred.Count -eq 1) -and ($phiDeferred[0]['passes'] -eq 4) -and ($phiDeferred[0]['stuck'] -eq $true) -and ($phiPaths.Count -eq 1) -and ($phiPaths[0] -ceq 'wiki/page.md') -and ($phiTracking -ceq $phiRemoteHead) -and $phiMergeHeadGone -and ((Invoke-Git $phi @('rev-parse', 'HEAD')).Trim() -ceq $phiHeadBefore) -and ([System.IO.File]::ReadAllText($walkLog).Contains("held until $phiHeldUntil")))
+    Test-Check 'the stuck wiki''s fourth pass inside the day fetches the commit origin gained meanwhile, starts no stub, records no merge step, lists it deferred with passes 4, stuck true and its path, HEAD as before and no merge left, and the log names the time its run is held until' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and $phiLastRunStamped -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'phi' 'pull') -ceq 'deferred: conflict') -and ($phiDeferred.Count -eq 1) -and ($phiDeferred[0]['passes'] -eq 4) -and ($phiDeferred[0]['stuck'] -eq $true) -and ($phiPaths.Count -eq 1) -and ($phiPaths[0] -ceq 'wiki/page.md') -and ($phiTracking -ceq $phiRemoteHead) -and $phiMergeHeadGone -and ((Invoke-Git $phi @('rev-parse', 'HEAD')).Trim() -ceq $phiHeadBefore) -and ([System.IO.File]::ReadAllText($walkLog).Contains("held until $phiHeldUntil")) -and ((Get-Step $status 'phi' 'merge') -ceq ''))
     Test-Check 'the stuck wiki''s fourth pass inside the day appends no notice' (@(Get-Notices 'phi').Count -eq 1)
     $state = Read-State
     $state['wikis']['phi']['lastMergeRunAt'] = [DateTime]::UtcNow.AddHours(-25).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
@@ -1480,7 +1522,7 @@ try {
     $state = Read-State
     $hetaDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'heta' })
     $hetaMergeHeadGone = (Invoke-Captured 'git' @('-C', $heta, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).ExitCode -ne 0
-    Test-Check 'a conflicting pull whose wiki''s run lock is held starts no stub, names the held lock in the log, relays the wrapper''s lock line to the walker''s stdout, stamps the last run time, and defers the wiki with passes 1, MERGE_HEAD gone and HEAD as before' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'heta' 'pull') -ceq 'deferred: conflict') -and ($hetaDeferred.Count -eq 1) -and ($hetaDeferred[0]['passes'] -eq 1) -and $state['wikis']['heta'].ContainsKey('lastMergeRunAt') -and ([System.IO.File]::ReadAllText($walkLog).Contains("heta merge run's first output line reports the wiki's run lock held")) -and ($r.Stdout.Contains('kb-run: another run holds the lock for ')) -and $hetaMergeHeadGone -and ((Invoke-Git $heta @('rev-parse', 'HEAD')).Trim() -ceq $hetaHeadBefore))
+    Test-Check 'a conflicting pull whose wiki''s run lock is held starts no stub, names the held lock in the log, relays the wrapper''s lock line to the walker''s stdout, stamps the last run time, reads merge ran: first output line reports the run lock held, and defers the wiki with passes 1, MERGE_HEAD gone and HEAD as before' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'heta' 'pull') -ceq 'deferred: conflict') -and ($hetaDeferred.Count -eq 1) -and ($hetaDeferred[0]['passes'] -eq 1) -and $state['wikis']['heta'].ContainsKey('lastMergeRunAt') -and ([System.IO.File]::ReadAllText($walkLog).Contains("heta merge run's first output line reports the wiki's run lock held")) -and ($r.Stdout.Contains('kb-run: another run holds the lock for ')) -and $hetaMergeHeadGone -and ((Invoke-Git $heta @('rev-parse', 'HEAD')).Trim() -ceq $hetaHeadBefore) -and ((Get-Step $status 'heta' 'merge') -ceq 'ran: first output line reports the run lock held'))
 
     # --- Bullet 4: the engine update with feed.json kept, a live tree, and a
     # wiki with no git identity. The fed upstream is a small repository the

@@ -101,9 +101,16 @@ recorded and the pass moving on as each step states:
      next reads ran: once a session or a person brings the wiki's HEAD to hold
      the change, or the other machine's engine is updated. A conflicting
      merge runs the wiki's kb-run.ps1 -Operation Merge, whose model run joins
-     both sides. The merge is resolved where MERGE_HEAD is gone and HEAD moved
-     afterward. Any other end state aborts the merge, records "deferred:
-     conflict" with the conflicted paths, and skips the wiki's remaining steps.
+     both sides. Each merge run started is recorded as a step of its own,
+     merge, before the pull: failed, and listed under failures, where the
+     wiki holds no kb-run.ps1, the run did not finish or the wrapper exited
+     non-zero, with the exit code and the first line of its error text, or
+     the stop where it did not finish; ran otherwise. No merge step is
+     recorded where no merge run started. The merge is resolved where
+     MERGE_HEAD is gone and HEAD moved afterward, whatever the merge step
+     reads. Any other end state aborts the merge, records
+     "deferred: conflict" with the conflicted paths, and skips the wiki's
+     remaining steps.
      For each merge the walker lands, by git or by the model, the step note
      and the log name the restore point, the merge's first parent, in the form
      "restore point <hash>". The wiki's state entry counts the consecutive
@@ -184,7 +191,9 @@ recorded "skipped: run lock held", and such a lint stamps nothing: no lint is
 stamped without its own Lint: commit. A merge run whose first stdout line
 reports the lock held is named in the log and still stamps its last run time,
 since a model run's first line can carry the same text and the stuck wiki's
-daily limit must not rest on it. Every child
+daily limit must not rest on it. For the same reason such a run that exited 0
+is recorded as the merge step "ran: first output line reports the run lock
+held", never skipped. Every child
 runs with the wiki as its working directory. The feeder, ingest, lint and
 merge children have their stdout and stderr read line by line and written
 through to the walker's own as each line arrives. Every child is assigned
@@ -208,11 +217,11 @@ Each pass writes %LOCALAPPDATA%\llm-wiki\walk-status.json whole through a
 temporary file: startedAt, finishedAt, engineHash, wikis as one object per
 wiki with a result among visited, untrusted, deferred and "skipped: budget",
 and for a visited wiki a steps object whose entries carry an outcome among ran,
-skipped, failed and deferred, a note and the seconds taken; deferred as the
-names still deferred with their reasons, a conflict's or a stop's paths, a
-conflict's count of consecutive deferred passes as passes and whether the wiki
-is stuck; failures
-as every failed step; and
+skipped, failed and deferred, a note and the seconds taken, a merge run's
+merge step among them with its seconds counted from the run's start;
+deferred as the names still deferred with their reasons, a conflict's or a
+stop's paths, a conflict's count of consecutive deferred passes as passes
+and whether the wiki is stuck; failures as every failed step; and
 a note where the pass has one, such as "no wikis listed" or a kill-on-close
 job that could not be replaced. The status is written once, at the pass's
 end, as the pass's report, while the state is written after each visit too.
@@ -1428,11 +1437,26 @@ function Invoke-PullStep {
             if (-not [string]::IsNullOrEmpty($Claude)) { $runArguments += @('-Claude', $Claude) }
             $runStartedAt = [DateTime]::UtcNow
             $run = Invoke-WikiScript $WikiPath 'kb-run.ps1' $runArguments @{ 'KB_RUN_SECONDS' = [string][Math]::Max(1, (Get-RemainingSeconds)) } -Capture -Relay
+            $lockHeld = $false
             if (-not $run.Missing) {
-                if (Test-LockHeld $run 'kb-run: another run holds the lock for ') {
+                $lockHeld = Test-LockHeld $run 'kb-run: another run holds the lock for '
+                if ($lockHeld) {
                     Write-Log "$($Wiki.name) merge run's first output line reports the wiki's run lock held"
                 }
                 $state['lastMergeRunAt'] = $runStartedAt.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+            }
+            # The run is recorded as a step of its own, before the pull: failed
+            # where the wiki holds no kb-run.ps1, the run did not finish or the
+            # wrapper exited non-zero, and ran otherwise. A lock line is carried
+            # in the note, never read as skipped, since a model's first line
+            # can carry the same text.
+            if ($run.Missing -or $run.TimedOut -or $run.ExitCode -ne 0) {
+                Add-Step $Wiki 'merge' 'failed' (Get-ChildNote $run 'kb-run.ps1 -Operation Merge') $runStartedAt
+            } else {
+                $mergeNotes = @()
+                if ($lockHeld) { $mergeNotes += 'first output line reports the run lock held' }
+                if (-not [string]::IsNullOrEmpty($run.Leftovers)) { $mergeNotes += $run.Leftovers }
+                Add-Step $Wiki 'merge' 'ran' ($mergeNotes -join '; ') $runStartedAt
             }
             $mergeHead = Invoke-Git $WikiPath @('rev-parse', '-q', '--verify', 'MERGE_HEAD') -Required
             $after = Invoke-Git $WikiPath @('rev-parse', '--verify', '-q', 'HEAD') -Required
