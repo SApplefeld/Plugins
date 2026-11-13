@@ -30,6 +30,7 @@ import { openWithWebSocket } from "./socket.ts";
 import type { OpenSpeechSocket } from "./socket.ts";
 import type { Speaker } from "./speaker.ts";
 import { spokenForm } from "./spoken-form.ts";
+import type { ReadLimits } from "./spoken-form.ts";
 
 /** The one host the text is ever sent to. A constant, so no setting can redirect it. */
 export const CARTESIA_SPEECH_URL = "wss://api.cartesia.ai/tts/websocket";
@@ -61,6 +62,8 @@ export type CartesiaSpeechOptions = {
    */
   timeoutMs: number;
   player: Pick<Player, "play" | "stop">;
+  /** The largest code block, table and list that are read aloud, which the spoken form applies. */
+  readLimits: ReadLimits;
   /**
    * Told the words a failure left unspoken, once per failed `speak`: the spoken form of the whole
    * text as handed, since without a playback offset the words already heard cannot be told apart.
@@ -76,7 +79,7 @@ export type CartesiaSpeechOptions = {
 
 type SpeechSocket = ReturnType<OpenSpeechSocket>;
 
-const POST_FAILED = "voice: posting an unspoken answer to the thread failed";
+const POST_FAILED = "voice: posting an unspoken line to the thread failed";
 
 /** Text with at least one letter or digit, in any script: the least worth sending to be voiced. */
 const UTTERABLE = /[\p{L}\p{N}]/u;
@@ -366,7 +369,7 @@ export function createCartesiaSpeech(options: CartesiaSpeechOptions): Speaker {
             .then(
               () =>
                 options.log(
-                  "voice: an unspoken answer given up on reached the thread late, so it may sit after a later answer",
+                  "voice: an unspoken line given up on reached the thread late, so it may sit after a later answer",
                 ),
               () => options.log(POST_FAILED),
             )
@@ -411,21 +414,21 @@ export function createCartesiaSpeech(options: CartesiaSpeechOptions): Speaker {
       );
     }
     if (inThread) return;
-    // The spoken copy, whole: without a playback offset the words already heard cannot be told
-    // from the rest, so the thread may repeat a few and loses none. This path runs only for a line
-    // not already in the thread, a fast answer or a holding line; a session reply reaches the
-    // thread as written before its speech is asked for, and `inThread` posts nothing for it. Queued
-    // on the posts chain rather than awaited, so the speech behind this call never waits on a post,
-    // and each post waits for the one before it to settle or time out. A throw and a rejection are
-    // caught alike, and the error is not logged, since its message can carry the text. The last
-    // catch keeps the chain from ever holding a rejection.
+    // The spoken copy, whole: without a playback offset the words already heard cannot be told from
+    // the rest, so the thread may repeat a few and loses none. This path runs only for a line not
+    // already in the thread, the helper's answer or one of its fixed lines, a hand-off line among
+    // them; a session reply reaches the thread as written before its speech is asked for, and
+    // `inThread` posts nothing for it. Queued on the posts chain rather than awaited, so the speech
+    // behind this call never waits on a post, and each post waits for the one before it to settle
+    // or time out. A throw and a rejection are caught alike, and the error is not logged, since its
+    // message can carry the text. The last catch keeps the chain from ever holding a rejection.
     posts = posts
       .then(() => withinTimeout(() => options.fallback(text)))
       .then(
         (finished) => {
           if (!finished) {
             options.log(
-              `voice: posting an unspoken answer to the thread did not finish within ` +
+              `voice: posting an unspoken line to the thread did not finish within ` +
                 `${String(options.timeoutMs)}ms, so later answers go on`,
             );
           }
@@ -440,7 +443,7 @@ export function createCartesiaSpeech(options: CartesiaSpeechOptions): Speaker {
       const mine = generation;
       const inThread = speakOptions?.inThread === true;
       // The spoken form is what Cartesia is sent and what the fallback posts, so the two agree.
-      const spoken = spokenForm(text);
+      const spoken = spokenForm(text, options.readLimits);
       // Nothing to say opens nothing and sends nothing: a reply with no letter or digit, such as
       // "?!" or "...", is no voice to wait for.
       if (!UTTERABLE.test(spoken)) return Promise.resolve();

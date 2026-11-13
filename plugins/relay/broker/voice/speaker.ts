@@ -2,15 +2,19 @@
 // Everything above this file speaks through `Speaker` alone, so the vendor behind it can change
 // without anything above it changing. The broker builds Cartesia's, in cartesia-speech.ts.
 
-/** One line of the spoken conversation: the operator's (`user`) or the persona's own. */
-export type SpokenLine = { role: "user" | "persona"; text: string };
+/**
+ * One line of the spoken conversation, by its speaker: the operator's (`user`), the quick voice
+ * helper's (`helper`), which covers the small model's answers and the fixed lines the voice speaks
+ * for itself, or the main model's reply that was read aloud (`persona`).
+ */
+export type SpokenLine = { role: "user" | "helper" | "persona"; text: string };
 
 /** What one `speak` call says about its text beyond the words. */
 export type SpeakOptions = {
   /**
    * The text already reaches the thread by another route, as a session reply does through the
    * outbound router, so a failure to speak it is not posted there a second time. Off by default:
-   * a fast answer has no other way to the thread.
+   * a helper's answer has no other way to the thread.
    */
   inThread?: boolean;
 };

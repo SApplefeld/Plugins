@@ -1,8 +1,12 @@
 // The voice module's hooks for transcription: a transcriber built on each join and closed on each
 // leave, fed every operator frame in between, with the barge-in rule bound to the joined channel's
-// player and the bridge attached to both. Nothing transcription-related outlives the channel, so
-// no audio leaves the machine while the bot is in none.
+// player and the bridge attached to both. The judging stage in interrupt.ts is built around the
+// transcriber, so the barge-in rule and the bridge both read a turn's end with the stage's verdict
+// on it. Nothing transcription-related outlives the channel, so no audio leaves the machine while
+// the bot is in none.
 import type { VoiceFrame } from "./connection.ts";
+import { createInterruptStage } from "./interrupt.ts";
+import type { InterruptStageOptions } from "./interrupt.ts";
 import type { Player } from "./player.ts";
 import { bindBargeIn } from "./transcriber.ts";
 import type { Transcriber } from "./transcriber.ts";
@@ -18,14 +22,15 @@ export type TranscriptionHooks = {
 
 /**
  * What `attach` hands back: the barge-in rule's discard, the two halves of its held-short-turn
- * reading where the bridge takes one (whether the persona is mid-reply, and the turn so read), and
- * the detach the leave runs.
+ * reading where the bridge takes one (whether the persona is mid-reply, and the turn so read), the
+ * call for a turn read as a stop phrase over a reading, and the detach the leave runs.
  */
 export type Attached = {
   /** A long turn ended; `cut` is whether it ended while the persona was still speaking. */
   onDiscard: (turn: number, cut: boolean) => void;
   speaking?: () => boolean;
   onHeldShort?: (turn: number) => void;
+  onStop?: (turn: number) => void;
   detach: () => void;
 };
 
@@ -34,6 +39,11 @@ export function transcriptionHooks(options: {
   key: string | null;
   /** The barge-in rule's short-turn bound, in words. */
   shortTurnWords: number;
+  /**
+   * The judging stage's threshold, Jev key and injected clock. The stage is built around whatever
+   * `create` returns, and is told a reading is paused by the attached bridge's mid-reply reading.
+   */
+  interrupt: Omit<InterruptStageOptions, "reading" | "shortTurnWords" | "log">;
   /** Builds a transcriber for one joined channel. */
   create: (key: string) => Transcriber;
   /**
@@ -54,10 +64,23 @@ export function transcriptionHooks(options: {
     },
     onJoined: (session) => {
       if (options.key === null) return;
+      // The inner transcriber, held so a stage that fails to build around it still closes it.
+      let inner: Transcriber | null = null;
       try {
-        transcriber = options.create(options.key);
+        inner = options.create(options.key);
+        transcriber = createInterruptStage(inner, {
+          ...options.interrupt,
+          reading: () => attached?.speaking?.() ?? false,
+          shortTurnWords: options.shortTurnWords,
+          log: options.log,
+        });
       } catch {
         // The error is not logged: it can carry what the factory was handed, the key among it.
+        try {
+          inner?.close();
+        } catch {
+          // Closing a transcriber that failed to start is best effort: the channel is deaf either way.
+        }
         transcriber = null;
         options.log("voice: transcription could not start, so the voice channel is deaf");
         return;
@@ -74,6 +97,7 @@ export function transcriptionHooks(options: {
         {
           speaking: () => attached?.speaking?.() ?? false,
           onHeldShort: (turn) => attached?.onHeldShort?.(turn),
+          onStop: (turn) => attached?.onStop?.(turn),
         },
       );
       try {

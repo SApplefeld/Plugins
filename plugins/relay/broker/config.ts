@@ -269,10 +269,14 @@ export type BrokerConfig = {
   /** How many spoken lines the fast tier remembers, from 2 to 64. */
   voiceMemoryTurns: number;
   /**
-   * How many words of a session's reply are spoken before the rest is left to the thread, from
-   * 20 to 600. The whole reply reaches the thread whatever this is.
+   * The most lines that are not blank of a fenced code block the voice reads aloud, from 0 to 20.
+   * A larger block is named by its size, and 0 names every block.
    */
-  voiceMaxSpokenWords: number;
+  voiceReadCodeLines: number;
+  /** The most cells of a table the voice reads aloud, its rows times its columns, from 0 to 60. */
+  voiceReadTableCells: number;
+  /** The most items of a list the voice reads aloud, from 0 to 50. */
+  voiceReadListItems: number;
   /**
    * Whether a turn's end is held so a thought gathered across a pause reaches the voice as one
    * turn. `off` wires the transcriber bare. `plain` holds every end with words for
@@ -286,15 +290,19 @@ export type BrokerConfig = {
   /** The finished-thought probability at or above which a judged hold releases at once, from 0.3 to 0.9. */
   voiceCompleteThreshold: number;
   /**
-   * How long after a hand-off the thinking line waits for the session's reply before it is spoken,
-   * from 0 to 10000 ms. Zero speaks it at the hand-off.
+   * The probability at or above which a turn spoken over a reading is read as said to the
+   * assistant, from 0.3 to 0.9. Below it the turn is a stray remark and the reading resumes.
+   */
+  voiceInterruptThreshold: number;
+  /**
+   * How long after a hand-off that is news to the operator the hand-off line waits for the
+   * session's reply before it is spoken, from 0 to 10000 ms. Zero speaks it at the hand-off.
    */
   voiceHoldFirstMs: number;
-  /**
-   * How long after a hand-off the still-looking line waits for the reply, from 1000 to 30000 ms,
-   * and greater than `voiceHoldFirstMs`.
-   */
-  voiceHoldSecondMs: number;
+  /** The waiting pulse's period, one swell from silence to silence, from 600 to 6000 ms. */
+  voicePulseMs: number;
+  /** The waiting pulse's peak as a percent of full scale, from 0 to 30. Zero sounds no pulse. */
+  voicePulseVolume: number;
   /**
    * The address the web surface's own listener binds, or null when `CHANNEL_WEB_BIND` is unset,
    * which leaves the surface off: no second server is created and the broker is its loopback
@@ -562,11 +570,17 @@ const VOICE_FAST_MODEL = /^claude-[a-z0-9.-]{1,64}$/;
 const DEFAULT_VOICE_MEMORY_TURNS = 16;
 const MIN_VOICE_MEMORY_TURNS = 2;
 const MAX_VOICE_MEMORY_TURNS = 64;
-// About a minute of speech. The floor keeps a spoken answer worth hearing, and the ceiling keeps a
-// reply from holding the channel for many minutes when the thread has it whole anyway.
-const DEFAULT_VOICE_MAX_SPOKEN_WORDS = 120;
-const MIN_VOICE_MAX_SPOKEN_WORDS = 20;
-const MAX_VOICE_MAX_SPOKEN_WORDS = 600;
+// The largest block of each kind the voice reads aloud: a one-line code block, a table of six
+// cells and a list of eight items are followed by ear, and a larger one is named by its size. Zero
+// names every block of its kind, which for code keeps every fenced block's text from the speech
+// vendor. The ceilings keep a typo from reading a wall of code or a large table aloud.
+const MIN_VOICE_READ = 0;
+const DEFAULT_VOICE_READ_CODE_LINES = 1;
+const MAX_VOICE_READ_CODE_LINES = 20;
+const DEFAULT_VOICE_READ_TABLE_CELLS = 6;
+const MAX_VOICE_READ_TABLE_CELLS = 60;
+const DEFAULT_VOICE_READ_LIST_ITEMS = 8;
+const MAX_VOICE_READ_LIST_ITEMS = 50;
 // Two seconds after a spoken turn's end before the held words go on, so a thought that carries on
 // inside the wait joins them. The floor keeps a hold worth having, and the ceiling keeps a finished
 // turn from waiting long after the operator has stopped. The threshold is the finished-thought
@@ -578,16 +592,28 @@ const MAX_VOICE_TURN_HOLD_MS = 5000;
 const DEFAULT_VOICE_COMPLETE_THRESHOLD = 0.8;
 const MIN_VOICE_COMPLETE_THRESHOLD = 0.3;
 const MAX_VOICE_COMPLETE_THRESHOLD = 0.9;
-// Two and a half seconds of silence after a hand-off before the thinking line, so a quick reply is
-// heard with no holding line at all, and nine before the still-looking line, so a slow one is not
-// met with silence. Zero speaks the thinking line at the hand-off. The ceilings keep a long wait
-// from reading as a dropped turn.
-const DEFAULT_VOICE_HOLD_FIRST_MS = 2500;
+// The probability at or above which a turn spoken over a reading is read as said to the assistant,
+// which stops the reading. The default is the value the question's wording was measured to clear
+// its bar at, on rows held out from the wording's tuning. The range keeps a typo from stopping a
+// reading on nearly every remark or on nearly none.
+const DEFAULT_VOICE_INTERRUPT_THRESHOLD = 0.5;
+const MIN_VOICE_INTERRUPT_THRESHOLD = 0.3;
+const MAX_VOICE_INTERRUPT_THRESHOLD = 0.9;
+// Zero speaks the hand-off line at the hand-off, so the operator hears at once where his turn
+// went. A host that sets a wait hears the line only where the reply has not arrived by then, and
+// the ceiling keeps that wait from reading as a dropped turn.
+const DEFAULT_VOICE_HOLD_FIRST_MS = 0;
 const MIN_VOICE_HOLD_FIRST_MS = 0;
 const MAX_VOICE_HOLD_FIRST_MS = 10000;
-const DEFAULT_VOICE_HOLD_SECOND_MS = 9000;
-const MIN_VOICE_HOLD_SECOND_MS = 1000;
-const MAX_VOICE_HOLD_SECOND_MS = 30000;
+// The waiting pulse: a slow swell, low in the mix, so it says the main model is working without
+// drawing the ear. The period's floor keeps it a swell rather than a flutter and its ceiling keeps
+// it heard; the volume's ceiling keeps a typo from playing it over the channel, and 0 turns it off.
+const DEFAULT_VOICE_PULSE_MS = 4800;
+const MIN_VOICE_PULSE_MS = 600;
+const MAX_VOICE_PULSE_MS = 6000;
+const DEFAULT_VOICE_PULSE_VOLUME = 3;
+const MIN_VOICE_PULSE_VOLUME = 0;
+const MAX_VOICE_PULSE_VOLUME = 30;
 const DEFAULT_RETAIN_TERMINAL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_SESSIONS = 500;
 const DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024;
@@ -1151,11 +1177,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
       MAX_VOICE_MEMORY_TURNS,
       DEFAULT_VOICE_MEMORY_TURNS,
     ),
-    voiceMaxSpokenWords: bounded(
-      env.CHANNEL_VOICE_MAX_SPOKEN_WORDS,
-      MIN_VOICE_MAX_SPOKEN_WORDS,
-      MAX_VOICE_MAX_SPOKEN_WORDS,
-      DEFAULT_VOICE_MAX_SPOKEN_WORDS,
+    voiceReadCodeLines: bounded(
+      env.CHANNEL_VOICE_READ_CODE_LINES,
+      MIN_VOICE_READ,
+      MAX_VOICE_READ_CODE_LINES,
+      DEFAULT_VOICE_READ_CODE_LINES,
+    ),
+    voiceReadTableCells: bounded(
+      env.CHANNEL_VOICE_READ_TABLE_CELLS,
+      MIN_VOICE_READ,
+      MAX_VOICE_READ_TABLE_CELLS,
+      DEFAULT_VOICE_READ_TABLE_CELLS,
+    ),
+    voiceReadListItems: bounded(
+      env.CHANNEL_VOICE_READ_LIST_ITEMS,
+      MIN_VOICE_READ,
+      MAX_VOICE_READ_LIST_ITEMS,
+      DEFAULT_VOICE_READ_LIST_ITEMS,
     ),
     // The turn hold's three, read whatever the flag for the same reason as the rest of the voice's.
     voiceTurnHold: voiceTurnHoldMode(env.CHANNEL_VOICE_TURN_HOLD),
@@ -1171,17 +1209,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
       MAX_VOICE_COMPLETE_THRESHOLD,
       DEFAULT_VOICE_COMPLETE_THRESHOLD,
     ),
+    voiceInterruptThreshold: boundedFraction(
+      env.CHANNEL_VOICE_INTERRUPT_THRESHOLD,
+      MIN_VOICE_INTERRUPT_THRESHOLD,
+      MAX_VOICE_INTERRUPT_THRESHOLD,
+      DEFAULT_VOICE_INTERRUPT_THRESHOLD,
+    ),
     voiceHoldFirstMs: bounded(
       env.CHANNEL_VOICE_HOLD_FIRST_MS,
       MIN_VOICE_HOLD_FIRST_MS,
       MAX_VOICE_HOLD_FIRST_MS,
       DEFAULT_VOICE_HOLD_FIRST_MS,
     ),
-    voiceHoldSecondMs: bounded(
-      env.CHANNEL_VOICE_HOLD_SECOND_MS,
-      MIN_VOICE_HOLD_SECOND_MS,
-      MAX_VOICE_HOLD_SECOND_MS,
-      DEFAULT_VOICE_HOLD_SECOND_MS,
+    voicePulseMs: bounded(env.CHANNEL_VOICE_PULSE_MS, MIN_VOICE_PULSE_MS, MAX_VOICE_PULSE_MS, DEFAULT_VOICE_PULSE_MS),
+    voicePulseVolume: bounded(
+      env.CHANNEL_VOICE_PULSE_VOLUME,
+      MIN_VOICE_PULSE_VOLUME,
+      MAX_VOICE_PULSE_VOLUME,
+      DEFAULT_VOICE_PULSE_VOLUME,
     ),
     // The web surface's ten, read here and only here so the installer's env allowlist pin sees
     // them, and validated in broker/web/config.ts, where the surface is: the bind is kept as
@@ -1201,15 +1246,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     webSiblings: webList(env.CHANNEL_WEB_SIBLINGS) ?? [],
     settingsUnset: unsetGatingKeys(env),
   };
-  // The still-looking line follows the thinking line, so a second moment at or before the first
-  // would speak it over the thinking line or ahead of it. Checked whatever the voice flag, like the
-  // two knobs themselves.
-  if (config.voiceHoldSecondMs <= config.voiceHoldFirstMs) {
-    throw new Error(
-      `expected CHANNEL_VOICE_HOLD_SECOND_MS (${String(config.voiceHoldSecondMs)}) above ` +
-        `CHANNEL_VOICE_HOLD_FIRST_MS (${String(config.voiceHoldFirstMs)})`,
-    );
-  }
   return config;
 }
 

@@ -3,7 +3,7 @@
 // tier and the speaker for that channel, built from the collaborators the broker holds for the life
 // of the process, and hands back the barge-in rule's discard and the detach the leave runs. Lifted
 // out of the broker's start so the wiring is tested with fakes rather than pinned from source.
-import { renderAnswer } from "../discord/render.ts";
+import { renderVoiceLine } from "../discord/render.ts";
 import type { CallOutcome } from "../discord/transport.ts";
 import { postThroughRateLimits } from "../routing/outbound.ts";
 import type { PostClock } from "../routing/outbound.ts";
@@ -13,6 +13,7 @@ import { createVoiceBridge } from "./bridge.ts";
 import type { BridgeSession, TierBinding, VoiceBridge } from "./bridge.ts";
 import type { FastTier } from "./fast.ts";
 import type { Player } from "./player.ts";
+import { pulseFrame } from "./pulse.ts";
 import type { LineNames } from "./rank.ts";
 import type { Speaker } from "./speaker.ts";
 import type { Transcriber } from "./transcriber.ts";
@@ -55,12 +56,15 @@ export type VoiceJoinOptions = {
   };
   /** `CHANNEL_MIRROR`. */
   mirror: boolean;
-  /** `CHANNEL_VOICE_MAX_SPOKEN_WORDS`. */
-  maxSpokenWords: number;
   /** The typing keeper's hold, or a no-op where no keeper is built. */
   hold: (threadId: string, until: number) => () => void;
   /** How long a held typing line stands with no frame to release it. */
   holdMs: number;
+  /**
+   * The waiting pulse's period in milliseconds and its peak as a percent of full scale. A volume of
+   * 0 sets no pulse at all.
+   */
+  pulse: { periodMs: number; volume: number };
   /** Builds the fast tier for one joined channel, with the bridge's binding. */
   tier: (binding: TierBinding) => FastTier;
   /** Builds the voice for one joined channel, or null where the voice is mute. */
@@ -107,27 +111,34 @@ export function voiceJoin(
   }
 
   /**
-   * Where an answer the speaker could not speak goes. With the mirror on it goes nowhere: the
-   * bridge posted the line to the thread before the speaker was asked for it, so posting the
-   * unspoken words again would put the answer in the thread twice. With the mirror off this is the
-   * only copy of those words the operator gets, so it is posted whatever else the mirror withholds,
-   * rendered as a reply tool's answer is: it is the same class of text landing in the same thread,
-   * and it is paced as that answer is, so a blocked bucket delays it rather than losing it.
+   * Where a line the speaker could not speak goes. Every line that reaches here is the helper's:
+   * its answers, the stopped line, the cannot-reach line and the hand-off lines, since the main
+   * model's read reply is in the thread already and the speaker posts nothing for it. With the
+   * mirror on it goes nowhere: the bridge posted an answer, the stopped line and the cannot-reach
+   * line to the thread before the speaker was asked for it, so posting the unspoken words again
+   * would put the line in the thread twice, and a hand-off line is spoken only and never posted.
+   * With the mirror off this is the only copy of those words the operator gets, so it is posted
+   * whatever else the mirror withholds, under the helper's voice line form with the session's name
+   * as it reads now, and paced as a reply's run is, so a blocked bucket delays it rather than
+   * losing it.
    */
-  function unspoken(threadId: string, text: string): Promise<void> {
+  function unspoken(threadId: string, session: string, text: string): Promise<void> {
     if (options.mirror) return Promise.resolve();
     let posts: Promise<void> = Promise.resolve();
-    for (const message of renderAnswer(text)) {
+    for (const message of renderVoiceLine("helper", session, text)) {
       posts = posts
         .then(() => paced(threadId, message))
         .then((landed) => {
           if (!landed) {
-            options.log(`voice: the thread refused an unspoken answer for thread ${threadId}`);
+            options.log(`voice: the thread refused an unspoken line for thread ${threadId}`);
           }
         });
     }
     return posts;
   }
+
+  const { periodMs, volume } = options.pulse;
+  const pulse = volume === 0 ? null : (index: number): Buffer => pulseFrame(index, periodMs, volume);
 
   return ({ transcriber, player, threadId, sessionId }) => {
     // The session's name is what its thread title shows, through the same bounding and the same
@@ -135,9 +146,10 @@ export function voiceJoin(
     // resolved at each use, never held: the session's name follows a rename, and an operator's line
     // is named for the account that spoke it, which the gateway's voice-state cache holds for every
     // account in the channel. One the cache does not hold is named by its id.
+    const sessionName = (): string => options.sessionName(threadId) ?? sessionId;
     const names = (speakerId: string): LineNames => ({
       speaker: options.nameOf(speakerId) ?? speakerId,
-      session: options.sessionName(threadId) ?? sessionId,
+      session: sessionName(),
     });
     const speaker = options.speaker;
     const bridge = createVoiceBridge({
@@ -150,10 +162,10 @@ export function voiceJoin(
       notice: (id, text) => options.writer.notice(id, text),
       post: paced,
       mirror: options.mirror,
-      maxSpokenWords: options.maxSpokenWords,
       player,
       hold: options.hold,
       holdMs: options.holdMs,
+      pulse,
       tier: options.tier,
       speaker:
         speaker === null
@@ -161,7 +173,7 @@ export function voiceJoin(
           : (timed) =>
               speaker({
                 player: { play: (pcm) => timed.play(pcm), stop: () => player.stop() },
-                fallback: (text) => unspoken(threadId, text),
+                fallback: (text) => unspoken(threadId, sessionName(), text),
               }),
       log: options.log,
     });
@@ -173,6 +185,7 @@ export function voiceJoin(
       // gap before a turn's first frame, or frames the player still holds after the last settled.
       speaking: () => bridge.speaking() || player.queued() > 0,
       onHeldShort: (turn) => bridge.heldShort(turn),
+      onStop: (turn) => bridge.stopped(turn),
       detach: () => {
         unsubscribe();
         bridge.leave();

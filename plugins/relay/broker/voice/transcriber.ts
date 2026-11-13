@@ -14,7 +14,8 @@ import type { Player } from "./player.ts";
  * skips an `end` with `lost` set, since it has no final text and `heard` may be a partial
  * transcript. Every `end` is final: the turn has no later event. `tone` on an `end` that is not
  * lost is the speaker's tone as the transcriber heard it, one short label, absent where it was not
- * confident.
+ * confident. `verdict` on an `end` is the judging stage's reading of a turn that ended over a paused
+ * reading, absent on every other end.
  */
 export type TurnEvent =
   | { kind: "start"; speakerId: string; turn: number }
@@ -25,6 +26,7 @@ export type TurnEvent =
       turn: number;
       text: string;
       tone?: string;
+      verdict?: InterruptVerdict;
       lost?: undefined;
       heard?: undefined;
     }
@@ -36,7 +38,15 @@ export type TurnEvent =
       lost: true;
       heard: string;
       tone?: undefined;
+      verdict?: undefined;
     };
+
+/**
+ * How a turn that ended over a paused reading was read, by the stage in interrupt.ts: `stop` is a
+ * stop phrase, `addressed` is a turn said to the assistant, and `stray` is a backchannel or words
+ * meant for someone else.
+ */
+export type InterruptVerdict = "stop" | "addressed" | "stray";
 
 export type Transcriber = {
   /** Takes one frame of 48 kHz 16-bit mono PCM and the account it came from. */
@@ -57,11 +67,13 @@ export function wordCount(text: string): number {
  * the persona is mid-reply: a speech handed to the speaker has not settled, or the player holds
  * frames. Both halves are needed, since a speak settles when its last frame reaches the player and
  * the player is empty in the gap before a turn's first frame arrives. `onHeldShort` is told the
- * number of a short turn that ended while it read true.
+ * number of a short turn that ended while it read true, and of a turn the judging stage read as
+ * stray. `onStop` is told the number of a turn the judging stage read as a stop phrase.
  */
 export type HeldShortReading = {
   speaking: () => boolean;
   onHeldShort: (turn: number) => void;
+  onStop?: (turn: number) => void;
 };
 
 /**
@@ -77,8 +89,12 @@ export type HeldShortReading = {
  * short turn that ends while the persona is mid-reply, `held.speaking()` reading true, is a
  * backchannel over the persona, and `held.onHeldShort` is called with its number, which is the one
  * reading of that judgment: the bridge posts such a turn and neither ranks nor hands it off. A
- * short turn while the persona is silent is a turn of its own and is reported to neither. Returns
- * the call that unbinds it.
+ * short turn while the persona is silent is a turn of its own and is reported to neither.
+ *
+ * An end that carries a verdict was judged over a paused reading, and the verdict decides in place
+ * of the word count. A stop discards the queued speech and calls `held.onStop`. An addressed turn
+ * takes the long turn's path with `cut` true. A stray turn takes the path of a short turn over
+ * speech: the player resumes and `held.onHeldShort` is called. Returns the call that unbinds it.
  */
 export function bindBargeIn(
   transcriber: Pick<Transcriber, "onTurn">,
@@ -101,6 +117,23 @@ export function bindBargeIn(
     }
     if (event.kind !== "end" || !holding) return;
     holding = false;
+    if (event.verdict === "stop") {
+      player.stop();
+      player.resume();
+      held?.onStop?.(event.turn);
+      return;
+    }
+    if (event.verdict === "stray") {
+      player.resume();
+      held?.onHeldShort(event.turn);
+      return;
+    }
+    if (event.verdict === "addressed") {
+      player.stop();
+      player.resume();
+      onDiscard?.(event.turn, true);
+      return;
+    }
     if (wordCount(event.lost === true ? event.heard : event.text) < shortTurnWords) {
       // Read before the resume, while the turn still holds the floor. The listener runs before the
       // bridge's for this same end, since it subscribed first, so the reading is there when the

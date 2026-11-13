@@ -1,8 +1,9 @@
 // The reply check: a closed, fixed-text test run over the small model's reply before it is spoken.
-// A reply that carries the hand-off token, that speaks about the speaker's own reach or ability,
-// or that takes back an earlier line is not the persona's to say, so the fast tier hands its turn
-// off instead of speaking it. The two phrase lists are literals in code, read and tested in full,
-// and the check makes no call. The module is pure and takes any string without throwing.
+// A reply that carries the hand-off token, that speaks about the helper's own reach or ability, or
+// that takes back an earlier line is not the helper's to say, so the fast tier hands its turn off
+// instead of speaking it, and where that hand-off is delivered and news a hand-off line says where
+// it went. The two phrase lists are literals in code, read and tested in full, and the check makes
+// no call. The module is pure and takes any string without throwing.
 //
 // Both the reply and every list entry are normalised the same way before matching: trimmed,
 // case-folded, whitespace runs collapsed to one space, and the apostrophe look-alikes (U+2018,
@@ -17,8 +18,8 @@ export type ReplyKind = "hand-off" | "access" | "walk-back";
  * Phrases about the speaker's own reach or ability. Each is first person and a whole phrase, long
  * enough that a light reply does not open with it: "I can't see why not" and "I'm just a bit
  * tired" match nothing here. A reply about the person, "you can't see that from here", is not
- * caught. The honest disclosure the prompt asks for, "I'm an AI assistant speaking in a
- * synthesized voice", matches nothing here. "I'm just an assistant" and "I'm only an assistant"
+ * caught. The honest disclosure the prompt asks for, "I'm the quick voice helper, a small
+ * AI model", matches nothing here. "I'm just an assistant" and "I'm only an assistant"
  * are caught by design, so the turn is handed off rather than a disclaimer spoken.
  */
 export const ACCESS_PHRASES: readonly string[] = [
@@ -106,7 +107,7 @@ const WALK_BACK = WALK_BACK_PHRASES.map(normalised);
  * The kind of a reply the fast tier must not speak, or null for a reply it may. Checked in order:
  * the hand-off token, then the access phrases, then the walk-back phrases, so a reply carrying more
  * than one is named by the first. The token counts anywhere in the reply, since the bracketed token
- * is never the persona's speech, so "[Hand off].", "Sure, [hand off]." and "**[handoff]**" are all
+ * is never the helper's speech, so "[Hand off].", "Sure, [hand off]." and "**[handoff]**" are all
  * hand-offs. An unbracketed "hand off" is ordinary speech and is not the token. A phrase counts
  * anywhere in the reply.
  */

@@ -1,8 +1,9 @@
 // The Jev client: the one way the broker sends text to TypeSafe.
 //
-// Three callers ask TypeSafe's Jev classifier yes-or-no questions about text. The response gate asks
-// about a thread's buffered conversation, the voice's ranking asks about a spoken turn, and the
-// voice's turn hold asks whether a held turn reads as a finished thought. Each
+// Four callers ask TypeSafe's Jev classifier yes-or-no questions about text. The response gate asks
+// about a thread's buffered conversation, the voice's ranking asks about a spoken turn, the
+// voice's turn hold asks whether a held turn reads as a finished thought, and the voice's
+// interruption stage asks whether a turn spoken over a reading was said to the assistant. Each
 // supplies its own questions, the state they are asked about, the threshold it reads the answer
 // against and the two lines its failures are logged on. What they share is here,
 // and none of it is an argument: the host, the model and the timeout are constants, so nothing a

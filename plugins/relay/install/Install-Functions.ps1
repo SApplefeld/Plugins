@@ -701,12 +701,16 @@ $script:ChannelBrokerEnvAllowlist = @(
     'CHANNEL_VOICE_FAST_KEY_FILE',
     'CHANNEL_VOICE_FAST_MODEL',
     'CHANNEL_VOICE_MEMORY_TURNS',
-    'CHANNEL_VOICE_MAX_SPOKEN_WORDS',
+    'CHANNEL_VOICE_READ_CODE_LINES',
+    'CHANNEL_VOICE_READ_TABLE_CELLS',
+    'CHANNEL_VOICE_READ_LIST_ITEMS',
     'CHANNEL_VOICE_HOLD_FIRST_MS',
-    'CHANNEL_VOICE_HOLD_SECOND_MS',
+    'CHANNEL_VOICE_PULSE_MS',
+    'CHANNEL_VOICE_PULSE_VOLUME',
     'CHANNEL_VOICE_TURN_HOLD',
     'CHANNEL_VOICE_TURN_HOLD_MS',
     'CHANNEL_VOICE_COMPLETE_THRESHOLD',
+    'CHANNEL_VOICE_INTERRUPT_THRESHOLD',
     # The web surface's ten. The bind is an address or the word tailscale, the four lists are
     # tailnet logins and node names, the CLI entry and the reader key file are paths, and the
     # siblings are names with tailnet addresses: none is a credential, since the reader key lives in

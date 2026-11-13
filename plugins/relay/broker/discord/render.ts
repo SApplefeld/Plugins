@@ -1794,13 +1794,24 @@ export function renderAnswer(text: string, mentionUserIds: readonly string[] = [
   return attributed(withoutInvisible(text).trim(), ANSWER_ATTRIBUTION, mentionPrefix(mentionUserIds));
 }
 
-/** Whose spoken line a voice post carries: the operator's, or the persona's own. */
-export type VoiceLineRole = "operator" | "persona";
+/**
+ * Whose spoken line a voice post carries: the operator's, the quick voice helper's, or the main
+ * model's reply that was read aloud (`persona`).
+ */
+export type VoiceLineRole = "operator" | "helper" | "persona";
+
+/** The class slot each speaker's voice line carries behind its name. */
+const VOICE_LINE_SLOT: Readonly<Record<VoiceLineRole, string>> = {
+  operator: "operator, voice",
+  helper: "voice helper",
+  persona: "voice",
+};
 
 /**
  * One line spoken in the thread's voice channel, rendered as the ordered messages it takes to carry
- * it whole: `<name> (operator, voice): <text>` for the operator's turn and `<name> (voice): <text>`
- * for the persona's, the forms the voice conversation is read back in.
+ * it whole: `<name> (operator, voice): <text>` for the operator's turn, `<name> (voice helper):
+ * <text>` for the helper's line and `<name> (voice): <text>` for the main model's read reply, the
+ * forms the voice conversation is read back in.
  *
  * The same treatment a mirrored reply gets, from the same machinery, because it is the same class
  * of text landing in the same thread: a transcript of what a person said, or an answer a model
@@ -1810,8 +1821,8 @@ export type VoiceLineRole = "operator" | "persona";
  * channel or the session chose, so it takes the escape and the bound a peer's name takes.
  */
 export function renderVoiceLine(role: VoiceLineRole, name: string, text: string): string[] {
-  const slot = role === "operator" ? "operator, voice" : "voice";
-  return attributed(withoutInvisible(text).trim(), `${inertField(name, MAX_PEER_NAME_DRAWN)} (${slot}): `);
+  const attribution = `${inertField(name, MAX_PEER_NAME_DRAWN)} (${VOICE_LINE_SLOT[role]}): `;
+  return attributed(withoutInvisible(text).trim(), attribution);
 }
 
 /**

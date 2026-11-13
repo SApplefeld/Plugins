@@ -1,27 +1,33 @@
-// The fast tier: a finished spoken turn is ranked by Jev as answer or hand off, a small Claude
-// model answers the turn at once through the `Speaker`, and a turn the session must take is handed
-// off and held: a thinking line is spoken only where the session's reply has not reached the tier
-// by the first hold moment, and a still-looking line only where it has not by the second. The
-// reply, a cut-in, a leave or the next hand-off clears the hold. The memory ring the tier answers
-// from is here too, since it is the one state the tier and the session's bridge share. The tier
-// appends the operator's turns itself; a persona line, its own answer or the session's reply, is
-// appended through `said` by the bridge once the operator has heard it through, which only the
-// bridge can tell. A turn the transcriber heard a tone in is ranked and answered with the tone's
-// note on its text, `withTone`'s, and the ring holds the turn without it.
+// The fast tier, the quick voice helper: a finished spoken turn is ranked by Jev as answer or hand
+// off, a small Claude model answers the turn at once through the `Speaker`, speaking as the helper
+// it is, and a turn the main model must take is handed off to its session. A hand-off that is news
+// to the operator, the last turn the helper answered or handed off having been answered, takes one
+// hand-off line once the session has the turn, spoken only where the session's reply has not
+// reached the tier by the hold moment, and at the hand-off where that moment is zero. A hand-off
+// straight after another takes none, and one that reaches no session takes none, since the bridge
+// speaks its cannot-reach line instead. The reply, a cut-in, a helper's answer to a later turn or a
+// leave clears a line still waiting. The memory ring the tier answers from is
+// here too, since it is the one state the tier and the session's bridge share. The tier appends the
+// operator's turns itself; the helper's answer or the main model's reply is appended through `said`
+// by the bridge once the operator has heard it through, which only the bridge can tell. A turn the
+// transcriber heard a tone in is ranked and answered with the tone's note on its text,
+// `withTone`'s, and the ring holds the turn without it.
 //
 // Each turn takes one direction and never none. Every failure of the screen, of Jev or of the model
-// hands the turn off and holds it, so the persona's session is the floor and nothing here
+// hands the turn off, so the main model's session is the floor and nothing here
 // throws to its caller or drops a turn in silence. A speech the speaker fails is not a hand-off:
 // the bridge posted the line to the thread before the speech was asked for, and with the mirror
 // off the speaker's own fallback posts the unspoken words there instead. A turn withdrawn by
 // another turn's long cut-in (`cutIn`) is the one exception to the rule: its work
 // is discarded, it is neither answered nor handed off, and a hand-off already delivered for it
-// stands.
+// stands. Two turns the bridge reads as a stop phrase skip the ranking: one that stopped a reading
+// joins the ring and goes no further (`stopHeard`), and one said while the session is working is
+// handed off unranked (`handOffUnranked`).
 //
 // Three absences each narrow what the tier does, and none stops it. With no judge key, no turn is
 // ranked and every turn hands off. With no fast key, or with no speaker, every turn hands off too,
 // and none is ranked, since an answer that cannot be spoken belongs to the session's thread reply
-// and the ranking would decide nothing; with no speaker there is no holding line either.
+// and the ranking would decide nothing; with no speaker there is no hand-off line either.
 //
 // What leaves the machine from here is the ring and the turn, screened for secrets before the Jev
 // call and again before the model call; a hit makes neither call, and the turn never enters the
@@ -32,7 +38,7 @@ import { SECRET_SCREEN, createJevClient } from "../jev/client.ts";
 import type { JevFetch, JevResult } from "../jev/client.ts";
 import { TONE_LABEL_SHAPE } from "./inworld.ts";
 import type { Player } from "./player.ts";
-import { STILL_LOOKING_LINES, THINKING_LINES, systemPrompt } from "./prompt.ts";
+import { HAND_OFF_LINES, MAIN_MODEL_PREFIX, systemPrompt } from "./prompt.ts";
 import { RANK_QUESTIONS, RANK_REPEAT_LOG, decide, rankState } from "./rank.ts";
 import type { LineNames, RankQuestion, RankThresholds } from "./rank.ts";
 import { replyKind } from "./reply-check.ts";
@@ -80,18 +86,21 @@ export type AnthropicFetch = (
   },
 ) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>;
 
-/** One message of the model's conversation: the ring's lines folded into alternating roles. */
+/** One message of the model's conversation: the ring's lines folded by speaker. */
 export type AnthropicMessage = { role: "user" | "assistant"; content: string };
 
-/** Who is appending a line: the operator's turn, the model's answer, or the session's reply. */
+/** Who is appending a line: the operator's turn, the helper's answer, or the session's reply. */
 export type RingWriter = "turn" | "answer" | "session reply";
 
-/** The kind a spoken persona line is remembered under once the operator has heard it through. */
+/**
+ * The kind a spoken line of the voice's is remembered under once the operator has heard it through:
+ * `answer` for the helper's own, and `session reply` for the main model's reply that was read.
+ */
 export type Remember = Extract<RingWriter, "answer" | "session reply">;
 
 /**
  * The speaker the tier is handed: `Speaker` with a second argument naming whether, and as what, the
- * line is remembered once heard through. A line that names none, a holding line or the bridge's
+ * line is remembered once heard through. A line that names none, a hand-off line or the bridge's
  * cannot-reach line, is spoken and never remembered. The bridge's wrapper speaker reads it, since a
  * speak settles when the last frame reaches the player rather than when it has played, and only the
  * bridge sees the operator's next turn, which is when a line counts as heard.
@@ -161,24 +170,31 @@ export function createMemoryRing(capacity: number, log: (message: string) => voi
 }
 
 /**
- * The ring plus the turn as the Messages API takes them: alternating `user` and `assistant`
- * messages, consecutive lines of one role joined by a line break, the first message a `user` one,
- * so a leading persona line is dropped.
+ * The ring plus the turn as the Messages API takes them. The operator's lines are `user` messages
+ * and the helper's are `assistant` messages, consecutive lines of either joined by a line break. A
+ * main model's reply is a `user` message of its own that opens with `MAIN_MODEL_PREFIX`, joined to
+ * nothing, so the small model never reads the main model's words as its own and the prefix always
+ * opens the message the prompt tells it to look for. The first message is a `user` one, so a
+ * leading helper line is dropped.
  */
 export function toMessages(lines: readonly SpokenLine[]): AnthropicMessage[] {
   const messages: AnthropicMessage[] = [];
+  // The speaker of the newest message, which decides whether the next line joins it.
+  let newest: SpokenLine["role"] | null = null;
   for (const line of lines) {
-    const role = line.role === "user" ? "user" : "assistant";
     const last = messages[messages.length - 1];
-    if (last === undefined) {
-      if (role === "user") messages.push({ role, content: line.text });
-      continue;
-    }
-    if (last.role === role) {
+    if (line.role === "persona") {
+      messages.push({ role: "user", content: `${MAIN_MODEL_PREFIX} ${line.text}` });
+    } else if (last !== undefined && newest === line.role) {
       last.content = `${last.content}\n${line.text}`;
+    } else if (line.role === "user") {
+      messages.push({ role: "user", content: line.text });
+    } else if (last !== undefined) {
+      messages.push({ role: "assistant", content: line.text });
+    } else {
       continue;
     }
-    messages.push({ role, content: line.text });
+    newest = line.role;
   }
   return messages;
 }
@@ -240,21 +256,23 @@ export type FastTierOptions = {
   player: Pick<Player, "play">;
   /**
    * Told the turn's text and its tone, where the transcriber heard one, once per hand-off, at the
-   * hand-off, after the thinking line is queued where `holdFirstMs` is zero. The text is the ring's
-   * line, without the tone's note. The bridge delivers it to the session with the note and the
-   * ring's lines past the mark, and moves the mark.
+   * hand-off, before any hand-off line is queued. The text is the ring's line, without the tone's
+   * note. The bridge delivers it to the session with the note and the ring's lines past the mark,
+   * and moves the mark. Returns whether the session was handed the turn: false where it was not,
+   * and the bridge has then spoken its cannot-reach line.
    */
-  handOff: (turn: string, tone?: string) => void;
+  handOff: (turn: string, tone?: string) => boolean;
   /**
-   * `CHANNEL_VOICE_HOLD_FIRST_MS`: how long after a hand-off the thinking line waits for the
-   * session's reply before it is spoken. Zero speaks it at the hand-off.
+   * How long the wait has been open, in milliseconds, or null while it is closed. The wait is the
+   * bridge's: open from a hand-off delivered to the main model's session until that session's turn
+   * ends. Read at each model call, for the sentence of state the system prompt carries.
+   */
+  waitMs: () => number | null;
+  /**
+   * `CHANNEL_VOICE_HOLD_FIRST_MS`: how long after a hand-off that is news the hand-off line waits
+   * for the session's reply before it is spoken. Zero speaks it at the hand-off.
    */
   holdFirstMs: number;
-  /**
-   * `CHANNEL_VOICE_HOLD_SECOND_MS`: how long after a hand-off the still-looking line waits for the
-   * reply. Greater than `holdFirstMs`, which the config refuses otherwise.
-   */
-  holdSecondMs: number;
   /**
    * Told the text of an answer whose turn was withdrawn while its speech was in flight, so the
    * bridge forgets it: the question has left the ring, and the answer must not be remembered alone.
@@ -263,7 +281,7 @@ export type FastTierOptions = {
   log: (message: string) => void;
   /** The clock each turn is timed on. Injected so a test reads a figure without waiting. */
   now?: () => number;
-  /** The hold's timers. Injected so a test drives its two moments without waiting. */
+  /** The hold's timer. Injected so a test drives its moment without waiting. */
   setTimer?: (callback: () => void, ms: number) => NodeJS.Timeout;
   clearTimer?: (timer: NodeJS.Timeout) => void;
 };
@@ -279,17 +297,18 @@ export type FastTier = {
    * in queue order with the tier's own speech, so no frame of it is ever timed as a turn's. Section
    * 5 speaks through this and nothing else. `remember` passes through to the speaker as the tier's
    * own answers pass `answer`. Resolves as the speaker does, at once with no speaker. Any speech
-   * asked for here clears the hold: the bridge speaks the session's reply and the cannot-reach line
-   * alone, and after either the turn waits on nothing a holding line could cover.
+   * asked for here clears the hold: the bridge speaks the session's reply, the stopped line and the
+   * cannot-reach line alone, and after any of them no hand-off line is owed. It leaves the tier's
+   * reading of whether the last turn was handed off as it is.
    */
   speak: (text: string, remember?: Remember) => Promise<void>;
   /**
-   * Appends a persona line the operator has heard through, the session's reply by default or the
-   * fast model's answer under `answer`, and returns whether it was remembered. One that matches the
-   * secret screen is refused by the ring and logged by a fixed line; it was still spoken, so the
-   * ring and what was said differ by that line, by design, to keep a secret off the vendors the
-   * ring is sent to. The bridge calls this at the operator's next turn's end, so a line a cut-in
-   * stopped short never arrives here.
+   * Appends a line of the voice's that the operator has heard through and returns whether it was
+   * remembered: the main model's reply by default, as a `persona` line, or the helper's own under
+   * `answer`, as a `helper` line. One that matches the secret screen is refused by the ring and
+   * logged by a fixed line; it was still spoken, so the ring and what was said differ by that line,
+   * by design, to keep a secret off the vendors the ring is sent to. The bridge calls this at the
+   * operator's next turn's end, so a line a cut-in stopped short never arrives here.
    */
   said: (text: string, writer?: Remember) => boolean;
   /**
@@ -297,16 +316,39 @@ export type FastTier = {
    * is aborted and a pending ranking is discarded on arrival, while the cutting-in turn itself is
    * left to be ranked and answered whether its end was taken before this call or after it. A
    * hand-off already delivered stands, and its hold is cleared unless it is the cutting-in turn's.
+   * A hold cleared here never spoke its line, so the operator has not heard of that hand-off, and
+   * the next hand-off is news.
    */
   cutIn: (turn: number) => void;
   /**
-   * Operator turn `turn`, which answers an ASK and which the bridge hands off unranked: its line
-   * joins the ring, unless the ring refuses it as screened.
+   * Operator turn `turn`, which answers an ASK and which the bridge hands off itself, unranked: its
+   * line joins the ring, unless the ring refuses it as screened. Called before the bridge's hand-off,
+   * so the event carries the line and the mark moves past it. No hand-off line is spoken for it.
    */
   answeredAsk: (turn: number, text: string) => void;
   /**
+   * The outcome of the bridge's hand-off of operator turn `turn`, the answer to an ASK, told after
+   * that hand-off returns. Delivered, it counts as a turn handed off, so the tier's next hand-off is
+   * not news. Undelivered, the bridge spoke its cannot-reach line, a helper's line, so the next
+   * hand-off is news.
+   */
+  askHandedOff: (turn: number, delivered: boolean) => void;
+  /**
+   * Operator turn `turn`, a stop phrase that stopped a reading: its line joins the ring, unless the
+   * ring refuses it as screened, and the turn is neither ranked nor handed off. It leaves the
+   * tier's reading of whether the last turn was handed off as it is.
+   */
+  stopHeard: (turn: number, text: string) => void;
+  /**
+   * Operator turn `turn`, a stop phrase said while the session is working and nothing is being
+   * read: into the ring and handed off by the tier's own hand-off with no ranking call, since only
+   * the session can stop its own work. Once the session has it, it always takes a hand-off line,
+   * queued at once at any `holdFirstMs`, so the operator hears that his words were passed on.
+   */
+  handOffUnranked: (turn: number, text: string, tone: string | undefined) => void;
+  /**
    * Clears the hold without speaking: the session's reply has arrived and the bridge holds it
-   * behind the operator's floor, so no holding line is owed for it.
+   * behind the operator's floor, so no hand-off line is owed for it.
    */
   clearHold: () => void;
   /**
@@ -328,7 +370,7 @@ type Outcome = "answered" | "handed off";
  * One finished turn and its work: its tone, the user line it put in the ring, the conversation it
  * is answered over (the ring before it plus the turn's text with its tone's note), when it ended,
  * the controller that aborts its model call, and the flags that keep a cancelled turn from being
- * answered or handed off, each of the two holding lines from being spoken twice for one turn, and a
+ * answered or handed off, a hand-off line from being spoken twice for one turn, and a
  * withdrawn turn's line from being pulled from under an answer already spoken to it. `speaking` is
  * the answer's text while its speech is in flight, so a withdrawal then can name it to the bridge.
  */
@@ -341,8 +383,7 @@ type Turn = {
   endedAt: number;
   controller: AbortController;
   cancelled: boolean;
-  thinkingSpoken: boolean;
-  stillLookingSpoken: boolean;
+  lineSpoken: boolean;
   answered: boolean;
   done: boolean;
   speaking: string | null;
@@ -366,12 +407,14 @@ function screened(texts: readonly string[]): boolean {
 }
 
 /**
- * One model call over the conversation. Settles on every path: the reply text, or the failure
- * kind, which is `cancelled` where the turn's own controller aborted it.
+ * One model call over the conversation, under the system prompt for `session` with the state
+ * sentence `waitMs` selects. Settles on every path: the reply text, or the failure kind, which is
+ * `cancelled` where the turn's own controller aborted it.
  */
 async function askModel(
   fast: FastModel,
   session: string,
+  waitMs: number | null,
   lines: readonly SpokenLine[],
   cancel: AbortSignal,
 ): Promise<{ ok: true; text: string } | { ok: false; kind: string }> {
@@ -388,7 +431,7 @@ async function askModel(
       body: JSON.stringify({
         model: fast.model,
         max_tokens: ANSWER_MAX_TOKENS,
-        system: systemPrompt(session),
+        system: systemPrompt(session, waitMs),
         messages: toMessages(lines),
       }),
       signal: AbortSignal.any([AbortSignal.timeout(ANSWER_TIMEOUT_MS), cancel]),
@@ -418,17 +461,29 @@ export function createFastTier(options: FastTierOptions): FastTier {
    * head is the one the next frame belongs to; it leaves the queue when its speak settles.
    */
   const awaiting: Awaiting[] = [];
-  // A pending holding line never keeps the broker's process alive at shutdown.
+  // A pending hand-off line never keeps the broker's process alive at shutdown.
   const setTimer = options.setTimer ?? ((callback, ms) => setTimeout(callback, ms).unref());
   const clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer));
-  /** Each set's next line: the two rotate apart, so one set's turn never moves the other's. */
-  let nextThinking = 0;
-  let nextStillLooking = 0;
+  /** The next hand-off line of the rotation, which starts at the first for each joined channel. */
+  let nextLine = 0;
   /**
-   * The hold: the handed-off turn it is for and the timers of its lines still to speak, or null.
-   * One at a time, the newest hand-off's, so one wait never hears two schedules.
+   * Whether the last turn the helper answered or that was given to the main model was given to the
+   * main model, which is what makes the next hand-off news or not. No at a join. A delivered
+   * hand-off sets it to yes, the tier's own and the bridge's own for the answer to a spoken
+   * question alike, and one that reached no session sets it to no, since the operator last heard
+   * the cannot-reach line. A helper's answer sets it to no where its turn is newer than
+   * `handedOffTurn`, so a late answer to an earlier turn never makes the next hand-off news. A cut-in
+   * that clears a hold before its line sets it to no, and so does a stop over a reading, which the
+   * bridge passes on as a cut-in. The stopped line and a stray turn never reach it.
    */
-  let hold: { turn: Turn; timers: NodeJS.Timeout[] } | null = null;
+  let handedOff = false;
+  /** The turn of the delivered hand-off that last set `handedOff` to yes. */
+  let handedOffTurn = 0;
+  /**
+   * The hold: a hand-off line waiting on its timer and the handed-off turn it is spoken for, or
+   * null. One at a time, so one wait never hears two lines.
+   */
+  let hold: { turn: Turn; timer: NodeJS.Timeout } | null = null;
   /** Counts ranking submissions, so no two ever share a key at the Jev client. */
   let submissions = 0;
 
@@ -439,7 +494,7 @@ export function createFastTier(options: FastTierOptions): FastTier {
       if (head !== undefined && !head.charged) {
         head.charged = true;
         if (head.turn !== null && head.outcome !== null) {
-          const what = head.outcome === "answered" ? "first audio" : "holding line";
+          const what = head.outcome === "answered" ? "first audio" : "hand-off line";
           log(`voice: turn ${head.outcome}, ${what} after ${String(Math.round(now() - head.turn.endedAt))}ms`);
         }
       }
@@ -473,72 +528,76 @@ export function createFastTier(options: FastTierOptions): FastTier {
   /** Clears the hold, where one is armed: a timer still pending never fires. */
   function clearHold(): void {
     if (hold === null) return;
-    for (const timer of hold.timers) clearTimer(timer);
+    clearTimer(hold.timer);
     hold = null;
   }
 
   /**
-   * Speaks the turn's next thinking line, or its next still-looking line, once per turn. A turn
-   * withdrawn since its hand-off is not held.
+   * Speaks the next hand-off line of the rotation for the turn, once per turn. A turn withdrawn
+   * since its hand-off gets none.
    */
-  function holdingLine(voice: TierSpeaker, turn: Turn, kind: "thinking" | "still looking"): void {
-    if (turn.cancelled) return;
-    let line: string;
-    if (kind === "thinking") {
-      if (turn.thinkingSpoken) return;
-      turn.thinkingSpoken = true;
-      line = THINKING_LINES[nextThinking];
-      nextThinking = (nextThinking + 1) % THINKING_LINES.length;
-    } else {
-      if (turn.stillLookingSpoken) return;
-      turn.stillLookingSpoken = true;
-      line = STILL_LOOKING_LINES[nextStillLooking];
-      nextStillLooking = (nextStillLooking + 1) % STILL_LOOKING_LINES.length;
-    }
+  function handOffLine(voice: TierSpeaker, turn: Turn): void {
+    if (turn.cancelled || turn.lineSpoken) return;
+    turn.lineSpoken = true;
+    const line = HAND_OFF_LINES[nextLine];
+    nextLine = (nextLine + 1) % HAND_OFF_LINES.length;
     void speak(voice, turn, "handed off", line);
   }
 
   /**
-   * Hands the turn off: arms the hold, then the callback. The hold replaces any earlier one and
-   * times its two lines from this call, and a thinking line due at zero is queued here, before the
-   * callback. A cancelled turn is neither held nor handed off. A throw out of the callback is the
-   * bridge's defect, logged by turn number and ended here, so it reaches neither the Jev client's
-   * handler nor the answer chain.
+   * Hands the turn off: the callback, then the hand-off line where it is owed. A line is owed where
+   * the callback delivered the turn and the hand-off is news, the last turn answered or handed off
+   * having been answered, and always with `atOnce`, the unranked hand-off of a stop phrase. It is
+   * queued here, as the callback returns, where `holdFirstMs` is zero or with `atOnce`, so a stop
+   * phrase's line is heard ahead of a reply the bridge speaks once this returns; otherwise the hold
+   * is armed for it, in place of any earlier one. A hand-off that is not news speaks nothing, and a
+   * line still waiting from the hand-off before it stays timed from that one and becomes this
+   * turn's, so one wait hears one line. A hand-off the callback did not deliver speaks no line and
+   * arms no hold: the bridge has spoken its cannot-reach line. A cancelled turn is neither held nor
+   * handed off. A throw out of the callback is the bridge's defect, logged by turn number, ended
+   * here so it reaches neither the Jev client's handler nor the answer chain, and read as a turn
+   * not delivered.
    */
-  function handOff(turn: Turn): void {
+  function handOff(turn: Turn, atOnce = false): void {
     if (turn.cancelled) return;
     turn.done = true;
-    clearHold();
-    if (speaker === null) {
-      // With nothing to speak through, the log line stands in for the hold, once per turn.
-      if (!turn.thinkingSpoken) {
-        turn.thinkingSpoken = true;
-        log("voice: turn handed off, no speaker to hold the line");
-      }
-    } else {
-      const voice = speaker;
-      const armed: { turn: Turn; timers: NodeJS.Timeout[] } = { turn, timers: [] };
-      if (options.holdFirstMs === 0) {
-        holdingLine(voice, turn, "thinking");
-      } else if (!turn.thinkingSpoken) {
-        armed.timers.push(setTimer(() => holdingLine(voice, turn, "thinking"), options.holdFirstMs));
-      }
-      if (!turn.stillLookingSpoken) {
-        armed.timers.push(
-          setTimer(() => {
-            // The last line of the hold: once it is spoken, nothing is left to clear.
-            if (hold === armed) hold = null;
-            holdingLine(voice, turn, "still looking");
-          }, options.holdSecondMs),
-        );
-      }
-      // A turn whose two lines were both spoken before this hand-off has nothing left to hold.
-      if (armed.timers.length > 0) hold = armed;
-    }
+    const news = !handedOff || atOnce;
+    let delivered = false;
     try {
-      options.handOff(turn.text, turn.tone);
+      delivered = options.handOff(turn.text, turn.tone);
     } catch {
       log(`voice: the hand-off callback threw turn=${String(turn.number)}`);
+    }
+    if (!delivered) {
+      handedOff = false;
+      return;
+    }
+    handedOff = true;
+    handedOffTurn = turn.number;
+    if (speaker === null) {
+      // With nothing to speak through, the log line stands in for the hand-off line, once per turn.
+      if (!turn.lineSpoken) {
+        turn.lineSpoken = true;
+        log("voice: turn handed off, no speaker for the hand-off line");
+      }
+    } else if (!news) {
+      if (hold !== null) hold.turn = turn;
+    } else {
+      const voice = speaker;
+      clearHold();
+      if (options.holdFirstMs === 0 || atOnce) {
+        handOffLine(voice, turn);
+      } else if (!turn.lineSpoken) {
+        const armed = {
+          turn,
+          timer: setTimer(() => {
+            // The hold's one line: once it is spoken, nothing is left to clear.
+            if (hold === armed) hold = null;
+            handOffLine(voice, armed.turn);
+          }, options.holdFirstMs),
+        };
+        hold = armed;
+      }
     }
   }
 
@@ -553,10 +612,10 @@ export function createFastTier(options: FastTierOptions): FastTier {
       handOff(turn);
       return;
     }
-    const result = await askModel(fast, names().session, turn.history, turn.controller.signal);
+    const result = await askModel(fast, names().session, options.waitMs(), turn.history, turn.controller.signal);
     if (turn.cancelled) return;
     if (!result.ok) {
-      log(`voice: the fast answer failed (${result.kind}), so the turn is handed off`);
+      log(`voice: the helper's answer failed (${result.kind}), so the turn is handed off`);
       handOff(turn);
       return;
     }
@@ -565,13 +624,18 @@ export function createFastTier(options: FastTierOptions): FastTier {
     // the kind alone, never the reply.
     const held = replyKind(result.text);
     if (held !== null) {
-      log(`voice: the fast answer was held back (${held}), so the turn is handed off`);
+      log(`voice: the helper's answer was held back (${held}), so the turn is handed off`);
       handOff(turn);
       return;
     }
     // Handed over to be remembered as an answer once heard through: the speaker's wrapper holds it
     // until the operator's next turn ends, and a cut-in before then drops it, so an answer the
-    // player had queued and never played is not the persona's words.
+    // player had queued and never played is not the helper's words. The helper answered this turn,
+    // so where it is newer than the last turn handed off, the next hand-off is news. A line still
+    // waiting for an earlier turn would play after this answer and sound as if this turn was handed
+    // off, so it is cleared.
+    if (turn.number > handedOffTurn) handedOff = false;
+    if (hold !== null && hold.turn.number < turn.number) clearHold();
     turn.speaking = result.text;
     await speak(speaker, turn, "answered", result.text, "answer");
     turn.speaking = null;
@@ -603,13 +667,14 @@ export function createFastTier(options: FastTierOptions): FastTier {
 
   /**
    * A finished turn: into the ring, through the screen, and to the judge. The ring takes the text
-   * alone, and the ranking and the answer take it with the tone's note.
+   * alone, and the ranking and the answer take it with the tone's note. With `ranked` false the
+   * turn is handed off with no ranking call, and its hand-off line is spoken at once.
    */
-  function ended(number: number, text: string, tone: string | undefined): void {
+  function ended(number: number, text: string, tone: string | undefined, ranked = true): void {
     const endedAt = now();
     // A record for the same turn is an earlier end this one replaces: its work still open is
     // withdrawn, its line leaves the ring unless an answer was
-    // spoken to it, and each of its holding lines already spoken is not spoken again. Settled
+    // spoken to it, and a hand-off line already spoken for it is not spoken again. Settled
     // records of other turns are no longer needed.
     const prior = open.get(number);
     if (prior !== undefined) {
@@ -621,7 +686,7 @@ export function createFastTier(options: FastTierOptions): FastTier {
     }
     const before = ring.lines();
     const line: SpokenLine = { role: "user", text };
-    // The ring refuses a screened turn, so its holding lines are spoken over the ring as it stood
+    // The ring refuses a screened turn, so its hand-off line is spoken over the ring as it stood
     // and the next turn is ranked over a ring that holds nothing of it. The call decision screens
     // the turn and the ring together, which agree, since the ring holds no screened line.
     const held = ring.append(line, "turn");
@@ -636,8 +701,7 @@ export function createFastTier(options: FastTierOptions): FastTier {
       endedAt,
       controller: new AbortController(),
       cancelled: false,
-      thinkingSpoken: prior?.thinkingSpoken ?? false,
-      stillLookingSpoken: prior?.stillLookingSpoken ?? false,
+      lineSpoken: prior?.lineSpoken ?? false,
       answered: false,
       done: false,
       speaking: null,
@@ -645,13 +709,13 @@ export function createFastTier(options: FastTierOptions): FastTier {
     open.set(number, turn);
     if (hit) {
       log(`voice: a turn matched the secret screen, so it is handed off with no call made turn=${String(number)}`);
-      handOff(turn);
+      handOff(turn, !ranked);
       return;
     }
     // With no judge nothing can rank the turn. With no model or no speaker a turn ranked as
     // answerable hands off all the same, so the ranking would decide nothing and is not asked for.
-    if (judge === null || fast === null || speaker === null) {
-      handOff(turn);
+    if (!ranked || judge === null || fast === null || speaker === null) {
+      handOff(turn, !ranked);
       return;
     }
     // A key of its own per submission: the Jev client parks a second submission on one key behind
@@ -691,10 +755,20 @@ export function createFastTier(options: FastTierOptions): FastTier {
       return speak(speaker, null, null, text, remember);
     },
     said(text, writer = "session reply") {
-      return ring.append({ role: "persona", text }, writer);
+      return ring.append({ role: writer === "answer" ? "helper" : "persona", text }, writer);
     },
     answeredAsk(_number, text) {
       ring.append({ role: "user", text }, "turn");
+    },
+    askHandedOff(number, delivered) {
+      handedOff = delivered;
+      if (delivered) handedOffTurn = number;
+    },
+    stopHeard(_number, text) {
+      ring.append({ role: "user", text }, "turn");
+    },
+    handOffUnranked(number, text, tone) {
+      ended(number, text, tone, false);
     },
     cutIn(number) {
       // The cutting-in turn's own record is spared, whether its end was taken before this call or
@@ -702,7 +776,11 @@ export function createFastTier(options: FastTierOptions): FastTier {
       for (const turn of open.values()) {
         if (turn.number !== number && !turn.done) withdraw(turn);
       }
-      if (hold !== null && hold.turn.number !== number) clearHold();
+      if (hold !== null && hold.turn.number !== number) {
+        // The hold's line was never spoken, so the operator has not heard of that hand-off.
+        if (!hold.turn.lineSpoken) handedOff = false;
+        clearHold();
+      }
     },
     clearHold,
     leave() {

@@ -2503,9 +2503,15 @@ export async function startBroker(
         ...transcriptionHooks({
           key,
           shortTurnWords: config.voiceShortTurnWords,
-          // The hold wraps Inworld, so every consumer the hooks subscribe reads turns through it:
-          // the barge-in rule and the bridge share one hold per end. Off, the transcriber is wired
-          // bare.
+          // The judging stage's own Jev client, under the key the ranking and the turn hold use.
+          // With no key a turn spoken over a reading is read by its word count.
+          interrupt: {
+            threshold: config.voiceInterruptThreshold,
+            judge: judgeKey === null ? null : { apiKey: judgeKey },
+          },
+          // The hold wraps Inworld, and the hooks wrap what this returns in the judging stage, so
+          // every consumer the hooks subscribe reads turns through both: the barge-in rule and the
+          // bridge share one hold and one verdict per end. Off, the stage wraps Inworld bare.
           create: (stt) => {
             const inworld = createInworld({
               key: stt,
@@ -2540,23 +2546,23 @@ export async function startBroker(
             deliver: (processToken, event) => relays.deliver(processToken, event),
             writer: mirrorWriter,
             mirror: config.mirror,
-            maxSpokenWords: config.voiceMaxSpokenWords,
             hold: (id, until) => typingKeeper?.hold(id, until) ?? ((): void => {}),
             // The longest the path from a turn's end to its first frame can run: the ranking's
             // timeout, then the fast model's, then the speech socket's.
             holdMs: JEV_TIMEOUT_MS + ANSWER_TIMEOUT_MS + config.speechTimeoutMs,
-            tier: ({ names, speaker, player, handOff, forget }) =>
+            pulse: { periodMs: config.voicePulseMs, volume: config.voicePulseVolume },
+            tier: ({ names, speaker, player, handOff, waitMs, forget }) =>
               createFastTier({
                 names,
                 thresholds: { handoff: config.voiceHandoffThreshold, answer: config.voiceAnswerThreshold },
                 memoryTurns: config.voiceMemoryTurns,
                 holdFirstMs: config.voiceHoldFirstMs,
-                holdSecondMs: config.voiceHoldSecondMs,
                 judge: judgeKey === null ? null : { apiKey: judgeKey },
                 fast: fastKey === null ? null : { apiKey: fastKey, model: config.voiceFastModel },
                 speaker,
                 player,
                 handOff,
+                waitMs,
                 forget,
                 log: note,
               }),
@@ -2569,6 +2575,11 @@ export async function startBroker(
                       voice: config.speechVoice,
                       timeoutMs: config.speechTimeoutMs,
                       player,
+                      readLimits: {
+                        codeLines: config.voiceReadCodeLines,
+                        tableCells: config.voiceReadTableCells,
+                        listItems: config.voiceReadListItems,
+                      },
                       fallback,
                       log: note,
                     }),

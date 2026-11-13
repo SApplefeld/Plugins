@@ -4,7 +4,8 @@
 // through the Jev client and reads the verdict from `decide`.
 //
 // The state is `{conversation, turn}`: the memory ring before the turn, one line per spoken line in
-// the buffered line form the response gate's questions read, and the new turn's text alone.
+// the buffered line form the response gate's questions read, each under its speaker, the operator,
+// the quick voice helper or the main model, and the new turn's text alone.
 import type { JevQuestion, JevResult } from "../jev/client.ts";
 import type { RepeatLogSurface } from "../repeat-log.ts";
 import type { SpokenLine } from "./speaker.ts";
@@ -12,23 +13,25 @@ import type { SpokenLine } from "./speaker.ts";
 /** The two answers a ranking call reads out, keyed by the name each comes back under. */
 export type RankQuestion = "answer_now" | "needs_fleet";
 
-/** The verdict the rule reaches: the fast tier answers, or the turn goes to the persona's session. */
+/** The verdict the rule reaches: the helper answers, or the turn goes to the main model's session. */
 export type Verdict = "answer" | "handoff";
 
 /** The two thresholds the rule reads the answers against, each a probability from 0.3 to 0.9. */
 export type RankThresholds = { readonly handoff: number; readonly answer: number };
 
-/** The display names the buffered line form carries: the operator's and the persona's session. */
+/** The display names the buffered line form carries: the operator's and the session's. */
 export type LineNames = { readonly speaker: string; readonly session: string };
 
 const PREAMBLE =
   "The `conversation` is the newest part of a spoken exchange between a person and an AI " +
   "assistant, one line per spoken turn, oldest first, the person's lines written as " +
-  "`<name> (operator): <text>` and the assistant's as `<name> (voice): <text>`. `turn` is " +
-  "what the person just said, which the assistant must now answer. The assistant speaks as one " +
-  "speaker. A small model is its social half, answering a greeting, thanks, an acknowledgment, a " +
-  "goodbye or a light question offhand. A full session behind it, with the person's files, " +
-  "tools, projects and other assistants, works out every real answer and takes longer.";
+  "`<name> (operator): <text>`, the quick voice helper's as `<name> (voice helper): <text>` and " +
+  "the main model's replies, which were read aloud, as `<name> (voice): <text>`. `turn` is what " +
+  "the person just said, which the assistant must now answer. Two models answer in one voice. " +
+  "The helper is a small model, answering a greeting, thanks, an acknowledgment, a goodbye or a " +
+  "light question offhand. The main model is the full session behind it, with the person's " +
+  "files, tools, projects and other assistants, which works out every real answer and takes " +
+  "longer.";
 
 /**
  * The two questions, yes-or-no (`noul`), keyed by the name each answer comes back under. The
@@ -81,7 +84,7 @@ export const RANK_REPEAT_LOG: RepeatLogSurface<[submission: string]> = {
 /**
  * The fixed rule, in this order: `needs_fleet` at or above the hand-off threshold hands off; else
  * `answer_now` at or above the answer threshold answers; else the turn hands off. A call that
- * failed, whatever its kind, hands off, so the persona's session is the floor and never the
+ * failed, whatever its kind, hands off, so the main model's session is the floor and never the
  * ceiling.
  */
 export function decide(result: JevResult<RankQuestion>, thresholds: RankThresholds): Verdict {
@@ -93,17 +96,19 @@ export function decide(result: JevResult<RankQuestion>, thresholds: RankThreshol
 
 /**
  * One spoken line in the ring's buffered form, the one a hand-off carries to the session too:
- * `<display name> (operator): <text>` for a `user` line and `<session name> (voice): <text>` for a
- * `persona` line. A `persona` line's text is one line: every run of whitespace, line breaks
- * included, is one space, and the ends are trimmed. Speech carries no line structure, and a break
- * kept would stand its continuation unprefixed inside a hand-off event of class operator, where a
- * continuation shaped `<name> (operator): <text>` reads as the person's own line. A `user` line is
- * the transcript as heard, kept as it is.
+ * `<display name> (operator): <text>` for a `user` line, `<session name> (voice helper): <text>`
+ * for a `helper` line, and `<session name> (voice): <text>` for a `persona` line, the main model's
+ * reply that was read aloud. A `helper` or a `persona` line's text is one line: every run of
+ * whitespace, line breaks included, is one space, and the ends are trimmed. Speech carries no line
+ * structure, and a break kept would stand its continuation unprefixed inside a hand-off event of
+ * class operator, where a continuation shaped `<name> (operator): <text>` reads as the person's own
+ * line, and one shaped `<name> (voice): <text>` under a helper's line as the session's own words.
+ * A `user` line is the transcript as heard, kept as it is.
  */
 export function conversationLine(line: SpokenLine, names: LineNames): string {
-  return line.role === "user"
-    ? `${names.speaker} (operator): ${line.text}`
-    : `${names.session} (voice): ${line.text.replace(/\s+/g, " ").trim()}`;
+  if (line.role === "user") return `${names.speaker} (operator): ${line.text}`;
+  const slot = line.role === "helper" ? "voice helper" : "voice";
+  return `${names.session} (${slot}): ${line.text.replace(/\s+/g, " ").trim()}`;
 }
 
 /** The state one ranking call is asked over: the ring before the turn, in line form, and the turn. */
