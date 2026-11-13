@@ -40,7 +40,7 @@ import type { PluginHost } from "./host";
 import type { HookBudget } from "./jev-live";
 import type { boundaryBankCompactionBoundary, boundaryKitInstallPathOf } from "./memq-boundary";
 import { memqVerbArgsOf } from "./memq-command";
-import { COORDINATOR_GROUND, architectLineRecords, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundAtSend, deliveryGroundIn, deliveryRecordProblem, getHighestInboxSeq, heldForDrain, listAskRecords, listInboxRecords, mayReachPersona, parseStoreRecord, personaNameProblem, readAskRecord, readReplyRecord, resolutionRecordText, senderPersonaOf, writeInboxRecord, type InboxRecord } from "./operator";
+import { COORDINATOR_GROUND, architectLineRecords, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundAtSend, deliveryGroundIn, deliveryRecordProblem, getHighestInboxSeq, heldForDrain, isQuietRecord, listAskRecords, listInboxRecords, mayReachPersona, parseStoreRecord, personaNameProblem, readAskRecord, readReplyRecord, resolutionRecordText, senderPersonaOf, writeInboxRecord, type InboxRecord } from "./operator";
 import { parseScanPairs } from "./pair-drafter";
 import type { PlanRecordReading } from "./plan-record";
 import { isPlanEntry, planLeftOpenText, planStatusText, reactivateAskedEntry } from "./plan-route";
@@ -110,7 +110,12 @@ export interface ToolCallContext extends SharedHandlerState {
   writeMemoryRecord: (...args: AfterDeps<typeof writeMemoryRecordFromModule>) => ReturnType<typeof writeMemoryRecordFromModule>;
   kitInstallPathOf: () => ReturnType<typeof boundaryKitInstallPathOf>;
   recognitionAsk: (...args: AfterDeps<typeof recognitionAskFromModule>) => ReturnType<typeof recognitionAskFromModule>;
-  pushDeliveryLine: (lines: string[], ground: string, rec: InboxRecord, waited: boolean) => void;
+  pushDeliveryLine: (lines: string[], ground: string, rec: InboxRecord, mark: "urgent" | "waited" | "quiet") => void;
+  // The two readings of a record text's opening lead, each written once in
+  // hooks/index.ts, which agentic_say reads to refuse the quiet mark on a
+  // text that asks for an act.
+  opensWithSeatLead: (text: string) => boolean;
+  opensWithQueueLead: (text: string) => boolean;
   promoteOpenRecord: (...args: AfterDeps<typeof promoteOpenRecordFromModule>) => ReturnType<typeof promoteOpenRecordFromModule>;
   workdirPathOf: (filename: string) => string;
   notePairDraftsDropped: (...args: AfterDeps<typeof notePairDraftsDroppedFromModule>) => void;
@@ -328,7 +333,7 @@ function awaitingAdmittedByText(awaitingAbove: GoalNode | undefined, entry: Expe
 // with before the served answer's scrub, from the off-arming path to the
 // break-in scan.
 export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Promise<ToolCallResult> {
-  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsWorkersRecordToArchitect, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, noteModelReplyCall, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
+  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, opensWithSeatLead, opensWithQueueLead, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsWorkersRecordToArchitect, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, noteModelReplyCall, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
   // An "off" session runs the guard and after-hook region around next(e)
   // and the compaction pass's rerun watch, and nothing else: no call
   // counting, no persona tool, no constraint. The watch counts a call
@@ -2557,9 +2562,28 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const text = String((e as any).text || "").trim();
     const answers = (e as any).answers as string | undefined;
     const urgent = (e as any).urgent === true;
+    const quiet = (e as any).quiet === true;
     if (!text) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
       return { deny: "agentic_say requires a non-empty 'text'." };
+    }
+    // A quiet record opens no turn and is never replied to, so the mark is
+    // refused on a send that asks its receiver for an act: an answer to an
+    // ask, an urgent record, and a text opening with a lead the receiver's
+    // plugin acts on. A queue record admits its plan only as a prompt, so a
+    // quiet one would start nothing and say nothing.
+    if (quiet && answers) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: "agentic_say: 'quiet' cannot be set with 'answers'. An answer to an ask is delivered as a prompt, and a quiet record opens no turn. Send it without 'quiet'." };
+    }
+    if (quiet && urgent) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: "agentic_say: 'quiet' cannot be set with 'urgent'. An urgent record breaks into the owner's running turn and takes its answer as a reply, and a quiet record is never replied to. Send it with one of the two." };
+    }
+    if (quiet && (opensWithQueueLead(text) || opensWithSeatLead(text))) {
+      const lead = text.slice(0, text.indexOf("]") + 1);
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `agentic_say: 'quiet' cannot be set on a text opening ${lead}. A record with that lead asks its receiver for an act, and a quiet record opens no turn. Send it without 'quiet'.` };
     }
     // Self-message guard: an owner addressing the persona it owns is
     // talking to itself. The guard keys on ownership rather than on the
@@ -2620,21 +2644,24 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     try {
       targetOwned = await readHolderMeta(commonsStore(), targetResource, sess.staleAfterMs) !== null;
     } catch { /* commons read failed; the result reads as for an owned target */ }
-    // Write the inbox record
+    // Write the inbox record. A quiet send carries no answer stamp: a record
+    // its sender marks as asking nothing is not the answer its receiver waits
+    // on, so the next unmarked send is the one stamped.
     const seq = await getHighestInboxSeq(commonsStore(), persona, sess.mySessionId) + 1;
-    const id = await writeInboxRecord(commonsStore(), persona, sess.mySessionId, seq, text, "say", answers, urgent, sendGround.answersRecord);
+    const id = await writeInboxRecord(commonsStore(), persona, sess.mySessionId, seq, text, "say", answers, urgent, quiet ? undefined : sendGround.answersRecord, undefined, quiet);
     sess.state.decisions.push({
       timestamp: Date.now(),
       loop: "worker",
       action: "say_sent",
-      detail: `${persona}: "${headPoints(text, 80)}" (id: ${id}${urgent ? ", urgent" : ""})`,
+      detail: `${persona}: "${headPoints(text, 80)}" (id: ${id}${urgent ? ", urgent" : quiet ? ", quiet" : ""})`,
     });
     // Inside the idle proposal's own turn, the first message to the
     // coordinator persona is the proposal. It is entered in
     // monitor.proposal.sent, which the tick's idle-proposal step settles
     // and sends again where the record reads skipped. A message in any
-    // other turn, [PROPOSAL] or not, is not entered.
-    if (currentTurnEntry()?.kind === "proposal" && persona === coordinatorPersona && proposalLedgeredTurnId() !== currentGateTurnId()) {
+    // other turn, [PROPOSAL] or not, is not entered. Neither is a quiet
+    // message, which asks the coordinator for nothing.
+    if (!quiet && currentTurnEntry()?.kind === "proposal" && persona === coordinatorPersona && proposalLedgeredTurnId() !== currentGateTurnId()) {
       setProposalLedgeredTurnId(currentGateTurnId());
       sess.state.monitor.proposal.sent = { text, writer: sess.mySessionId, seq, delivered: false };
       // Attempted rather than depended on: the record is written above and
@@ -2643,7 +2670,10 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       try { await persist(); } catch { /* persist could not read or write the store; the entry waits in memory */ }
     }
     if (!targetOwned) {
-      return { result: `Message written to ${persona} (id: ${id}, pending: no live session owns '${persona}', so the record waits until a session owning that persona drains it; agentic_inbox on '${persona}' reads its state)` };
+      return { result: `Message written to ${persona} (id: ${id}, ${quiet ? "quiet, " : ""}pending: no live session owns '${persona}', so the record waits until a session owning that persona drains it; agentic_inbox on '${persona}' reads its state)` };
+    }
+    if (quiet) {
+      return { result: `Message sent to owner of ${persona} (id: ${id}, quiet: the record opens no turn; the owner's plugin takes it at its next quiet tick or inside a running turn, and the owner's model reads it at a tool call of the owner's running turn where one is open, and otherwise of the next turn something else opens; it is not replied to and owes no agentic_resolve, and one not read within 24 hours of being taken is dropped)` };
     }
     return { result: `Message sent to owner of ${persona} (id: ${id}${urgent ? ", urgent: delivered inside the owner's running turn if one is in flight" : ", delivered on the owner's next quiet tick or as its running turn ends, each further waiting message following as the previous delivery turn ends, or, unless it is labelled COORDINATOR or WORKER under the architect persona at delivery, into a turn already running once it has waited past the break-in bound; a delivery on the wait alone is not replied to, and the owner closes the record with agentic_resolve"})` };
   }
@@ -3317,13 +3347,17 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // The resolve has landed; nothing below may turn it into a throw or a
     // refusal. An answer-leg push is stamped with the resolved record's id
     // rather than the leg's own pick, which is the owner's first open record
-    // to the architect and may be another one.
+    // to the architect and may be another one. The note is written quiet
+    // where the record it resolves is quiet by the one reading, so a note is
+    // never louder than its record; any other note is written plain and wakes
+    // its reader. The reading is of the record already held, and of no other.
+    const pushQuiet = isQuietRecord(target);
     let pushedId: string | null = null;
     let pushError: unknown = pushReadError;
     if (senderPersona !== null) {
       try {
         const seq = await getHighestInboxSeq(store, senderPersona, sess.mySessionId) + 1;
-        pushedId = await writeInboxRecord(store, senderPersona, sess.mySessionId, seq, resolutionRecordText(id, outcome, pushNote), "say", undefined, false, pushAnswersRecord ? id : undefined, id);
+        pushedId = await writeInboxRecord(store, senderPersona, sess.mySessionId, seq, resolutionRecordText(id, outcome, pushNote), "say", undefined, false, pushAnswersRecord ? id : undefined, id, pushQuiet);
       } catch (err) {
         pushError = err;
       }
@@ -3347,7 +3381,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         timestamp: Date.now(),
         loop: "worker",
         action: "operator_resolution_pushed",
-        detail: `record ${id}: the note was sent to '${senderPersona}' as record ${pushedId}${stampFailed}`,
+        detail: `record ${id}: the note was sent${pushQuiet ? " quiet" : ""} to '${senderPersona}' as record ${pushedId}${stampFailed}`,
       });
     } else if (pushError !== undefined) {
       sess.state.decisions.push({
@@ -3373,6 +3407,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // carries it.
     try { await persist(); } catch { /* persist could not read or write the store; the line above waits in memory */ }
     if (pushedId !== null) {
+      if (pushQuiet) {
+        return { result: `Record ${id} resolved (${outcome}); the note was sent quiet to ${senderPersona} as record ${pushedId}: the resolved record was quiet, so the note opens no turn and carries no authority, its reader meets it inside its running turn or a later one, and one not read within 24 hours of being taken is dropped. A grant or an ask goes by agentic_say without the quiet mark.` };
+      }
       return { result: `Record ${id} resolved (${outcome}); the note was sent to ${senderPersona} as record ${pushedId}.` };
     }
     if (unpushed !== null) {
@@ -3568,9 +3605,16 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       const persona = sess.persona;
       const pending = (await listInboxRecords(store, persona))
         .filter((rec) => rec.status === "pending" && !rec.answers);
-      const candidates = pending.filter((rec) => rec.urgent === true || scanAt - rec.at >= breakInAfterMs);
+      // A quiet record takes neither leg: it is carried by the quiet carry
+      // below, one per scan, and never on its wait.
+      const candidates = pending.filter((rec) => !isQuietRecord(rec) && (rec.urgent === true || scanAt - rec.at >= breakInAfterMs));
+      const quietPending = pending.filter((rec) => isQuietRecord(rec));
       const lines: string[] = [];
-      const claims = candidates.length > 0 ? await readAllClaims(store, sess.staleAfterMs) : [];
+      // A quiet record is carried from pending only where the held list is
+      // empty, so the claims are read for it only then. A list that empties
+      // during this scan has the claims read at the pending carry below.
+      let claimsRead = candidates.length > 0 || (quietPending.length > 0 && sess.state.monitor.quietHeld.length === 0);
+      let claims = claimsRead ? await readAllClaims(store, sess.staleAfterMs) : [];
       // A record whose writer persona cannot sit inside the bracket, or
       // whose id or text fails the record rule, is left pending here; the
       // tick's drain marks it skipped. The ground a record passes on is the
@@ -3656,10 +3700,118 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
             ? `record ${rec.id} delivered inside the running turn as context on ${e.tool} after waiting ${Math.floor((scanAt - rec.at) / 60_000)} min`
             : `record ${rec.id} delivered inside the running turn as context on ${e.tool}`,
         });
-        pushDeliveryLine(lines, ground, rec, waited);
+        pushDeliveryLine(lines, ground, rec, waited ? "waited" : "urgent");
+      }
+      // The quiet carry: at most one quiet record per scan, the oldest. The
+      // held list is read first, since the drain takes quiet records oldest
+      // first and a record still pending arrived later or found the list
+      // full. A held record is read from the store by its key and passes the
+      // record rule; its line opens under the ground the list holds, which
+      // this plugin read from the claims at the take, and under the id the
+      // list holds, never under a field read back from the store. One that
+      // has left the store, fails the rule or reads neither delivered nor
+      // pending is dropped from the list, and the scan goes on to the next
+      // oldest. Only where the list is empty is a quiet record carried from
+      // pending: one that arrived while the turn ran or found the list full.
+      // Its ground is read from the claims as a flagged record's is, and one
+      // whose writer holds no live ground stays pending for the drain to
+      // skip. The wait leg's pass over the coordinator's and the architect's
+      // grounds does not apply, since a quiet bracket is never a steer. A
+      // quiet record is never stamped with a turn id, so no turn's answer is
+      // filed as its reply. A store read or write that throws here leaves
+      // the entry held for a later scan and keeps the lines above.
+      // The list can change under each await here: the take's rollback
+      // takes back out an entry its refused persist added, and a drain in
+      // flight can list a record this scan read as pending. So an entry no
+      // longer in the list after the store read is passed over, the list is
+      // spliced only where the entry still stands, and a pending record is
+      // carried only where its re-read still reads pending and the list has
+      // not gained its id.
+      let heldListChanged = false;
+      let quietCarried = false;
+      try {
+        const held = sess.state.monitor.quietHeld;
+        let carried = false;
+        while (!carried && held.length > 0) {
+          const entry = held.reduce((oldest, each) => (each.at < oldest.at ? each : oldest));
+          const rec = parseStoreRecord<InboxRecord>(await store.get(entry.key));
+          if (held.indexOf(entry) === -1) continue;
+          const recordProblem = rec === null ? null : deliveryRecordProblem(rec);
+          const dropReason = rec === null ? "it is no longer in the store"
+            : recordProblem !== null ? `it fails the record rule: ${recordProblem}`
+            : rec.status !== "delivered" && rec.status !== "pending" ? "its status reads neither delivered nor pending"
+            : null;
+          if (rec === null || dropReason !== null) {
+            held.splice(held.indexOf(entry), 1);
+            heldListChanged = true;
+            sess.state.decisions.push({
+              timestamp: Date.now(),
+              loop: "monitor",
+              action: "operator_quiet_dropped",
+              detail: `record ${entry.id} dropped from the held list and not carried: ${dropReason}`,
+            });
+            continue;
+          }
+          // A held record still pending is one the take listed and could
+          // not mark, so it is marked here, before the entry leaves the list.
+          // The record is marked by then, so it is carried whether or not
+          // its entry still stands after the write's await.
+          if (rec.status === "pending") await store.set(entry.key, { ...rec, status: "delivered", deliveredAt: scanAt, ground: entry.ground });
+          const at = held.indexOf(entry);
+          if (at !== -1) held.splice(at, 1);
+          heldListChanged = true;
+          sess.state.decisions.push({
+            timestamp: Date.now(),
+            loop: "monitor",
+            action: "operator_delivered_quiet",
+            detail: `record ${entry.id} carried from the held list as context on ${e.tool}`,
+          });
+          pushDeliveryLine(lines, entry.ground, { ...rec, id: entry.id }, "quiet");
+          carried = true;
+          quietCarried = true;
+        }
+        if (!carried && held.length === 0) {
+          if (!claimsRead && quietPending.length > 0) {
+            claims = await readAllClaims(store, sess.staleAfterMs);
+            claimsRead = true;
+          }
+          // listInboxRecords returns its records oldest first.
+          for (const rec of quietPending) {
+            const ground = groundFor(rec);
+            if (ground === null) continue;
+            const existing = await store.get(rec.key);
+            if (!existing) continue;
+            const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
+            if (parsed.status !== "pending" || held.some((entry) => entry.id === rec.id)) continue;
+            parsed.status = "delivered";
+            parsed.deliveredAt = scanAt;
+            parsed.ground = ground;
+            await store.set(rec.key, parsed);
+            sess.state.decisions.push({
+              timestamp: Date.now(),
+              loop: "monitor",
+              action: "operator_delivered_quiet",
+              detail: `record ${rec.id} carried from pending as context on ${e.tool}`,
+            });
+            pushDeliveryLine(lines, ground, rec, "quiet");
+            quietCarried = true;
+            break;
+          }
+        }
+      } catch { /* the store refused a read or a write; a held entry stays for a later scan */ }
+      if (quietCarried || heldListChanged) {
+        // Attempted rather than depended on: a quiet record carried above is
+        // already marked delivered, or its entry already out of the list, so
+        // a throw here would show it never while its sender reads it
+        // delivered. The change stands in memory and the first write that is
+        // not refused carries it. A scan that carried only urgent or waited
+        // lines takes the plain save, and a throw there falls to the catch
+        // below.
+        try { await persist(); } catch { /* persist could not read or write the store; the change waits in memory */ }
+      } else if (lines.length > 0) {
+        await persist();
       }
       if (lines.length > 0) {
-        await persist();
         const prior = Array.isArray(r.context) ? r.context : [];
         return { ...r, context: [...prior, ...lines] } as typeof r;
       }

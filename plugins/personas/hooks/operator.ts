@@ -7,7 +7,7 @@
 // after, as the Writer lines below state for inbox and floor keys.
 //
 // Records:
-// - inbox:<persona>:<writerSessionId>:<seq> = { id, from, at, text, kind, answers?, urgent?, status }
+// - inbox:<persona>:<writerSessionId>:<seq> = { id, from, at, text, kind, answers?, urgent?, quiet?, status }
 // - reply:<persona>:<msgId> = { at, text }
 // - ask:<persona>:<askId> = { at, nodeId, question, status }
 // - seq:<persona>:<writerSessionId> = { seq, at }, the writer's sequence floor
@@ -35,6 +35,7 @@ export interface InboxRecord {
   kind: InboxKind;
   answers?: string; // askId if kind === "answer"
   urgent?: boolean; // plan item 8.3: delivered inside the owner's running turn, not at the next quiet tick
+  quiet?: boolean; // set by the sender on a record that asks its receiver for nothing: taken with no turn opened, and read as a line on a tool result of a turn something else opens; read through isQuietRecord alone
   status: InboxStatus;
   deliveredAt?: number; // set by owner on delivery
   ground?: string; // set by owner on delivery: the label the record was delivered under, such as COORDINATOR
@@ -178,6 +179,7 @@ export async function writeInboxRecord(
   urgent?: boolean,
   answersRecord?: string,
   resolutionOf?: string,
+  quiet?: boolean,
 ): Promise<string> {
   const id = `${persona}-${writerSessionId}-${seq}`;
   const key = inboxKey(persona, writerSessionId, seq);
@@ -190,6 +192,7 @@ export async function writeInboxRecord(
     kind,
     answers,
     ...(urgent ? { urgent: true } : {}),
+    ...(quiet ? { quiet: true } : {}),
     ...(answersRecord ? { answersRecord } : {}),
     ...(resolutionOf ? { resolutionOf } : {}),
     status: "pending",
@@ -817,8 +820,11 @@ function answerLegOpener(claims: UnionedClaim[], target: string, writer: string,
   if (architect.stamped === true) return "";
   const targetOwner = commonsWinner(claims, personaKey(target));
   if (targetOwner === null) return null;
+  // A quiet record asks its receiver for nothing, so no answer is stamped to
+  // it and it holds no answer leg open.
   const opener = architect.records.find((r) => r.from === targetOwner
     && (r.status === "delivered" || r.status === "answered")
+    && !isQuietRecord(r)
     && deliveryRecordProblem(r) === null);
   return opener === undefined ? null : opener.id;
 }
@@ -904,6 +910,20 @@ export function heldForDrain(ground: string, architectPersona: string): boolean 
 }
 
 /**
+ * Whether a stored record is quiet: its `quiet` field is the boolean true,
+ * its `urgent` field is not true, and it carries no `answers`. A quiet
+ * record asks its receiver for nothing, so the drain takes it with no prompt
+ * submitted and the break-in scan carries it on a tool result. The fields are
+ * store data any plugin-loaded session can write, so a string or a number in
+ * `quiet` is not the mark, and a record carrying the mark beside `urgent` or
+ * `answers`, which no send writes, reads as not quiet and is delivered as an
+ * unmarked record is. Every site that treats a record as quiet reads it here.
+ */
+export function isQuietRecord(rec: { quiet?: unknown; urgent?: unknown; answers?: unknown }): boolean {
+  return rec.quiet === true && rec.urgent !== true && !rec.answers;
+}
+
+/**
  * The one rule for the record fields a delivery reads: `id` is a non-empty
  * string that passes the bracket rule above, and `text` is a string. Both
  * are store data any plugin-loaded session wrote: an id carrying "]" could
@@ -921,18 +941,29 @@ export function deliveryRecordProblem(rec: { id: unknown; text: unknown }): stri
 }
 
 /**
+ * The mark a delivery bracket carries after the record id, or "plain" for
+ * none.
+ */
+export type DeliveryMark = "plain" | "urgent" | "waited" | "quiet";
+
+/**
  * The bracket every delivered record opens with: `[<ground> id=<id>]` on a
  * plain delivery, `[<ground> id=<id>, urgent]` where the sender flagged the
- * record, and `[<ground> id=<id>, waited]` where an unflagged record broke
- * into a running turn because it had waited past the bound. The marker says
- * why the record arrived and grants nothing: delegated authority comes only
- * from a coordinator prompt, never from a bracket on a tool result.
+ * record, `[<ground> id=<id>, waited]` where an unflagged record broke
+ * into a running turn because it had waited past the bound, and
+ * `[<ground> id=<id>, quiet]` where the sender marked the record as asking
+ * for nothing. The marker says why the record arrived and grants nothing:
+ * delegated authority comes only from a coordinator prompt, never from a
+ * bracket on a tool result. The quiet mark tells its reader the record is
+ * information, whatever persona the ground names: it opened no turn, it is
+ * not replied to and owes no agentic_resolve, and it takes the standing of
+ * the turn it lands in.
  * `ground` is what deliveryGroundIn returned and `id` has passed
  * deliveryRecordProblem. The id rides in-band because agentic_inbox returns
  * nothing to the owner, so nothing else tells the owner the id agentic_resolve
  * takes.
  */
-export function deliveryPrefix(ground: string, id: string, mark: "plain" | "urgent" | "waited"): string {
+export function deliveryPrefix(ground: string, id: string, mark: DeliveryMark): string {
   return `[${ground} id=${id}${mark === "plain" ? "" : `, ${mark}`}]`;
 }
 
@@ -972,7 +1003,7 @@ export function deliveryText(
   ground: string,
   id: string,
   text: string,
-  opts: { mark?: "plain" | "urgent" | "waited"; answerTo?: string } = {},
+  opts: { mark?: DeliveryMark; answerTo?: string } = {},
 ): string {
   const answer = opts.answerTo === undefined ? "" : `Answer to ${opts.answerTo}: `;
   return `${deliveryPrefix(ground, id, opts.mark ?? "plain")} ${quoteContinuationLines(`${answer}${text}`)}`;

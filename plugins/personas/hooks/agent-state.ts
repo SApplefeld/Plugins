@@ -436,6 +436,25 @@ export interface SentPlanRecord {
   resends: number;
 }
 
+// A quiet inbox record the drain took: `id` and `key` name the record in the
+// commons store, `at` is the instant it was written, and `ground` is the
+// label the drain read from the live claims at the take. The carry builds the
+// record's line under this `ground`, never under a field read back from the
+// store, and reads the record's text from the store by `key`. The entry
+// leaves the list when a tool result carries the record, or when the record
+// has left the store, fails the record rule or reads neither delivered nor
+// pending.
+export interface QuietHeld {
+  id: string;
+  key: string;
+  ground: string;
+  at: number;
+}
+
+// The most entries the held list keeps. A quiet record found while the list
+// is full stays pending in the store until an entry leaves.
+export const QUIET_HELD_MAX = 64;
+
 // A long-term goal: the idea a persona is working towards. It is held in a
 // list beside the goal tree, not as a node in it, and no tree walker reads
 // that list, so a long-term goal is never activated and never holds a root
@@ -656,6 +675,9 @@ export interface MonitorState {
   // The records goal_add sent for plans the autonomy level admitted, which a
   // quiet tick reads back while their entries still need them.
   planRecords: SentPlanRecord[];
+  // The held list: the quiet records the drain took with no prompt
+  // submitted, which a main-loop tool call's result carries, oldest first.
+  quietHeld: QuietHeld[];
   cost: {
     classify: { count: number; estTokens: number };
     reason: { count: number; estTokens: number };
@@ -1568,6 +1590,7 @@ export function createDefaultState(persona: string, sessionId: string): AgentSta
       selfReview: { count: 0, lastAt: 0, turnsSince: 0, windowStart: 0, pendingPeriodic: false, lastInjectAt: 0, sent: [] },
       proposal: { askedAt: 0, sent: null },
       planRecords: [],
+      quietHeld: [],
       cost: {
         classify: { count: 0, estTokens: 0 },
         reason: { count: 0, estTokens: 0 },
@@ -1840,6 +1863,32 @@ function fillPlanRecords(state: AgentState): void {
   }).map((rec) => (Number.isFinite(rec.resends) ? rec : { ...rec, resends: 0 }));
 }
 
+// The held list, filled at every load site that fills the plan record
+// ledger, with no version bump. A stored value that is not a list reads as an
+// empty one, which is how a store written before the list existed loads. An
+// entry is kept only where its id, key and ground are strings and its at a
+// finite number; anything else is dropped. Of the entries kept, ordered by
+// at, a later entry naming an id an earlier one names is dropped, and the
+// list keeps its first QUIET_HELD_MAX.
+function fillQuietHeld(state: AgentState): void {
+  const stored = (state.monitor as { quietHeld?: unknown }).quietHeld;
+  if (!Array.isArray(stored)) {
+    state.monitor.quietHeld = [];
+    return;
+  }
+  const seen = new Set<string>();
+  state.monitor.quietHeld = headItems(stored.filter((e): e is QuietHeld => {
+    const entry = e as Partial<QuietHeld> | null;
+    return !!entry && typeof entry === "object"
+      && typeof entry.id === "string" && typeof entry.key === "string" && typeof entry.ground === "string"
+      && Number.isFinite(entry.at);
+  }).sort((a, b) => a.at - b.at).filter((entry) => {
+    if (seen.has(entry.id)) return false;
+    seen.add(entry.id);
+    return true;
+  }), QUIET_HELD_MAX);
+}
+
 // The task list, filled at every load exit. A stored value that is not a list
 // reads as an empty one, which is how a store written before the list existed
 // loads. A stored entry is kept only where its id, goalId and text are
@@ -2089,6 +2138,7 @@ export function parseState(json: string): AgentState {
 
     fillProposal(state);
     fillPlanRecords(state);
+    fillQuietHeld(state);
     // L10: invariant block runs on both v2 and v3 branches.
     // Section 1: fill/recover runs on every branch's exit; see the function.
     applyPlanRecordOnLoad(state);
@@ -2129,6 +2179,7 @@ export function parseState(json: string): AgentState {
     fillPreviousSessionIds(state);
     fillProposal(state);
     fillPlanRecords(state);
+    fillQuietHeld(state);
     fillAsks(state, Date.now());
     applyPlanRecordOnLoad(state);
     enforceInvariants(state);
@@ -2234,6 +2285,7 @@ export function parseState(json: string): AgentState {
   fillPreviousSessionIds(state);
   fillProposal(state);
   fillPlanRecords(state);
+  fillQuietHeld(state);
   fillAsks(state, Date.now());
 
   // S12: fill selfReview with defaults at the E11 site, no version bump.

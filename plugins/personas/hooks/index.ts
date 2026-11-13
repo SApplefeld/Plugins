@@ -5692,7 +5692,7 @@ export const register: Register = async (on, options) => {
         "the session holding the coordinator persona may address any persona, and a session owning a named persona may address any persona it does not own, " +
         "the default persona, the coordinator persona and the architect persona among them. " +
         "The architect's answer: where the session owning the architect persona addresses a persona whose owner sent the architect a record " +
-        "that is delivered or answered, the record is stamped as the answer to it, and is delivered as the architect's even if the architect resolves that record with agentic_resolve after sending it. " +
+        "that is delivered or answered and not quiet, the record is stamped as the answer to it, and is delivered as the architect's even if the architect resolves that record with agentic_resolve after sending it. A quiet send is delivered as the architect's and carries no such stamp. " +
         "A target this session owns is refused, because an owner does not message itself. " +
         "A target whose name differs only in case from a persona a live session owns, where no live session owns the name as given, " +
         "is refused naming that persona, and nothing is written: send to it under its exact name. " +
@@ -5700,7 +5700,10 @@ export const register: Register = async (on, options) => {
         "it says no live session owns the persona and the record waits pending until a session owning that persona drains it. " +
         "The owner sees the message on its next quiet tick, or as its running turn ends, and each further waiting message follows as the " +
         "previous delivery turn ends. urgent: true breaks into a running turn instead and takes that turn's own " +
-        "answer as the reply. What a sent record does between those two moments, and what the sender reads back afterwards, is stated in " +
+        "answer as the reply. quiet: true marks a record that asks its receiver for nothing, such as an acknowledgment or a status line: " +
+        "it opens no turn, the owner's model reads it as a line on a tool result, inside the owner's running turn where one is open and otherwise in the next turn something else opens, and it is never replied to. " +
+        "quiet is refused with answers, with urgent: true, and on a text opening [QUEUE], [FINDING], [PROPOSAL] or [STARTED]. " +
+        "What a sent record does between those two moments, and what the sender reads back afterwards, is stated in " +
         "agentic_inbox's description.",
       inputSchema: {
         type: "object",
@@ -5716,6 +5719,10 @@ export const register: Register = async (on, options) => {
           urgent: {
             type: "boolean",
             description: "Optional. Deliver inside the owner's current turn (as context on its next tool result) immediately, without the wait. Not for answering an ask.",
+          },
+          quiet: {
+            type: "boolean",
+            description: "Optional. Set it on a record that asks its receiver for nothing, such as an acknowledgment or a status line. The record opens no turn and is not replied to. Not with answers or urgent, and not on a text opening [QUEUE], [FINDING], [PROPOSAL] or [STARTED].",
           },
           persona: {
             type: "string",
@@ -5734,8 +5741,9 @@ export const register: Register = async (on, options) => {
         "the session holding the coordinator persona may read any persona, a session holding a reader claim on a persona may read it, " +
         "a session owning a named persona may read any other persona, and a persona this session owns is refused. " +
         "Returns {inbox: [{id, from, at, text, kind, status, reply?, deferred?, turnRunningMs?, outcome?, note?, resolvedAt?, answersRecord?, answerRecords?: [{id, at, status, text}]}], asks: [{id, at, nodeId, question, status}], workdir?}: workdir is the target persona's live owner's launch directory, where its own store file sits. " +
-        "A pending record carries deferred: true and turnRunningMs while the owner is inside a turn: it waits for that turn to end, or breaks into it once it has waited past the break-in bound, which a record labelled COORDINATOR, or WORKER under the architect persona, at delivery never does. " +
+        "A pending record carries deferred: true and turnRunningMs while the owner is inside a turn: one not quiet waits for that turn to end, or breaks into it once it has waited past the break-in bound, which a record labelled COORDINATOR, or WORKER under the architect persona, at delivery never does, and a quiet one is carried into that turn as a line on a tool result. " +
         "A record delivered on its wait alone is never replied to: it stays delivered until the owner resolves it. " +
+        "A quiet record reads delivered once the owner's plugin holds it, which can be before the owner's model has read it, and is never replied to. " +
         "A resolved record carries outcome (done or declined), note and resolvedAt. " +
         "A skipped record carries note, naming why delivery refused it. " +
         "Where this session owns a named persona other than default, answerRecords lists, ordered by at, every record in the inbox of the alphabetically first such persona stamped as the answer to the returned record, " +
@@ -5969,6 +5977,8 @@ export const register: Register = async (on, options) => {
         "Owner only. Mark an operator record addressed to this persona as resolved. " +
         "A reply says a turn answered; a resolution says the work the record asked for is finished or will not be done. " +
         "A non-empty note is sent as a record to the persona the sender's session owns, where this session can reach that persona, and arrives under the delivery label an agentic_say from this session would carry. " +
+        "A note on a quiet record is sent quiet: it opens no turn, carries no authority, and its reader meets it inside its running turn or a later one, so a grant or an ask goes by agentic_say without the quiet mark. " +
+        "Any other note opens a turn for its reader, so where this session already answered the record with agentic_say, leave the note empty. " +
         "Where the note cannot be sent, it waits in the resolved record for the sender to read through agentic_inbox. " +
         "The resolve stands whether or not the note was sent, and the result says which. " +
         "Refused for a record still pending (not delivered yet), for a skipped record, and for a record addressed to another persona.",
@@ -7703,9 +7713,11 @@ export const register: Register = async (on, options) => {
         writeMemoryRecord: (text, meta) => writeMemoryRecord($, text, meta),
         kitInstallPathOf: () => kitInstallPathOf($),
         recognitionAsk: (tool, input, mode, budget) => recognitionAsk($, tool, input, mode, budget),
-        pushDeliveryLine: (lines, ground, rec, waited) => {
-          lines.push(deliveryText(ground, rec.id, rec.text, { mark: waited ? "waited" : "urgent" }));
+        pushDeliveryLine: (lines, ground, rec, mark) => {
+          lines.push(deliveryText(ground, rec.id, rec.text, { mark }));
         },
+        opensWithSeatLead,
+        opensWithQueueLead,
         promoteOpenRecord,
         workdirPathOf,
         notePairDraftsDropped,

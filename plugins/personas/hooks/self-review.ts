@@ -5,7 +5,7 @@
 import { headPoints } from "./agent-state";
 import type { MemoryEntry, MonitorState } from "./agent-state.ts";
 import { bracketSafeText, oneLine } from "./agent-state";
-import { heldForDrain } from "./operator";
+import { heldForDrain, isQuietRecord } from "./operator";
 
 export interface SelfReviewOptions {
   selfReviewStreak: number;
@@ -258,7 +258,7 @@ export type KaizenSignal = "asks_unresolved" | "memory_quality" | "message_wait"
 export interface OwnRecordInput {
   decisions: Array<{ timestamp: number; loop: string; action: string; detail: string; askId?: string }>;
   memory: MemoryEntry[];
-  inbox: Array<{ at: number; deliveredAt?: number; ground?: string }>;
+  inbox: Array<{ at: number; deliveredAt?: number; ground?: string; quiet?: unknown; urgent?: unknown; answers?: unknown }>;
   // One entry per finding sent, from the finder's own ledger.
   sent: Array<{ signal: string; sentAt: number }>;
   // The plugin's architect persona name, or "" when it holds none.
@@ -317,6 +317,9 @@ function collectEvents(input: OwnRecordInput): Record<KaizenSignal, KaizenEvent[
     // until the turn ends, so its wait is by design. A record with no ground
     // predates the field and counts.
     if (r.ground !== undefined && heldForDrain(r.ground, input.architectPersona)) continue;
+    // A quiet record is held until a tool call of a turn something else
+    // opens, so its wait is by design too.
+    if (isQuietRecord(r)) continue;
     if (typeof r.deliveredAt === "number" && r.deliveredAt - r.at >= KAIZEN_MESSAGE_WAIT_MS) {
       out.message_wait.push({ at: r.deliveredAt, note: "waited " + Math.round((r.deliveredAt - r.at) / 60_000) + " min" });
     }

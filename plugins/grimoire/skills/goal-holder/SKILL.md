@@ -35,7 +35,7 @@ Write to kit memory what the seat learns while holding the goal: a design the ar
 
 ## Turn Budget
 
-The goal context block shows the turns spent against the root's budget. Every completed turn spends one, a nudge and a delivered record among them. So the seat's lever is ending each turn once its act is done.
+The goal context block shows the turns spent against the root's budget. Every completed turn spends one, a nudge and a record delivered as a prompt among them. So the seat's lever is ending each turn once its act is done. A record its sender marked quiet, a mark unrelated to the quiet interval above, opens no turn at its receiver and spends none there. The `agentic_say` description says when to mark a record.
 
 When the budget is spent, the plugin blocks the root and opens an ask to the operator naming the count, and the seat waits. The ask names the turns that may release the root with `goal_resume`, and a turn the controller starts is not among them.
 

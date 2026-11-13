@@ -27,7 +27,7 @@
 // evaluates it once per process while it loads a fresh hooks/index.ts per
 // case.
 
-import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, headPoints, holdOf, isPlanningDue, isRootFinished, oneLine, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, switchToPlan, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type SentFinding, type SentPlanRecord } from "./agent-state";
+import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, headPoints, holdOf, isPlanningDue, isRootFinished, oneLine, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, switchToPlan, QUIET_HELD_MAX, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type QuietHeld, type SentFinding, type SentPlanRecord } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, shadowAsk as shadowAskFromModule, shadowOutcome as shadowOutcomeFromModule, tickOpenAsk as tickOpenAskFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { stampBeat, stampSupervisorFile, type BeatHost, type HeartbeatEntry } from "./beat";
 import { cacheTick, type CacheClockState } from "./cache-clock";
@@ -41,7 +41,7 @@ import { fleetReadingOf, readFleetRows, type FleetLine, type fleetPromptText } f
 import type { PluginHost } from "./host";
 import { shownDoneStatement } from "./goal-persona";
 import type { HookBudget, LiveAskResult } from "./jev-live";
-import { SweepDeleteError, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundIn, deliveryPrefix, deliveryRecordProblem, enforceChannelWindow, listInboxRecords, mayReachPersona, readAskRecord, readInboxRecord, sendPluginRecord, sweepExpiredRecords, type InboxRecord } from "./operator";
+import { SweepDeleteError, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundIn, deliveryPrefix, deliveryRecordProblem, enforceChannelWindow, isQuietRecord, listInboxRecords, mayReachPersona, readAskRecord, readInboxRecord, sendPluginRecord, sweepExpiredRecords, type InboxRecord } from "./operator";
 import { PLAN_ARCHIVE_DIRS } from "./plan-record";
 import { isPlanEntry, reactivateAskedEntry, roundSummaryText } from "./plan-route";
 import { CONTROLLER_DECISION, PLAN_SWITCH, PLAN_SWITCH_NO_MATCH, controllerLabelsOf, controllerLastAnswerText, controllerStateText, kaizenLine, resolverOf, type ControllerStateFact } from "./question-catalog";
@@ -1003,10 +1003,77 @@ export async function drainInboxOnce(ctx: TickContext, owns: () => boolean): Pro
         detail: `record at ${rec.key}: ${problem}; marked skipped`,
       });
     }
-    // Take the oldest record with a live claim
-    if (withClaim.length > 0) {
-      withClaim.sort((a, b) => a.rec.at - b.rec.at);
-      const { rec: oldest, ground } = withClaim[0];
+    // The take: each quiet record with a live claim, oldest first, joins the
+    // held list while the list has room, and nothing is submitted for it. A
+    // main-loop tool call's result carries it later. The list is persisted
+    // before any store record is marked, since a record marked delivered
+    // that no list names is carried by nothing while its sender reads it as
+    // taken. A record whose id the list already holds is one an earlier
+    // take listed and could not mark: it is marked here under the ground the
+    // list holds, with no second entry and no second decision. A record
+    // found while the list is full stays pending for a later tick.
+    const quietRecords = withClaim.filter(({ rec }) => isQuietRecord(rec)).sort((a, b) => a.rec.at - b.rec.at);
+    if (quietRecords.length > 0) {
+      const held = sess.state.monitor.quietHeld;
+      const listed: { rec: InboxRecord; ground: string }[] = [];
+      const added: { rec: InboxRecord; entry: QuietHeld; decision: AgentState["decisions"][number] }[] = [];
+      for (const { rec, ground } of quietRecords) {
+        const already = held.find((entry) => entry.id === rec.id && entry.key === rec.key);
+        if (already !== undefined) {
+          listed.push({ rec, ground: already.ground });
+          continue;
+        }
+        if (held.length >= QUIET_HELD_MAX) continue;
+        const entry: QuietHeld = { id: rec.id, key: rec.key, ground, at: rec.at };
+        const decision: AgentState["decisions"][number] = {
+          timestamp: Date.now(),
+          loop: "monitor",
+          action: "operator_quiet_held",
+          detail: `record ${rec.id} taken with no prompt submitted, held to be carried as ${deliveryPrefix(ground, rec.id, "quiet")}`,
+        };
+        held.push(entry);
+        sess.state.decisions.push(decision);
+        added.push({ rec, entry, decision });
+      }
+      if (added.length > 0) {
+        // A refused persist takes the new entries and their decisions back
+        // out, and their records stay pending with nothing marked. A persist
+        // that threw is carried here, so the pick below runs as it does on a
+        // tick with no quiet record; one that returned false means the
+        // session yielded the persona, and the drain ends.
+        let landed = false;
+        try {
+          landed = await ctx.persistOrRollBack(() => {
+            for (const { entry, decision } of added) {
+              const at = held.indexOf(entry);
+              if (at !== -1) held.splice(at, 1);
+              ctx.dropDecision(decision);
+            }
+          });
+          if (!landed) return false;
+        } catch { /* the store refused the write; the rollback ran and the records stay pending */ }
+        if (!owns()) return false;
+        if (landed) for (const { rec, entry } of added) listed.push({ rec, ground: entry.ground });
+      }
+      for (const { rec, ground } of listed) {
+        const existing = await store.get(rec.key);
+        if (!owns()) return false;
+        if (!existing) continue;
+        const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
+        parsed.status = "delivered";
+        parsed.deliveredAt = Date.now();
+        // The ground the held list carries the record under. No turn id is
+        // written, so no turn's answer is filed as the record's reply.
+        parsed.ground = ground;
+        await store.set(rec.key, parsed);
+        if (!owns()) return false;
+      }
+    }
+    // Take the oldest record with a live claim that is not quiet
+    const pickable = withClaim.filter(({ rec }) => !isQuietRecord(rec));
+    if (pickable.length > 0) {
+      pickable.sort((a, b) => a.rec.at - b.rec.at);
+      const { rec: oldest, ground } = pickable[0];
       // The goal block, the task list, the standing text and any
       // follow-up block ride ahead of the record; a delivery carries no
       // memory block, contextSourcesOf in hooks/index.ts says why. They are built before
