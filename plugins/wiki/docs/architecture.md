@@ -799,7 +799,26 @@ takes seven steps: trust, engine update, pull, feed, ingest, lint and push.
   held goes in its note rather than reading `skipped`. No `merge` step is
   recorded where no merge run started.
 - **Feed** runs `feed-inbox.ps1` where the KB holds `.claude/feed.json`.
-- **Ingest** runs where `inbox/` holds a file other than `.gitkeep`.
+- **Ingest** runs where `inbox/` holds a file other than `.gitkeep`, hidden
+  files included. After a run it records `ran`, the walker lists `inbox/`
+  again.
+  Where every file the run started with is still there, the step reads
+  `failed`, and is listed under `failures`, with the note
+  `kb-run.ps1 -Operation Ingest exited 0 and took no file from inbox/`.
+  The walker's own listing counts hidden files, which the ingest's listing
+  leaves out, so an inbox that holds only a hidden file reads this way. Three
+  such runs in a row over the same file names hold the ingest for 24 hours
+  after the last of them started. Each held pass starts no run and reads
+  `failed` with the note
+  `held after 3 ingest runs that took no file from inbox/`, and `walk.log`
+  names when the hold ends. A held ingest reads `failed`, where a held lint
+  reads `skipped`, since the session-start hook prints no skipped step and a
+  held inbox holds documents nobody has read. A file added to `inbox/`,
+  renamed there or removed from it starts the count again and ends any hold
+  on the next pass, and so does a run that takes a file. Only file names
+  count, so a folder in `inbox/` changes nothing. A run that reaches no
+  verdict counts nothing: one that exits non-zero, is refused for budget or
+  stopped at it, finds the run lock held or defers to a live edit.
 - **Lint** runs where the KB's last successful lint is absent or more than
   seven days old. It is stamped done only where the run exits 0 and a `Lint:`
   commit landed. A lint that fails, or ends with no `Lint:` commit, three times
@@ -820,10 +839,12 @@ wrapper, whose action is
 `claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default --strict-mcp-config`,
 with `wiki-lint` or `wiki-merge` in place of `wiki-ingest`. The prompt names
 the skill in prose, the stable form for a headless run. The model pin is
-load-bearing and fails silently when wrong: a too-small or unpinned model does
-nothing while emitting success-shaped text. The permission mode pin holds the
-run to the workspace allow list on an account whose own default is to bypass
-permissions. An MCP server is a program or service that hands Claude
+load-bearing and fails without an error when wrong: a too-small or unpinned
+model does nothing while emitting success-shaped text and exiting 0. The
+walker reports such an ingest as one that took no file and records such a
+lint as having made no `Lint:` commit. Nothing reports such a query. The
+permission mode pin holds the run to the workspace allow list on an account
+whose own default is to bypass permissions. An MCP server is a program or service that hands Claude
 extra tools, a channel's reply tool among them. The MCP pin,
 `--strict-mcp-config` with no `--mcp-config`, starts the run with no MCP
 server, so no such tool reaches a scheduled run.

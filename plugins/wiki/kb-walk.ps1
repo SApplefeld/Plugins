@@ -139,7 +139,28 @@ recorded and the pass moving on as each step states:
      -Operation Ingest runs. A Live read that is missing, times out or exits
      non-zero records the step failed; one that prints any line records
      "deferred: live", starts no model run, and the step is tried again next
-     pass.
+     pass. After a run recorded ran, the walker lists inbox/ again: where every
+     file name it started with, hidden ones among them, is still listed,
+     compared without regard to letter case, the run took nothing, and the
+     step is recorded failed, and listed under failures, with the note
+     "kb-run.ps1 -Operation Ingest exited 0 and took no file from inbox/",
+     which names no file. A run that took any file stays ran. The wiki's
+     state entry counts the consecutive runs that took nothing,
+     ingestFailures, holds the time the last such run started,
+     lastIngestAttemptAt, and holds ingestStalledInbox, the SHA-256 digest
+     of the file names that run started with, sorted by ordinal comparison
+     and joined by line feeds. A run that took a file removes all three, as
+     does an empty inbox, and an inbox whose names differ from the digest, a
+     count that reads 0 or a digest that does not read removes them before
+     the step goes on, so a file added, renamed or
+     removed releases the hold on the next pass. A run that reached no
+     verdict, "deferred: live", "skipped: run lock held", "skipped: budget",
+     a stop at the budget or a non-zero exit, leaves all three as they were.
+     An ingest whose count is 3 or more starts no Live read and no run while
+     lastIngestAttemptAt is under 24 hours old, a time later than now reading
+     as absent: it records failed with the note "held after 3 ingest runs
+     that took no file from inbox/", and the log says until when the run is
+     held.
   6. Lint. Where the wiki's last lint is absent or older than seven days, the
      walker reads kb-status.ps1 -What Live as the ingest does, then reads HEAD,
      and kb-run.ps1 -Operation Lint runs. The time is stamped only where the
@@ -1107,7 +1128,7 @@ function Get-ConflictPasses {
 
 # A run-start time from a wiki's state entry, by its field name, or $null
 # where the entry holds none it can read. A time later than now reads as none,
-# since no run started then, so the lint hold outlasts no day.
+# since no run started then, so the lint and ingest holds outlast no day.
 function Get-PastStateTime {
     param($State, [string]$Name)
     $last = [DateTime]::MinValue
@@ -1525,21 +1546,141 @@ function Invoke-RunStep {
     return $true
 }
 
-# Step 5: ingest, only where the inbox holds a file.
+# The names of the files that are direct children of the wiki's inbox/, hidden
+# ones among them, other than .gitkeep, each as the folder lists it. An inbox
+# folder that does not exist reads as empty. Each name is text its dropper
+# chose, so the walker only compares and hashes them, and writes none to a
+# note, the status, the state or the log.
+function Get-InboxNames {
+    param([string]$WikiPath)
+    $inbox = Join-Path $WikiPath 'inbox'
+    if (-not [System.IO.Directory]::Exists($inbox)) { return @() }
+    try {
+        $paths = [System.IO.Directory]::GetFiles($inbox)
+    } catch [System.IO.DirectoryNotFoundException] {
+        return @()
+    }
+    return @($paths | ForEach-Object { [System.IO.Path]::GetFileName($_) } | Where-Object { $_ -ne '.gitkeep' })
+}
+
+# The SHA-256 digest, as 64 lowercase hexadecimal digits, of inbox file names:
+# sorted by ordinal comparison, joined with one line feed, which no Windows
+# file name holds, and encoded as UTF-8. It does not change with the order the
+# folder lists the names, and changes where a name is added, removed or
+# renamed, a rename that changes only letter case among them.
+function Get-InboxDigest {
+    param([string[]]$Names)
+    $sorted = [string[]]@($Names)
+    [Array]::Sort($sorted, [System.StringComparer]::Ordinal)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes(($sorted -join "`n")))
+    } finally {
+        $sha.Dispose()
+    }
+    return (-join ($digest | ForEach-Object { $_.ToString('x2') }))
+}
+
+# The wiki's count of consecutive ingest runs that took no file, from its
+# state entry. The entry is read as untrusted: anything but a whole number
+# reads as 0.
+function Get-IngestFailures {
+    param($State)
+    $failures = 0
+    if ($State.Contains('ingestFailures') -and [int]::TryParse([string]$State['ingestFailures'], [System.Globalization.NumberStyles]::None, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$failures)) {
+        return $failures
+    }
+    return 0
+}
+
+# The time the wiki's last ingest run that took no file started, through
+# Get-PastStateTime.
+function Get-LastIngestAttemptAt {
+    param($State)
+    return (Get-PastStateTime $State 'lastIngestAttemptAt')
+}
+
+# The digest of the inbox names the wiki's last ingest run that took no file
+# started with, from its state entry, or $null where the entry holds anything
+# but 64 lowercase hexadecimal digits.
+function Get-IngestStalledInbox {
+    param($State)
+    if ($State.Contains('ingestStalledInbox') -and ($State['ingestStalledInbox'] -is [string]) -and
+        [regex]::IsMatch($State['ingestStalledInbox'], '\A[0-9a-f]{64}\z')) {
+        return $State['ingestStalledInbox']
+    }
+    return $null
+}
+
+# Ends the wiki's run of ingest runs that took no file.
+function Remove-IngestHold {
+    param($State)
+    $State.Remove('ingestFailures')
+    $State.Remove('lastIngestAttemptAt')
+    $State.Remove('ingestStalledInbox')
+}
+
+# Step 5: ingest, only where the inbox holds a file. The walker lists inbox/
+# before the run and again after a run recorded ran. Where every name it
+# started with is still listed, compared without regard to letter case, the
+# run took nothing, and the step's record is replaced with failed under a
+# fixed note that names no file. A run that takes any file reads ran, a run
+# that removes a duplicate and commits nothing among them. The check reads no
+# commit and no output of the run.
+#
+# An inbox whose runs take nothing 3 times in a row over the same names is
+# held, as a failing lint is: it starts no run until a day after the last such
+# run started, so a stalled inbox costs one run a day rather than one an hour,
+# and each held pass still reads failed. The state entry counts those runs in
+# ingestFailures, holds the last one's start in lastIngestAttemptAt and the
+# digest of the names it started with in ingestStalledInbox. An empty inbox,
+# a count of 0, or an inbox whose names differ from that digest removes all
+# three, so a file added, renamed or removed gets a run on the next pass. A
+# run that took a file removes them too. A run that reached no verdict, live,
+# lock held, refused for budget, stopped at the budget or exited non-zero,
+# leaves them as they were.
 function Invoke-IngestStep {
     param($Wiki, [string]$WikiPath)
     $startedAt = [DateTime]::UtcNow
-    $inbox = Join-Path $WikiPath 'inbox'
-    $files = @()
-    if ([System.IO.Directory]::Exists($inbox)) {
-        $files = @([System.IO.Directory]::GetFiles($inbox) | Where-Object { [System.IO.Path]::GetFileName($_) -ne '.gitkeep' })
-    }
-    if ($files.Count -eq 0) {
+    $state = Get-WikiState $Wiki.name
+    $names = @(Get-InboxNames $WikiPath)
+    if ($names.Count -eq 0) {
+        Remove-IngestHold $state
         Add-Step $Wiki 'ingest' 'skipped' 'inbox empty' $startedAt
         return
     }
+    $digest = Get-InboxDigest $names
+    $failures = Get-IngestFailures $state
+    $holdRecorded = $state.Contains('ingestFailures') -or $state.Contains('lastIngestAttemptAt') -or $state.Contains('ingestStalledInbox')
+    if ($holdRecorded -and ($failures -eq 0 -or ((Get-IngestStalledInbox $state) -cne $digest))) {
+        Remove-IngestHold $state
+        $failures = 0
+    }
+    if ($failures -ge 3) {
+        $lastAttempt = Get-LastIngestAttemptAt $state
+        if ($null -ne $lastAttempt -and $lastAttempt -gt [DateTime]::UtcNow.AddHours(-24)) {
+            $heldUntil = $lastAttempt.AddHours(24)
+            Write-Log "$($Wiki.name) ingest has taken no file from inbox/ in $failures runs in a row, so its run is held until $($heldUntil.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture))"
+            Add-Step $Wiki 'ingest' 'failed' 'held after 3 ingest runs that took no file from inbox/' $startedAt
+            return
+        }
+    }
     if (-not (Test-QuietTree $Wiki $WikiPath 'ingest' $startedAt)) { return }
-    $null = Invoke-RunStep $Wiki $WikiPath 'ingest' 'Ingest' $startedAt
+    $attemptedAt = [DateTime]::UtcNow.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    if (-not (Invoke-RunStep $Wiki $WikiPath 'ingest' 'Ingest' $startedAt)) { return }
+
+    # The run recorded ran; a run that left every name it started with
+    # replaces that record.
+    $left = [System.Collections.Generic.HashSet[string]]::new([string[]]@(Get-InboxNames $WikiPath), [System.StringComparer]::OrdinalIgnoreCase)
+    $taken = @($names | Where-Object { -not $left.Contains($_) })
+    if ($taken.Count -gt 0) {
+        Remove-IngestHold $state
+        return
+    }
+    $state['ingestFailures'] = $failures + 1
+    $state['lastIngestAttemptAt'] = $attemptedAt
+    $state['ingestStalledInbox'] = $digest
+    Add-Step $Wiki 'ingest' 'failed' 'kb-run.ps1 -Operation Ingest exited 0 and took no file from inbox/' $startedAt
 }
 
 # The wiki's count of consecutive failed lints, from its state entry. The

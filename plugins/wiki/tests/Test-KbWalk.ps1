@@ -16,7 +16,9 @@ KBWALK_STUB_SLEEP names, and where KBWALK_STUB_MODE is resolve copies the text
 KBWALK_STUB_RESOLVED names over wiki/page.md and commits it, which completes a
 merge; otherwise it leaves the tree as it found it. On a lint run, where
 KBWALK_STUB_LINT is commit the stub makes an empty commit under "Lint:", and
-where it is reconcile one under "Reconcile:" alone. Where KBWALK_STUB_ECHO is
+where it is reconcile one under "Reconcile:" alone. On an ingest run, where
+KBWALK_STUB_TAKE names a file the stub removes it from inbox/, as an ingest
+that moves its source does. Where KBWALK_STUB_ECHO is
 set the stub prints one line of its own and then that text, as a model's
 output would. Started with --version as its first argument, for the build read
 of the wrapper each wiki runs, the stub does none of that: it records its
@@ -26,13 +28,26 @@ or 2.1.257 where the case names none. No case reaches the real claude.
 It checks, one case per acceptance bullet: a pass over three wikis calling the
 stub once for the one inbox file, with an empty inbox skipped and an untrusted
 wiki skipped; a wiki whose stub build is 2.1.256 reading ingest failed, with
-the wrapper's refusal in the step's note and in the failures list and no stub
-run in the wiki; a conflicting pull in such a wiki reading merge failed with
-the same refusal in its note and in the failures list, no stub run, and the
-pull still deferred: conflict with its path, passes 1, no merge left and HEAD
-as before; the lint gate both ways on the seven-day stamp, the due lint's
-model output carrying the wrapper's lock-held prefix on a later line and the
-lint still recorded `run`; a due lint whose run made only a Reconcile: commit,
+the wrapper's refusal in the step's note and in the failures list, no stub
+run in the wiki and no ingestFailures, lastIngestAttemptAt or
+ingestStalledInbox in its state; a conflicting pull in such a wiki reading
+merge failed with the same refusal in its note and in the failures list, no
+stub run, and the pull still deferred: conflict with its path, passes 1, no
+merge left and HEAD as before; an ingest whose stub leaves the inbox as it
+found it reading failed: kb-run.ps1 -Operation Ingest exited 0 and took no
+file from inbox/, listed once under failures, and counting ingestFailures 1
+with a fresh lastIngestAttemptAt and a digest; two more such passes counting
+3, a fourth inside the day held as failed: held after 3 ingest runs that took
+no file from inbox/ with no stub call and the log naming when the hold ends,
+and a fifth with the last attempt 25 hours back calling the stub again and
+counting 4; that held ingest released by a file added to its inbox, its next
+pass calling the stub and counting 1 under a new digest, and its emptied
+inbox reading skipped: inbox empty with all three fields gone; an ingest that
+took nothing from two files on one pass, whose stub takes one on the next,
+reading ran with no ingest failure and all three fields gone; the lint gate
+both ways on the seven-day stamp, the due lint's model output carrying the
+wrapper's lock-held prefix on a later line and the lint still recorded
+`run`; a due lint whose run made only a Reconcile: commit,
 and one whose run made none, each recorded skipped: no Lint: commit with no
 stamp; a due lint with no Lint: commit on three passes in a row counting
 lintFailures to 3, its fourth pass inside the day held as skipped: held
@@ -585,6 +600,7 @@ function Get-RunEnvironment {
         'KBWALK_STUB_RESOLVED' = $resolvedFile
         'KBWALK_STUB_ECHO'     = $null
         'KBWALK_STUB_LINT'     = $null
+        'KBWALK_STUB_TAKE'     = $null
         'KBWALK_STUB_BUILD'    = $null
     }
     foreach ($name in $Overlay.Keys) { $environment[$name] = $Overlay[$name] }
@@ -692,9 +708,11 @@ try {
     # KBWALK_STUB_LINT commit makes an empty commit under Lint:, as a lint that
     # completes does, and reconcile one under Reconcile: alone, as a lint the
     # skill stopped at its live check after reconciling does; unset, the lint
-    # commits nothing. A build read, which passes --version first, branches
-    # away before the stub writes anything, so the record holds one ARGS: and
-    # CWD: pair per run.
+    # commits nothing. On an ingest run, KBWALK_STUB_TAKE names one inbox file
+    # the stub removes, as an ingest that moves its source to sources/ does;
+    # unset, the ingest leaves the inbox as it found it. A build read, which
+    # passes --version first, branches away before the stub writes anything,
+    # so the record holds one ARGS: and CWD: pair per run.
     $stubLines = @(
         '@echo off'
         'if "%~1"=="--version" goto version'
@@ -712,6 +730,7 @@ try {
         ')'
         'if "%~2"=="Use the wiki-lint skill." if "%KBWALK_STUB_LINT%"=="commit" git commit -q --allow-empty -m "Lint: stub check, clean"'
         'if "%~2"=="Use the wiki-lint skill." if "%KBWALK_STUB_LINT%"=="reconcile" git commit -q --allow-empty -m "Reconcile: stub leftovers"'
+        'if "%~2"=="Use the wiki-ingest skill." if defined KBWALK_STUB_TAKE del /q "inbox\%KBWALK_STUB_TAKE%"'
         ">>`"$script:afterMarker`" echo after"
         'exit 0'
         ':version'
@@ -738,7 +757,7 @@ try {
     Clear-Stub
     Remove-Item -LiteralPath $statusPath -Force
     $statusAbsentBefore = -not (Test-Path -LiteralPath $statusPath)
-    $r = Invoke-Walker
+    $r = Invoke-Walker @{ 'KBWALK_STUB_TAKE' = 'drop.md' }
     $records = @(Get-StubRecords)
     $status = Read-Status
     Test-Check 'a pass over three wikis exits 0 and calls the stub once, in the first wiki, with the ingest argument line' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $alpha) -and ($records[0].Args -ceq $ingestArgs))
@@ -770,9 +789,11 @@ try {
     $r = Invoke-Walker @{ 'KBWALK_STUB_BUILD' = '2.1.256' }
     $records = @(Get-StubRecords)
     $status = Read-Status
+    $state = Read-State
     $hethStep = Get-Step $status 'heth' 'ingest'
     $hethFailures = @(@($status['failures']) | Where-Object { ($_['name'] -ceq 'heth') -and ($_['step'] -ceq 'ingest') })
-    Test-Check 'a wiki whose stub build is 2.1.256 reads ingest failed with a note holding exited 1, 2.1.256 and is older than 2.1.257, lists one ingest failure holding the same words, and starts no stub run' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and $hethStep.StartsWith('failed: ', [StringComparison]::Ordinal) -and $hethStep.Contains('exited 1') -and $hethStep.Contains('2.1.256') -and $hethStep.Contains('is older than 2.1.257') -and ($hethFailures.Count -eq 1) -and ([string]$hethFailures[0]['note']).Contains('2.1.256') -and ([string]$hethFailures[0]['note']).Contains('is older than 2.1.257') -and ($records.Count -eq 0))
+    $hethHoldFields = @(@('ingestFailures', 'lastIngestAttemptAt', 'ingestStalledInbox') | Where-Object { $state['wikis']['heth'].ContainsKey($_) })
+    Test-Check 'a wiki whose stub build is 2.1.256 reads ingest failed with a note holding exited 1, 2.1.256 and is older than 2.1.257, lists one ingest failure holding the same words, starts no stub run, and, since a non-zero exit counts nothing, leaves its state with no ingestFailures, lastIngestAttemptAt or ingestStalledInbox' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and $hethStep.StartsWith('failed: ', [StringComparison]::Ordinal) -and $hethStep.Contains('exited 1') -and $hethStep.Contains('2.1.256') -and $hethStep.Contains('is older than 2.1.257') -and ($hethFailures.Count -eq 1) -and ([string]$hethFailures[0]['note']).Contains('2.1.256') -and ([string]$hethFailures[0]['note']).Contains('is older than 2.1.257') -and ($records.Count -eq 0) -and ($hethHoldFields.Count -eq 0))
 
     # The same refusal on a merge run. teth's pull conflicts on wiki/page.md
     # and the wrapper refuses its Merge run on the old build: the merge step
@@ -809,6 +830,107 @@ try {
     $tethPaths = @(if ($tethDeferred.Count -eq 1 -and $tethDeferred[0].ContainsKey('paths')) { @($tethDeferred[0]['paths']) } else { @() })
     $tethMergeHeadGone = (Invoke-Captured 'git' @('-C', $teth, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).ExitCode -ne 0
     Test-Check 'a conflicting pull in a wiki whose stub build is 2.1.256 reads merge failed with a note holding exited 1, 2.1.256 and is older than 2.1.257, lists one merge failure holding the same words, starts no stub run, and leaves the pull deferred: conflict with its path, passes 1, MERGE_HEAD gone and HEAD as before' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and $tethStep.StartsWith('failed: ', [StringComparison]::Ordinal) -and $tethStep.Contains('exited 1') -and $tethStep.Contains('2.1.256') -and $tethStep.Contains('is older than 2.1.257') -and ($tethFailures.Count -eq 1) -and ([string]$tethFailures[0]['note']).Contains('exited 1') -and ([string]$tethFailures[0]['note']).Contains('2.1.256') -and ([string]$tethFailures[0]['note']).Contains('is older than 2.1.257') -and ($records.Count -eq 0) -and ((Get-Step $status 'teth' 'pull') -ceq 'deferred: conflict') -and ($tethDeferred.Count -eq 1) -and ($tethDeferred[0]['reason'] -ceq 'conflict') -and ($tethPaths.Count -eq 1) -and ($tethPaths[0] -ceq 'wiki/page.md') -and ($tethDeferred[0]['passes'] -eq 1) -and $tethMergeHeadGone -and ((Invoke-Git $teth @('rev-parse', 'HEAD')).Trim() -ceq $tethHeadBefore))
+
+    # --- An ingest run that takes nothing. samekh's inbox holds one file and
+    # its lint is stamped yesterday, so the ingest is the pass's one model
+    # run, and the stub leaves the inbox as it found it. The step reads failed
+    # with the fixed note, listed once under failures, and the state counts
+    # ingestFailures 1 with the run's start and the digest of the names.
+    $tookNothing = 'kb-run.ps1 -Operation Ingest exited 0 and took no file from inbox/'
+    $heldNote = 'held after 3 ingest runs that took no file from inbox/'
+    $samekh = New-Wiki 'samekh'
+    [System.IO.File]::WriteAllText((Join-Path $samekh 'inbox\drop.md'), "a dropped note`n")
+    Set-List @('samekh')
+    Set-State -LastLintAt @{ samekh = $yesterday }
+    Clear-Stub
+    $r = Invoke-Walker
+    $records = @(Get-StubRecords)
+    $status = Read-Status
+    $state = Read-State
+    $samekhFailures = @(@($status['failures']) | Where-Object { ($_['name'] -ceq 'samekh') -and ($_['step'] -ceq 'ingest') })
+    $samekhAttempt = [DateTime]::MinValue
+    $samekhAttempted = [DateTime]::TryParseExact((Get-StampText $state['wikis']['samekh']['lastIngestAttemptAt']), 'o', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$samekhAttempt)
+    $samekhDigest = [string]$state['wikis']['samekh']['ingestStalledInbox']
+    Test-Check 'an ingest run that exits 0 and leaves the inbox as it found it reads failed: kb-run.ps1 -Operation Ingest exited 0 and took no file from inbox/, is listed once under failures with that note, and counts ingestFailures 1 with a fresh lastIngestAttemptAt and a 64-digit lowercase ingestStalledInbox' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $samekh) -and ($records[0].Args -ceq $ingestArgs) -and ((Get-Step $status 'samekh' 'ingest') -ceq "failed: $tookNothing") -and ($samekhFailures.Count -eq 1) -and ([string]$samekhFailures[0]['note'] -ceq $tookNothing) -and ($state['wikis']['samekh']['ingestFailures'] -eq 1) -and $samekhAttempted -and ($samekhAttempt.ToUniversalTime() -gt [DateTime]::UtcNow.AddMinutes(-5)) -and ($samekhDigest -cmatch '\A[0-9a-f]{64}\z'))
+
+    # The ingest hold. Two more such passes count samekh's ingestFailures to
+    # 3, and a fourth inside the day starts no stub, reads failed with the
+    # held note, and the log names the time the hold ends, a day after the
+    # third run started. With that start moved 25 hours back, a fifth pass
+    # runs the stub again and counts 4.
+    $samekhPassesOk = $true
+    foreach ($pass in 2..3) {
+        Clear-Stub
+        $r = Invoke-Walker
+        $records = @(Get-StubRecords)
+        $status = Read-Status
+        $state = Read-State
+        $samekhPassOk = (-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Args -ceq $ingestArgs) -and ((Get-Step $status 'samekh' 'ingest') -ceq "failed: $tookNothing") -and ($state['wikis']['samekh']['ingestFailures'] -eq $pass)
+        if (-not $samekhPassOk) { Write-Host "samekh pass $pass off its expected shape" }
+        $samekhPassesOk = $samekhPassesOk -and $samekhPassOk
+    }
+    $samekhAttempted = [DateTime]::TryParseExact((Get-StampText $state['wikis']['samekh']['lastIngestAttemptAt']), 'o', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$samekhAttempt)
+    $samekhHeldUntil = $samekhAttempt.ToUniversalTime().AddHours(24).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $samekhHeldFailures = @(@($status['failures']) | Where-Object { ($_['name'] -ceq 'samekh') -and ($_['step'] -ceq 'ingest') })
+    $samekhHeldOk = $samekhPassesOk -and $samekhAttempted -and (-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'samekh' 'ingest') -ceq "failed: $heldNote") -and ($samekhHeldFailures.Count -eq 1) -and (@([System.IO.File]::ReadAllLines($walkLog) | Where-Object { $_.Contains(' samekh ingest ') -and $_.Contains($samekhHeldUntil) }).Count -ge 1)
+    $state = Read-State
+    $state['wikis']['samekh']['lastIngestAttemptAt'] = [DateTime]::UtcNow.AddHours(-25).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    [System.IO.File]::WriteAllText($statePath, (ConvertTo-Json -InputObject $state -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+    Clear-Stub
+    $r = Invoke-Walker
+    $records = @(Get-StubRecords)
+    $status = Read-Status
+    $state = Read-State
+    Test-Check 'an ingest that takes nothing on three passes in a row calls the stub once a pass and counts ingestFailures 2 and 3, a fourth pass inside the day starts no stub, reads failed: held after 3 ingest runs that took no file from inbox/ and the log names the time the hold ends, and a fifth with the last attempt 25 hours back calls the stub again and counts 4' ($samekhHeldOk -and (-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $samekh) -and ($records[0].Args -ceq $ingestArgs) -and ((Get-Step $status 'samekh' 'ingest') -ceq "failed: $tookNothing") -and ($state['wikis']['samekh']['ingestFailures'] -eq 4))
+
+    # The release, in both forms. samekh is held again, its last attempt
+    # fresh. A file added to its inbox changes the names, so the next pass
+    # starts the stub, which takes nothing again: the count restarts at 1,
+    # never 5, under a digest other than the held one. An emptied inbox then
+    # reads skipped: inbox empty with all three fields gone.
+    $samekhHeldDigest = [string]$state['wikis']['samekh']['ingestStalledInbox']
+    [System.IO.File]::WriteAllText((Join-Path $samekh 'inbox\second.md'), "a second note`n")
+    Clear-Stub
+    $r = Invoke-Walker
+    $records = @(Get-StubRecords)
+    $status = Read-Status
+    $state = Read-State
+    $samekhReleasedDigest = [string]$state['wikis']['samekh']['ingestStalledInbox']
+    $samekhReleaseOk = (-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Args -ceq $ingestArgs) -and ((Get-Step $status 'samekh' 'ingest') -ceq "failed: $tookNothing") -and ($state['wikis']['samekh']['ingestFailures'] -eq 1) -and ($samekhReleasedDigest -cmatch '\A[0-9a-f]{64}\z') -and ($samekhReleasedDigest -cne $samekhHeldDigest)
+    foreach ($name in @('drop.md', 'second.md')) { Remove-Item -LiteralPath (Join-Path $samekh "inbox\$name") -Force }
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $state = Read-State
+    $samekhHoldFields = @(@('ingestFailures', 'lastIngestAttemptAt', 'ingestStalledInbox') | Where-Object { $state['wikis']['samekh'].ContainsKey($_) })
+    Test-Check 'a held ingest whose inbox gains a file starts the stub on the next pass and, taking nothing, counts ingestFailures 1 under a new digest, and once its inbox is emptied it reads skipped: inbox empty with ingestFailures, lastIngestAttemptAt and ingestStalledInbox gone' ($samekhReleaseOk -and (-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'samekh' 'ingest') -ceq 'skipped: inbox empty') -and ($samekhHoldFields.Count -eq 0))
+
+    # The other direction. ayin's inbox holds two files. The first pass's stub
+    # leaves both, so the state counts 1 under their digest. The second pass,
+    # over the same two names and that state as the walker wrote it, has the
+    # stub take one, as an ingest that moves a source or removes a duplicate
+    # does: the ingest reads ran, lists no failure, and all three fields go.
+    $ayin = New-Wiki 'ayin'
+    [System.IO.File]::WriteAllText((Join-Path $ayin 'inbox\first.md'), "a first note`n")
+    [System.IO.File]::WriteAllText((Join-Path $ayin 'inbox\other.md'), "another note`n")
+    Set-List @('ayin')
+    Set-State -LastLintAt @{ ayin = $yesterday }
+    Clear-Stub
+    $r = Invoke-Walker
+    $state = Read-State
+    $ayinWritten = (-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 1) -and ($state['wikis']['ayin']['ingestFailures'] -eq 1) -and $state['wikis']['ayin'].ContainsKey('lastIngestAttemptAt') -and ([string]$state['wikis']['ayin']['ingestStalledInbox'] -cmatch '\A[0-9a-f]{64}\z')
+    Clear-Stub
+    $r = Invoke-Walker @{ 'KBWALK_STUB_TAKE' = 'first.md' }
+    $records = @(Get-StubRecords)
+    $status = Read-Status
+    $state = Read-State
+    $ayinFailures = @(@($status['failures']) | Where-Object { ($_['name'] -ceq 'ayin') -and ($_['step'] -ceq 'ingest') })
+    $ayinHoldFields = @(@('ingestFailures', 'lastIngestAttemptAt', 'ingestStalledInbox') | Where-Object { $state['wikis']['ayin'].ContainsKey($_) })
+    $ayinLeft = @(Get-ChildItem -LiteralPath (Join-Path $ayin 'inbox') -File | Where-Object { $_.Name -ne '.gitkeep' })
+    Test-Check 'an ingest that took nothing on one pass, whose stub on the next pass over the same two names takes one, reads ran, lists no ingest failure, and leaves ingestFailures, lastIngestAttemptAt and ingestStalledInbox gone' ($ayinWritten -and (-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Args -ceq $ingestArgs) -and ($ayinLeft.Count -eq 1) -and ((Get-Step $status 'ayin' 'ingest') -ceq 'ran') -and ($ayinFailures.Count -eq 0) -and ($ayinHoldFields.Count -eq 0))
 
     # --- Bullet 2: the lint gate both ways on the seven-day stamp.
     $delta = New-Wiki 'delta'
@@ -1557,7 +1679,7 @@ try {
     $zetaClaudeDirty = (Invoke-Git $zeta @('status', '--porcelain', '--', '.claude')).Trim()
     $zetaInbox = @(Get-ChildItem -LiteralPath (Join-Path $zeta 'inbox') -File | Where-Object { $_.Name -ne '.gitkeep' })
     Test-Check "a wiki whose engine.json hash differs is updated and committed with the subject Engine: update to $hash8, its engine.json now the engine's hash and its .claude/ clean" ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($zetaSubject -ceq "Engine: update to $hash8") -and ($zetaParent -ceq $zetaHeadBefore) -and ($zetaMark['templateHash'] -ceq $script:engineHash) -and ($zetaClaudeDirty -eq '') -and ((Get-Step $status 'zeta' 'update') -ceq "ran: updated to $hash8"))
-    Test-Check 'the updated wiki''s feed.json is unchanged, the feed step ran and fed the upstream page, and ingest then ran the stub there' (($zetaFeed -ceq $feedJson) -and ((Get-Step $status 'zeta' 'feed') -ceq 'ran') -and ($zetaInbox.Count -eq 1) -and ((Get-Step $status 'zeta' 'ingest') -ceq 'ran') -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $zeta))
+    Test-Check 'the updated wiki''s feed.json is unchanged, the feed step ran and fed the upstream page, and ingest then ran the stub there, which left the page in the inbox, so the step reads failed: kb-run.ps1 -Operation Ingest exited 0 and took no file from inbox/' (($zetaFeed -ceq $feedJson) -and ((Get-Step $status 'zeta' 'feed') -ceq 'ran') -and ($zetaInbox.Count -eq 1) -and ((Get-Step $status 'zeta' 'ingest') -ceq 'failed: kb-run.ps1 -Operation Ingest exited 0 and took no file from inbox/') -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $zeta))
     $etaMark = Get-Content -LiteralPath (Join-Path $eta '.claude\engine.json') -Raw | ConvertFrom-Json -AsHashtable
     Test-Check 'a wiki with a live edit is recorded deferred: live, left at its commit and its old engine.json, listed under deferred, and its later steps still run' (((Get-Step $status 'eta' 'update') -ceq 'deferred: live') -and ((Invoke-Git $eta @('rev-parse', 'HEAD')).Trim() -ceq $etaHeadBefore) -and ($etaMark['templateHash'] -ceq $staleHash) -and (@(Get-Deferred $status) -ccontains 'eta: live') -and ((Get-Step $status 'eta' 'ingest') -ceq 'skipped: inbox empty'))
     $thetaDirty = (Invoke-Git $theta @('status', '--porcelain', '--', '.claude')).Trim()
@@ -1767,7 +1889,7 @@ try {
     Set-List @('rho', 'sigma', 'tau', 'upsilon')
     Set-State -LastLintAt @{ rho = $yesterday; sigma = $eightDaysAgo; tau = $yesterday; upsilon = $eightDaysAgo }
     Clear-Stub
-    $r = Invoke-Walker @{ 'KBWALK_STUB_LINT' = 'commit' }
+    $r = Invoke-Walker @{ 'KBWALK_STUB_LINT' = 'commit'; 'KBWALK_STUB_TAKE' = 'drop.md' }
     $status = Read-Status
     $statusText = [System.IO.File]::ReadAllText($statusPath)
     $rhoMergeHeadGone = (Invoke-Captured 'git' @('-C', $rho, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).ExitCode -ne 0
@@ -1888,7 +2010,7 @@ try {
     foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $omega '.claude') -Recurse -File -Force)) { [System.IO.File]::SetLastWriteTimeUtc($file.FullName, $omegaWrittenAt) }
     $omegaHeadBefore = (Invoke-Git $omega @('rev-parse', 'HEAD')).Trim()
     Clear-Stub
-    $r = Invoke-Walker @{ 'KBWALK_STUB_LINT' = 'commit' }
+    $r = Invoke-Walker @{ 'KBWALK_STUB_LINT' = 'commit'; 'KBWALK_STUB_TAKE' = 'drop.md' }
     $records = @(Get-StubRecords)
     $status = Read-Status
     $state = Read-State
@@ -2076,8 +2198,11 @@ try {
     $records = @(Get-StubRecords)
     $status = Read-Status
     $state = Read-State
-    Test-Check 'with the budget spent inside the first wiki, the first wiki ran ingest, the second reads skipped: budget, and the cursor stops before it' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $iota) -and ((Get-Step $status 'iota' 'ingest') -ceq 'ran') -and ((Get-WikiStatus $status 'kappa')['result'] -ceq 'skipped: budget') -and ([string]$state['cursor'] -ceq 'iota'))
-    Test-Check 'a due lint left with under 60 seconds of budget reads skipped: budget, starts no stub, keeps its old stamp, and the failures list is empty' (((Get-Step $status 'iota' 'lint') -ceq 'skipped: budget') -and ((Get-StampText $state['wikis']['iota']['lastLintAt']) -ceq $eightDaysAgo) -and (@($status['failures']).Count -eq 0))
+    Test-Check 'with the budget spent inside the first wiki, the first wiki ran ingest, which took no file from inbox/, the second reads skipped: budget, and the cursor stops before it' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $iota) -and ((Get-Step $status 'iota' 'ingest') -ceq 'failed: kb-run.ps1 -Operation Ingest exited 0 and took no file from inbox/') -and ((Get-WikiStatus $status 'kappa')['result'] -ceq 'skipped: budget') -and ([string]$state['cursor'] -ceq 'iota'))
+    # The stub leaves iota's inbox file for the later cases over this wiki,
+    # so the ingest's own failure is the one the list holds.
+    $iotaOtherFailures = @(@($status['failures']) | Where-Object { -not (($_['name'] -ceq 'iota') -and ($_['step'] -ceq 'ingest')) })
+    Test-Check 'a due lint left with under 60 seconds of budget reads skipped: budget, starts no stub, keeps its old stamp, and the failures list holds nothing but the ingest that took no file' (((Get-Step $status 'iota' 'lint') -ceq 'skipped: budget') -and ((Get-StampText $state['wikis']['iota']['lastLintAt']) -ceq $eightDaysAgo) -and ($iotaOtherFailures.Count -eq 0) -and (@($status['failures']).Count -eq 1))
     # The lint commits under Lint:, so it is stamped, and the lock and kill
     # cases below over this wiki each start only its ingest.
     Clear-Stub
