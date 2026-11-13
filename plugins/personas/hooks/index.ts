@@ -3563,8 +3563,12 @@ const seedGoalFromFile = async (dp: any, goalFile: string, firstLaunch: boolean)
       if (budgetBefore === undefined) held.turnsSpent = 0;
       held.turnBudget = read.block.turns;
     } else {
+      // No turn is counted while the root has no budget, so the total goes
+      // with it; a budget given back later states the floor sentence, never
+      // an undercount as a total.
       delete held.turnBudget;
       delete held.turnsSpent;
+      delete held.turnsTotal;
     }
     held.updatedAt = now;
     sess.state.updatedAt = now;

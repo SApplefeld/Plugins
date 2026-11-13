@@ -1487,6 +1487,10 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         }
         named.blockedReason = undefined;
         named.lead = null;
+        // The turn this call runs in is the goal's closing turn, which the
+        // turn's own end cannot count on a complete root, so the total takes
+        // it here, before the completion builds the record that states it.
+        if (typeof named.turnsTotal === "number" && typeof named.turnBudget === "number") named.turnsTotal += 1;
         await completeRootByGoalDone(named, note);
         const rootWritten = await persistAnswering(ctx, "goal_done", named.id);
         if (rootWritten === false) {

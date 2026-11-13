@@ -1892,13 +1892,22 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // follows or drives the goal's work, save the supervisor's priming turn,
   // so a restart costs the goal nothing, and a [SUPERVISOR-ASK] turn, which
   // the same reading marks. An aborted, errored or refused turn
-  // spends none, and a root the budget already blocked counts none until
-  // goal_resume lifts it. The ask is one per block, as the cost cap's
+  // spends none, and a root the budget already blocked counts none against
+  // it until goal_resume lifts it. The ask is one per block, as the cost cap's
   // is: a standing own ask is left, and a lifted one is withdrawn before the
   // next opens. The step sits above the record close, so the blocking ask
   // it opens is one the close's open-ask rule reads.
+  // The root's total, turnsTotal, takes one for every turn this step would
+  // count and also for a turn completed while the budget blocks the root,
+  // since a turn the session takes while it waits for its release is part
+  // of what the goal cost. Only a root that already carries the total gains
+  // on it, so a root seeded before the field never starts one partway. The
+  // blocked root's updatedAt is left alone, so its stamp still dates its
+  // block.
   if (completesGateTurn && sess.isOwner && !skipped && !completesPrimingTurn) {
     const root = sess.state.goals.find((g) => g.parentId === null);
+    if (root && typeof root.turnBudget === "number" && root.status !== "complete" && root.status !== "abandoned"
+      && typeof root.turnsTotal === "number") root.turnsTotal += 1;
     if (root && typeof root.turnBudget === "number" && root.status !== "complete" && root.status !== "abandoned"
       && !(root.status === "blocked" && root.blockedReason === TURN_BUDGET_REASON)) {
       const budgetNow = Date.now();

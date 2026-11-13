@@ -138,7 +138,8 @@ export function seedDecision(state: AgentState, block: GoalBlock, firstLaunch: b
 }
 
 // The root a block seeds: the shape goal_create builds, with the statements
-// on doneWhen, the budget on turnBudget and a count of zero where one rides.
+// on doneWhen, the budget on turnBudget and both counts, turnsSpent and
+// turnsTotal, at zero where one rides.
 // maxRounds is goal_create's default of 10, the round budget each plan under
 // the root inherits. The objective and the title cut from it are stored
 // folded to one line and bracket-safe, since every goal print, the planner
@@ -168,6 +169,7 @@ export function seedRootFrom(block: GoalBlock, now: number): GoalNode {
   if (block.turns !== undefined) {
     root.turnBudget = block.turns;
     root.turnsSpent = 0;
+    root.turnsTotal = 0;
   }
   return root;
 }
@@ -217,12 +219,19 @@ export function turnBudgetResumeRefusedText(rootId: string): string {
 
 // The record the completed root of a goal-lifetime persona sends the
 // coordinator persona, whose fleet_retire disables the entry in the roster.
-// A root carrying a turn budget ends the record on the turns it spent of that
-// budget since its seed, its last goal_resume or the start whose adoption gave
-// it that budget, the sentence the coordinator passes to the roadmap persona.
-// Each goal_resume restarts the count, so the figure is a floor on what the
-// goal cost rather than its total. A root with no budget adds nothing.
+// A root carrying a turn budget ends the record on one sentence about its
+// turns, the sentence the coordinator passes to the roadmap persona. A root
+// that also carries turnsTotal states that total, every turn counted from
+// its seed to its close, beside the budget. A root with a budget and no
+// total was seeded before the total existed or took its first budget from
+// an adoption, and its only count is turnsSpent, which runs from its seed,
+// its last goal_resume or the start whose adoption gave it that budget.
+// Its record keeps the sentence that says so, since that count is a floor
+// on what the goal cost and stating it as a total would be untrue. A root
+// with no budget adds nothing.
 export function retireRecordText(persona: string, root: GoalNode): string {
-  const spent = typeof root.turnBudget === "number" ? ` It spent ${root.turnsSpent ?? 0} of ${root.turnBudget} turns since its seed, its last resume or the start that gave it its budget.` : "";
+  const spent = typeof root.turnBudget !== "number" ? ""
+    : typeof root.turnsTotal === "number" ? ` It spent ${root.turnsTotal} turns in all, against a budget of ${root.turnBudget} turns that each resume granted again.`
+    : ` It spent ${root.turnsSpent ?? 0} of ${root.turnBudget} turns since its seed, its last resume or the start that gave it its budget.`;
   return `[RETIRE] Persona '${safeText(persona)}' completed its goal "${safeText(root.objective)}" and its roster entry carries lifetime goal, so retire the entry with fleet_retire. Its store, memory and run directory stay.${spent}`;
 }

@@ -200,6 +200,10 @@ export interface GoalNode {
                        // turnBudget since the seed, the last goal_resume or
                        // the start that adopted the root's first budget
                        // from the roster
+  turnsTotal?: number; // root only: the completed turns counted on the root
+                       // since its seed, which no goal_resume restarts. A
+                       // root seeded before the field, or given its first
+                       // budget by an adoption, carries none
   askedBy?: string; // root only: the author the channel envelope named on the
                     // turn goal_create ran in. Absent where the root came from
                     // any other turn or the envelope named no author. The
@@ -2178,9 +2182,11 @@ export function parseState(json: string): AgentState {
     parsed.version = 10;
   }
 
-  // v10 to v11: the root gains doneWhen, turnBudget and turnsSpent, each
-  // optional and absent on a stored root, which the load check below reads
-  // as a root with no statements and no budget. Nothing is defaulted, since
+  // v10 to v11: the root gains doneWhen, turnBudget, turnsSpent and
+  // turnsTotal, each optional and absent on a stored root, which the load
+  // check below reads as a root with no statements, no budget and no total.
+  // A root an earlier v11 build seeded also lacks turnsTotal, and keeps the
+  // older record sentence. Nothing is defaulted, since
   // a budget of zero would block the root at its first turn end.
   if (parsed.version === 10) {
     parsed.version = 11;
@@ -2437,16 +2443,17 @@ function enforceInvariants(state: AgentState): void {
     }
   }
 
-  // The seeded root's three fields, each kept only in the shape the seed
+  // The seeded root's four fields, each kept only in the shape the seed
   // writes: doneWhen an array of strings, turnBudget a positive integer,
-  // turnsSpent a whole number. A value of another shape is dropped rather
-  // than defaulted, so a root never gains a budget that counts from a value
-  // the seed did not write.
+  // turnsSpent and turnsTotal each a whole number. A value of another shape
+  // is dropped rather than defaulted, so a root never gains a budget or a
+  // total that counts from a value the seed did not write.
   for (const g of state.goals) {
-    const raw = g as { doneWhen?: unknown; turnBudget?: unknown; turnsSpent?: unknown };
+    const raw = g as { doneWhen?: unknown; turnBudget?: unknown; turnsSpent?: unknown; turnsTotal?: unknown };
     if (raw.doneWhen !== undefined && !(Array.isArray(raw.doneWhen) && raw.doneWhen.every((s) => typeof s === "string"))) delete g.doneWhen;
     if (raw.turnBudget !== undefined && !(Number.isInteger(raw.turnBudget) && (raw.turnBudget as number) > 0)) delete g.turnBudget;
     if (raw.turnsSpent !== undefined && !(Number.isInteger(raw.turnsSpent) && (raw.turnsSpent as number) >= 0)) delete g.turnsSpent;
+    if (raw.turnsTotal !== undefined && !(Number.isInteger(raw.turnsTotal) && (raw.turnsTotal as number) >= 0)) delete g.turnsTotal;
   }
 
   // The load-time backstop for the task reap; persist runs the same reap on
