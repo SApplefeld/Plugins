@@ -504,6 +504,27 @@ function defaultRepoDir() {
     return path.resolve(__dirname, '..', '..', '..');
 }
 
+// Which copy of this tool took a reading, named from its plugin root, the
+// directory holding scripts/. An installed copy sits in a cache directory named
+// for its commit, so a basename of git-object shape is that copy's identity; the
+// shape is the one hooks/session-start.js's isShaShaped holds, written out here
+// because this script runs standalone with no hook beside it. Any other root is
+// named by the HEAD commit git resolves for the script's own directory: on a
+// checkout or a marketplace clone the commit checked out there, uncommitted edits
+// to the script not marked, and for a non-hex root inside some other repository
+// that repository's HEAD. Where
+// git cannot answer, through a failure or the timeout, the basename is printed as
+// it stands. No form carries a path, since the reading lands in a plan doc.
+function toolCopy(pluginRoot) {
+    mustHaveLibs();
+    const base = path.basename(pluginRoot);
+    if (/^[0-9a-f]{7,40}$/i.test(base)) return 'installed ' + base;
+    const out = libs.gitOutput(path.join(pluginRoot, 'scripts'), ['rev-parse', '--short', 'HEAD'], { timeoutMs: GIT_TIMEOUT_MS });
+    const sha = out === null ? '' : out.split(/\r?\n/)[0].trim();
+    if (/^[0-9a-f]{7,40}$/i.test(sha)) return 'checkout ' + sha;
+    return safePath(base);
+}
+
 // A root holds a path when the path sits anywhere beneath it. Every measured
 // root is a directory root, and its trailing slash is what makes the prefix test
 // exact rather than a name-prefix match; a root spelled as a single file would
@@ -2246,7 +2267,8 @@ function main() {
         out('wrote ' + result.count + ' caps to ' + safePath(budgetFile));
         return;
     }
-    // The subject line, which the reading verbs and sync print first. Without it a reading
+    // The subject line, which the reading verbs and sync print first, followed by the
+    // tool line toolCopy composes. Without the subject line a reading
     // says what it measured and never which repository it measured, and the default
     // subject is derived from where this script sits: under a marketplace install
     // that is the marketplace's own clone of this repository, so a call with no
@@ -2264,6 +2286,7 @@ function main() {
     // directory name and is named by the root itself, which carries no account name
     // either.
     out('repository: ' + safePath(path.basename(repoDir) || repoDir));
+    out('tool: ' + toolCopy(path.resolve(__dirname, '..')));
     if (args.verb === 'report') {
         out(result.lines.join('\n'));
         return;
@@ -2336,6 +2359,7 @@ module.exports = {
     boundList,
     boundNotice,
     defaultRepoDir,
+    toolCopy,
     rootHolds,
     classify,
     repoTopLevel,

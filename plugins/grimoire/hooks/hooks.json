@@ -75,6 +75,16 @@
           }
         ]
       }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-root-nudge.js\""
+          }
+        ]
+      }
     ]
   }
 }

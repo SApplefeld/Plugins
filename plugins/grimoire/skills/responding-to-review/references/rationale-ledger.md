@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document governs how a session weighs and answers review output and operator feedback before acting on either. It owns the moments where a review agent returns findings, where the operator gives feedback or a correction, and where a session is about to implement a suggestion from either source, especially one that looks wrong, unclear, or larger than the problem; it also owns how a session counts corroboration across independent review lenses, how it treats a reviewer's clearance or a pair of contradicting verdicts, how it handles a claim finding's fix brief, and the tone of a review reply. It does not own severity triage itself, which it hands to executing-work's "Address findings" step, nor the claim-finding class and its dispositions, which it hands to executing-work, nor the docs-curator Drift Report route, which it hands to finishing-work. Load class: `named-trigger` - the skill is loaded before a specific act, when review output arrives to be adjudicated, when the operator gives feedback, or before implementing a suggestion from either.
 
-Extracted at `6bc07fb`: whole document (`skills.responding-to-review.SKILL.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 1 on 2026-09-20 (S021 and S022 below, S010 retired). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `f862acf0` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags.
+Extracted at `6bc07fb`: whole document (`skills.responding-to-review.SKILL.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 1 on 2026-09-20 (S021 and S022 below, S010 retired). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `f862acf0` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_kit-copy-at-dispatch_spec_v1.md` section 1 on 2026-11-13 (BN001 to BN003 below, under the plan's letter BN, for the kit-drift adjudication).
 
 ### C001
 - key: Treat a review finding as an input to your judgment rather than an order, and evaluate it before you act on it.
@@ -894,3 +894,33 @@ Extracted at `6bc07fb`: whole document (`skills.responding-to-review.SKILL.md`).
 - verdict: retire
 - reason: row 1096 merge. Executing-work step 4 carries it: "**An advisory lens's Critical or Major is weighed and dispositioned, never routed.**".
 - passage: An advisory lens's Critical or Major, the performance-reviewer's or the security-reviewer's, takes the advisory disposition paragraph at executing-work's step 4 for its route, and nothing here.
+
+### BN001
+- key: Weigh a finding that cites a kit rule from another kit copy against the session's own copy of that rule.
+- class: rule
+- source: plugins/grimoire/skills/responding-to-review/SKILL.md:18
+- provenance: `docs/plans/claude-kit_kit-copy-at-dispatch_spec_v1.md` section 1 2026-11-13, for issues 799 and 870, on the plan author's ruling of 2026-11-13 recorded under that plan's `## Intent`.
+- verdict: keep
+- landed: `docs/plans/claude-kit_kit-copy-at-dispatch_spec_v1.md` section 1
+- reason: The session's copy is the one its run obeyed, so it is the standard the work is judged by. A reviewer that read another copy can cite a rule the author never loaded, and weighing the finding against the session's copy separates a real defect from a difference between copies.
+- passage: A finding citing a kit rule from another kit copy is weighed against the session's copy of that rule.
+
+### BN002
+- key: Treat such a finding as kit drift only where the session's copy lacks the rule or words its sentence differently, never over a difference elsewhere in the file; record both roots in the Chapter or the handoff recap, and never adjudicate it as a defect of the spec or the diff.
+- class: rule
+- source: plugins/grimoire/skills/responding-to-review/SKILL.md:18
+- provenance: `docs/plans/claude-kit_kit-copy-at-dispatch_spec_v1.md` section 1 2026-11-13, for issues 799 and 870, on the plan author's ruling of 2026-11-13 recorded under that plan's `## Intent`.
+- verdict: keep
+- landed: `docs/plans/claude-kit_kit-copy-at-dispatch_spec_v1.md` section 1
+- reason: Where the session's copy carries the same sentence, the cited path changes nothing about whether the finding is right, so it is weighed like any other finding. Where the rule is absent or worded differently, the author could not have followed it, so fixing the spec or the diff for it would be wrong. Recording both roots leaves the drift visible to whoever updates the install.
+- passage: Only where the session's copy lacks the rule or words its sentence differently is it kit drift, never over a difference elsewhere in the file: record both roots in the Chapter or the handoff recap, and never adjudicate it as a defect of the spec or the diff.
+
+### BN003
+- key: Count a root written with a leading `~` and its absolute form as one root.
+- class: mechanic
+- source: plugins/grimoire/skills/responding-to-review/SKILL.md:18
+- provenance: `docs/plans/claude-kit_kit-copy-at-dispatch_spec_v1.md` section 1 2026-11-13, for issues 799 and 870, on the plan author's ruling of 2026-11-13 recorded under that plan's `## Intent`.
+- verdict: keep
+- landed: `docs/plans/claude-kit_kit-copy-at-dispatch_spec_v1.md` section 1
+- reason: The `Kit root:` line prints a root under the home directory with a leading `~`, while a reviewer may cite the same copy by its absolute path, so the two spellings must not read as two copies and turn every finding into kit drift.
+- passage: A root with a leading `~` and its absolute form are one root.

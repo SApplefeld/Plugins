@@ -2427,6 +2427,106 @@ else {
     }
 }
 
+# --- Agent charters. The skills dispatch charters by name, and the payload
+# --- ships those names as doctor\agents.json. This check reads that list from
+# --- the payload this doctor sits in, never another copy, and finds
+# --- agents\<name>.md there for each name. A missing charter on an installed
+# --- plugin means the build shipped short, so the remedy is an update; on a
+# --- clone the checkout itself is short. A manifest that is missing or is not
+# --- a list of charter names FAILs, since the payload cannot be judged
+# --- without it. Where settings enable $installId, the check then reads the
+# --- commit installed_plugins.json records for it against the HEAD of the
+# --- marketplace clone at ~\.claude\plugins\marketplaces\<marketplace>, and
+# --- reports INFO where they differ, since the machine then runs a build
+# --- other than the clone's. The record is the entry whose installPath names
+# --- this payload, or the first entry with a commit where none does. It says
+# --- nothing of that where the plugin is not enabled, the clone is absent,
+# --- git is not on PATH, either read fails, or the two agree.
+$agentManifestPath = Join-Path $pluginRoot "doctor\agents.json"
+$agentsDir = Join-Path $pluginRoot "agents"
+$charterRemedy = if ($isClone) { "Fix: restore each missing charter in the checkout's agents folder, $agentsDir." }
+                 else { "Fix: claude plugin update $installId, then re-run doctor, since this build shipped short." }
+$agentNames = $null
+$agentManifestError = $null
+if (-not (Test-Path -LiteralPath $agentManifestPath -PathType Leaf)) {
+    $agentManifestError = "$agentManifestPath does not exist, so this payload's charters cannot be checked."
+}
+else {
+    try {
+        $agentManifest = Get-Content -LiteralPath $agentManifestPath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+        $agentNames = @($agentManifest)
+        if ($agentNames.Count -eq 0 -or @($agentNames | Where-Object { -not ($_ -is [string]) -or $_ -cnotmatch '^[a-z0-9][a-z0-9-]*$' }).Count -gt 0) {
+            $agentNames = $null
+            $agentManifestError = "$agentManifestPath is not a list of charter names, so this payload's charters cannot be checked."
+        }
+    }
+    catch {
+        $agentNames = $null
+        $agentManifestError = "$agentManifestPath could not be read or parsed, so this payload's charters cannot be checked: " + (Get-SanitizedLine $_.Exception.Message 200)
+    }
+}
+if ($null -ne $agentManifestError) {
+    Report "FAIL" "Agent charters" @($agentManifestError, $charterRemedy, (Get-PayloadClause))
+}
+else {
+    $missingCharters = @($agentNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $agentsDir "$_.md") -PathType Leaf) })
+    if ($missingCharters.Count -eq 0) {
+        Report "PASS" "Agent charters" @("All $($agentNames.Count) charters doctor\agents.json names are in $agentsDir.")
+    }
+    else {
+        Report "FAIL" "Agent charters" (@("$($missingCharters.Count) of the $($agentNames.Count) charters doctor\agents.json names are missing from ${agentsDir}, so a skill that dispatches one runs without it:") +
+            ($missingCharters | ForEach-Object { "  $_.md" }) + @($charterRemedy, (Get-PayloadClause)))
+    }
+}
+$recordedSha = $null
+if ($installEnabled -and (Test-Path -LiteralPath $installedPluginsPath -PathType Leaf)) {
+    try {
+        $shaRecord = Get-Content -LiteralPath $installedPluginsPath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+        if (($shaRecord -is [System.Management.Automation.PSCustomObject]) -and
+            ($shaRecord.plugins -is [System.Management.Automation.PSCustomObject]) -and
+            ($shaRecord.plugins.PSObject.Properties.Name -contains $installId)) {
+            $shaEntries = @(@($shaRecord.plugins.PSObject.Properties[$installId].Value) |
+                Where-Object { $_ -is [System.Management.Automation.PSCustomObject] })
+            $isValidSha = { param($e) ($e.gitCommitSha -is [string]) -and $e.gitCommitSha -match '^[0-9a-fA-F]{40}$' }
+            # Full paths, case-insensitive, trailing separators ignored; a path
+            # that does not resolve names nothing.
+            $toFullPath = { param($p) try { [System.IO.Path]::GetFullPath([string]$p).TrimEnd('\', '/') } catch { $null } }
+            $payloadFull = & $toFullPath $pluginRoot
+            $ownEntry = $shaEntries | Where-Object {
+                ($_.installPath -is [string]) -and $_.installPath -ne "" -and ($null -ne $payloadFull) -and
+                [string]::Equals((& $toFullPath $_.installPath), $payloadFull, [System.StringComparison]::OrdinalIgnoreCase)
+            } | Select-Object -First 1
+            if ($null -ne $ownEntry) {
+                if (& $isValidSha $ownEntry) { $recordedSha = $ownEntry.gitCommitSha }
+            }
+            else {
+                $recordedSha = $shaEntries | Where-Object { & $isValidSha $_ } |
+                    ForEach-Object { $_.gitCommitSha } | Select-Object -First 1
+            }
+        }
+    }
+    catch { $recordedSha = $null }
+}
+$marketplaceClone = Join-Path $claudeDir ("plugins\marketplaces\" + $installId.Split("@")[1])
+# Applications only, so a function or alias named git is never taken.
+$gitCmd = Get-Command git -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if (($null -ne $recordedSha) -and ($null -ne $gitCmd) -and (Test-Path -LiteralPath (Join-Path $marketplaceClone ".git"))) {
+    $cloneHead = $null
+    try {
+        $cloneHeadLines = @(& $gitCmd.Source -C $marketplaceClone rev-parse HEAD 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $cloneHeadLines.Count -eq 1 -and "$($cloneHeadLines[0])".Trim() -match '^[0-9a-fA-F]{40}$') {
+            $cloneHead = "$($cloneHeadLines[0])".Trim()
+        }
+    }
+    catch { $cloneHead = $null }
+    if (($null -ne $cloneHead) -and ($cloneHead -ne $recordedSha)) {
+        Report "INFO" "Agent charters" @(
+            "The marketplace clone at $marketplaceClone is at commit $(Get-SanitizedLine $cloneHead 120), and $installedPluginsPath records $(Get-SanitizedLine $recordedSha 120) for $installId, so this machine runs a build other than the clone's.",
+            "To move this machine onto the marketplace's current build: claude plugin update $installId, then restart Claude Code."
+        )
+    }
+}
+
 # --- Summary.
 Write-Host ""
 if ($script:failCount -gt 0) {

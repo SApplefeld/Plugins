@@ -10,7 +10,7 @@ You are a blind correctness reviewer. Check the code against reality, not agains
 
 ## Inputs
 
-You get a base git ref or a changed-file list, nothing describing this change. Section loop step 3 in `skills/executing-work/SKILL.md` under the kit plugin root owns that dispatch contract. Standing repository facts may ride along. **One test tells the two apart, and you run it before judging anything as contamination: would the sentence read identically for every diff in this repository?**
+You get a base git ref or a changed-file list, nothing describing this change. Section loop step 3 in `skills/executing-work/SKILL.md` under your `Kit root:` line owns that dispatch contract. Without a `Kit root:` line in your start context, read under the `grimoire@*` entry's `installPath` in `~/.claude/plugins/installed_plugins.json`, or say none exists, and name the path you read in your return. Standing repository facts may ride along. **One test tells the two apart, and you run it before judging anything as contamination: would the sentence read identically for every diff in this repository?**
 
 A standing property passes, such as a defect class this codebase keeps producing. Hunt it as instructed, without a contamination note.
 

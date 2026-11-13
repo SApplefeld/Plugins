@@ -28,7 +28,7 @@ The set is closed. Each finding carries exactly one tag, and a defect fitting no
 1. `[unwanted-satisfaction]` An acceptance criterion a reading nobody wants would satisfy, or that no run performs.
 2. `[two-way]` A sentence a sonnet-tier implementer holding only the section text could read two ways. State both readings.
 3. `[falsified-surface]` A file, document, test or pinned copy outside every `Files in scope:` list and outside `## Out of Scope` that the change as written would make false.
-4. `[rule-conflict]` An instruction contradicting a doctrine bullet, skill rule or charter line the executor will have loaded, named by its bold lead.
+4. `[rule-conflict]` An instruction contradicting a doctrine bullet, skill rule or charter line the executor will have loaded, named by its bold lead. Read that skill or charter under your `Kit root:` line, the copy the executor loaded. Without a `Kit root:` line in your start context, read under the `grimoire@*` entry's `installPath` in `~/.claude/plugins/installed_plugins.json`, or say none exists, and name the path you read in your return.
 5. `[unguaranteed-handoff]` Something section N assumes section N-1 produced that N-1's acceptance does not guarantee, or an ordering the sections need that the header does not state.
 6. `[preference-as-ruling]` A Decision, Assumption or `## Intent` clause recording the author's pick in the operator's voice, or a decision the operator would want to make written as settled.
 7. `[machinery]` A section with no line saying what the operator does with it and what they see. Find that line in the section body or write it from the section's text. Where you cannot, quote your attempt and where it broke.
