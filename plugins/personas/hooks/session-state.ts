@@ -340,5 +340,19 @@ export interface SessionState {
   // that ends.
   pairDraftOwed: { turnId: string; pairs: ScanPair[]; notDrafted: number; at: number } | null;
   pairDrafts: { turnId: string; block: string } | null;
+  // The [MEMORY CHECK] turns goal_done's closes owe, oldest first, each as
+  // queueMemoryCheck in hooks/index.ts takes it: the closed goal's id, its
+  // title and every goal the close completed. The engine rejects a
+  // $.prompt.submit made inside a tool call, so the tool-call context
+  // records the check here and the next main-loop turn end in
+  // hooks/turn-complete.ts hands it to queueMemoryCheck, taking each entry
+  // off the list as it does. In memory only, never persisted, and not reset
+  // when the session switches persona. A check owed when the session's
+  // process ends is not sent, and its names stay shown until newer ones push
+  // them off the shown list. A check owed when the session switches to
+  // another persona is not sent either: the turn end hands it to the new
+  // persona's state, which holds none of its goals, so it is dropped with no
+  // decision and its names stay shown in the old persona's store.
+  memoryChecksOwed: Array<{ goalId: string; title: string; goalIds: string[] }>;
 }
 

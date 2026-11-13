@@ -634,9 +634,9 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
 // records drains at turn pace rather than one per tick. It returns true where
 // it submitted a record, or where a drain already running when it was called
 // submitted one. A running drain holds the slot until its submit settles,
-// which is when the session is next idle: the end of the turn the submit
-// opened. So the turn end's wait on it settles at once in health and is the
-// step that delivers the next record, and the hold keeps a second drain from
+// as the turn the submit opens starts (submitExpectedTurn in index.ts). So
+// in health a turn end finds the slot empty and starts the drain that
+// delivers the next record, and the hold keeps a second drain from
 // submitting beside a prompt not yet entered. The idle tick never waits on
 // the slot: drainInboxIdle below counts the idle ticks that find the same
 // drain still in flight and clears it at the bound.
@@ -806,7 +806,7 @@ export async function drainInboxOnce(ctx: TickContext, owns: () => boolean): Pro
   // (ask_answered path) before the general drain.
   // The open-turn reading is taken here rather than trusted from the
   // caller. The tick's blocks before this call submit, and a submit
-  // resolves only when the session is next idle, so a turn can have
+  // resolves only as the turn it opens starts, so a turn can have
   // opened underneath them by the time this line runs. This drain marks
   // a record delivered and then submits it, and a submit into an open turn
   // is queued rather than answered, so the record would carry a delivered
@@ -1215,8 +1215,8 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // those sessions get a [STORE LOST] turn of their own, ahead of the fleet
   // block and the inbox drain, and the model tells the coordinator, which
   // re-queues the work. The line is cleared here, before the submit, and
-  // not when the submit reports. The prompt submit does not resolve until
-  // the session is next idle, and until that turn opens the tick sees no
+  // not when the submit reports. The prompt submit resolves only as the
+  // turn it opens starts, and until that turn opens the tick sees no
   // open turn and runs in full, so a tick landing in that window would read
   // the same line and queue a second [STORE LOST] turn beside the first. A
   // refused submit puts the line back and records why, so the next idle
@@ -1278,8 +1278,8 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       const { current, changed, notes, movedKeys } = fleetReadingOf(report, previousMap, previousFirstReadingDone, fleetNow, ctx.heartbeatMs, { tickFailure: ctx.tickFailure(), startStoreProblem: ctx.startStoreProblem(), reconcileStoreProblem: ctx.reconcileStoreProblem() });
       // The reading is advanced here, before the submit below, and not when
       // the model reports. What the order guards is the window between a
-      // submit and the turn it opens: the prompt submit does not resolve until
-      // the session is next idle, and until that turn opens the tick sees no
+      // submit and the turn it opens: the prompt submit resolves only as
+      // that turn starts, and until that turn opens the tick sees no
       // open turn and runs in full. A tick landing in that window reads the
       // same fleet, and against a reading still holding the previous one it
       // queues a second copy of this prompt. Submitted prompts accumulate
@@ -1493,7 +1493,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
     } else if (reconcileNow - lastReconcileAt >= reconcileEveryMs) {
       // The open-turn reading is taken again here rather than trusted from
       // the top of the tick. The fleet block above submits, and a submit
-      // does not resolve until the session is next idle, so a turn can
+      // resolves only as the turn it opens starts, so a turn can
       // have opened underneath it by the time this line runs. A prompt
       // submitted into that turn wakes nothing: it is queued and arrives
       // as part of the next turn's prompt, beside the [FLEET] line that
@@ -1648,7 +1648,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // as the idle proposal skips them. trunkGateDecision reads the local date
   // and hour, since the hour is the operator's quiet hour on this box. The
   // date is stamped and persisted before the submit, for the idle proposal's
-  // reason: the submit does not resolve until the session is next idle, so a
+  // reason: the submit resolves only as the turn it opens starts, so a
   // stamp written after it would leave every tick in between queueing
   // another copy, and a relaunch while it waits would ask again. A submit
   // that fails has still spent the day, which the trunk_gate_failed record
@@ -1731,7 +1731,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // open when the candidate is read leaves the routine due for a later tick.
   // The fire follows the trunk gate's order for the trunk
   // gate's reason: the last fire is stamped and persisted before the submit,
-  // which does not resolve until the session is next idle, so a stamp
+  // which resolves only as the turn it opens starts, so a stamp
   // written after it would leave every tick in between queueing another
   // copy. A submit that fails has still spent the fire, which the
   // routine_failed record makes visible. A fire whose session moved to
@@ -2481,7 +2481,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       }
     }
     // The ledger is written before the announcement is submitted, since
-    // the submit does not resolve until the session is next idle. A save
+    // the submit resolves only as the turn it opens starts. A save
     // that throws still lets the announcement go out, and the settled
     // ledger waits in memory for the next save.
     if (planRecordsChanged) {
@@ -2955,7 +2955,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       }
     }
     // The settled entry is written before the announcement is submitted,
-    // since the submit does not resolve until the session is next idle.
+    // since the submit resolves only as the turn it opens starts.
     if (unroutableLine !== null) {
       sess.state.updatedAt = Date.now();
       await ctx.persist();
@@ -2963,8 +2963,8 @@ export async function idleTick(ctx: TickContext): Promise<void> {
     }
 
     // The ask. askedAt is stamped before the submit, for the reason the
-    // nudge floor is spent first: the prompt submit does not resolve until
-    // the session is next idle, so a stamp written after it would leave
+    // nudge floor is spent first: the prompt submit resolves only as the
+    // turn it opens starts, so a stamp written after it would leave
     // every tick in between passing the interval and queueing another
     // copy. A submit that fails has still spent the interval, which the
     // proposal_failed record makes visible. The stamp is persisted before

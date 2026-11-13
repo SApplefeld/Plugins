@@ -1602,6 +1602,23 @@ async function submitKaizen(dp: any, expectedTurns: ExpectedTurn[], announced: s
 // settled text on the entry as its second match key. No site reads the
 // submit's result directly. A result that is not an object is read as an
 // accepted submit with no settled text. Top level because it takes `dp`.
+//
+// This is the plugin's one $.prompt.submit, and when it resolves is the
+// engine's to decide. A submit made while the session is idle resolves as
+// the turn it opens starts. A submit made while a turn runs waits for that
+// turn to end first, then resolves as its own turn starts. The engine
+// rejects a submit made inside a tool.call hook, since it would wait on the
+// turn that hook is holding. The engine's declaration PromptSubmitResult, in
+// .claude/types/claude-code.d.ts, puts the resolve at the turn's start and
+// not at its end. Its wording also allows a resolve as soon as the prompt is
+// queued behind a running turn, earlier than the second reading above. A
+// stamp the submitted turn's own end reads is written before the submit, and
+// the tick reads again whether a turn is open after each awaited submit, so
+// those orders hold at either moment. The drain slot's hold, at drainInbox
+// in controller-tick.ts, needs the second reading: a resolve at the queue
+// would free the slot while its record still waits, and the next turn end
+// could submit a second record beside it. Every comment that orders a stamp
+// or a re-read around a submit takes its timing from this one.
 async function submitExpectedTurn(dp: any, expectedTurns: ExpectedTurn[], entry: ExpectedTurn): Promise<SubmitOutcome> {
   let result: PromptSubmitResult | undefined;
   try {
@@ -1741,6 +1758,7 @@ const sess: SessionState = {
   pairFork: FORK_IDLE,
   pairDraftOwed: null,
   pairDrafts: null,
+  memoryChecksOwed: [],
 };
 
 // The directory the session's working-directory files resolve against: the
@@ -3780,7 +3798,7 @@ const BLOCKED_TURN_BACK_TEXT = "[BLOCKED WITH NO QUESTION] Your last turn closed
 // hooks/turn-complete.ts marked and whose store write landed before this
 // call. The entry goes into the expected-turn list before the submit, which
 // is not awaited, as queueMemoryCheck's is not: $.prompt.submit resolves only
-// once the session is next idle, and this runs inside the turn end. A
+// as the turn it opens starts, and this runs inside the turn end. A
 // rejected or dropped submit leaves the list through submitExpectedTurn and
 // logs blocked_turn_back_refused. The lead keeps its mark either way, so a
 // refused turn is not sent again in that stretch of blocked closes. Top
@@ -3999,13 +4017,20 @@ async function completeLeafReturningClosed(dp: any, id: string, note: string, le
 // are store text, so both are folded to one line and pass through
 // bracketSafeText, the title cut at the 80 characters a title is stored
 // at. The entry goes into the expected-turn list before the submit, which
-// is not awaited: $.prompt.submit resolves only once the session is next
-// idle, and two of the four close sites run inside the turn itself. A
-// refused submit leaves the list through submitExpectedTurn, logs
-// memory_check_refused and clears the goals' entries, since no answer is
-// coming. Only the owner asks, since only the owner stamps: a reader
-// session clears the goals' entries and queues nothing. Top level because it
-// takes `dp`; `expectedTurns` is register's expected-turn list.
+// is not awaited: $.prompt.submit resolves only as the turn it opens
+// starts, and a close at a turn's end runs before that turn is over. Of the
+// four close sites, the two in hooks/turn-complete.ts submit from inside
+// the turn-end handler and the tick's in hooks/controller-tick.ts submits
+// from the tick. goal_done's close runs inside a tool call, where the engine
+// rejects a submit, so its context records the check on
+// sess.memoryChecksOwed instead of calling this, and the next main-loop turn
+// end calls it for each entry from inside its turn-end handler, as the other
+// two turn-end closes do. A refused submit leaves the list through
+// submitExpectedTurn, logs memory_check_refused and clears the goals'
+// entries, since no answer is coming. Only the owner asks, since only the
+// owner stamps: a reader session clears the goals' entries and queues
+// nothing. Top level because it takes `dp`; `expectedTurns` is register's
+// expected-turn list.
 function queueMemoryCheck(dp: any, expectedTurns: ExpectedTurn[], goalId: string, title: string, goalIds: string[]): void {
   const names = shownNamesUnder(goalIds);
   if (names.length === 0) return;
@@ -6735,7 +6760,7 @@ export const register: Register = async (on, options) => {
         // The floor is spent here, before the submit, so that the open-turn
         // test in hooks/controller-tick.ts's idleTick, which calls this closure,
         // and this write are one synchronous step. $.prompt.submit
-        // does not resolve until the session is next idle, so during a
+        // resolves only as the turn it opens starts, so during a
         // long turn it parks; writing the floor after it would leave
         // every tick reading the same stale stamp, passing the floor,
         // and queueing another identical copy of this prompt. The cost
@@ -6768,10 +6793,10 @@ export const register: Register = async (on, options) => {
         // count itself moves at a nudged turn's end, never here.
         const unlinedAnswers = sess.nudgedAnswersWithoutStatus;
         // The nudged turn's end writes the controller call's acted
-        // outcome against this stamp, and that turn may run and end
-        // before the submit below resolves, so the stamp is held here
-        // with the expected-turn entry. A later nudge replaces it, as
-        // the score joiner's is replaced.
+        // outcome against this stamp, so the stamp is held here with the
+        // expected-turn entry, before the submit below, and that turn's
+        // end finds it at either resolve submitExpectedTurn names. A later
+        // nudge replaces it, as the score joiner's is replaced.
         sess.jevActedStampId = controllerStampId;
         // Only the submit's own outcome is read here, so a throw from the
         // ledger writes idleTick makes after this returns is not recorded as
@@ -7741,7 +7766,10 @@ export const register: Register = async (on, options) => {
         persistOrRollBack: (rollBack) => persistOrRollBack($, rollBack),
         activate: (nextId, reason) => activate($, nextId, reason),
         runHealth: (forNodeId) => runHealth($, forNodeId),
-        queueMemoryCheck: (expectedTurns, goalId, title, goalIds) => queueMemoryCheck($, expectedTurns, goalId, title, goalIds),
+        // goal_done's close runs inside this tool call, where the engine
+        // rejects a $.prompt.submit, so its check is owed to the next
+        // main-loop turn end, which hands it to queueMemoryCheck.
+        queueMemoryCheck: (_expectedTurns, goalId, title, goalIds) => { sess.memoryChecksOwed.push({ goalId, title, goalIds }); },
         writeClaimDirect: () => writeClaimDirect($),
         migrateLegacyMemories: () => migrateLegacyMemories($),
         completeLeafReturningClosed: (id, note, leftOpen) => completeLeafReturningClosed($, id, note, leftOpen),

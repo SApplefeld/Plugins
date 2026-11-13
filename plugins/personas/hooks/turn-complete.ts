@@ -2196,6 +2196,41 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // backstop went out or another turn is open, leaves its window for the
   // next owner turn end that scans, which reads from this start.
   if (removedOwnEntry && !completesSubagent && sess.isOwner && mapStartedAt !== undefined) openRepromptWindow(sess, mapStartedAt);
+  // The [MEMORY CHECK] turns goal_done's closes owe go out from inside this
+  // turn-end handler, the event the engine's refusal of a submit made inside
+  // a tool call names, at every main-loop turn end this session saw start,
+  // the ones the gate below skips included. They go out before the block
+  // below schedules its re-prompt and its drain, so each check is submitted
+  // ahead of both, in the order goal_done closed their goals. The checks this
+  // handler's own close sites queued above go out before them. The loop
+  // awaits nothing, so it holds no chain. An entry leaves the list before it
+  // is handed over, so no check is sent twice. A session that lost ownership
+  // of the persona after the close hands each entry over all the same:
+  // queueMemoryCheck on a session that does not own the persona clears its
+  // own copy of the names and submits nothing, so no entry waits for a later
+  // promotion, and the names stay shown in the store until newer ones push
+  // them out. A session that switched to another persona after the close
+  // hands each entry to a state holding none of the closed goals, so
+  // queueMemoryCheck finds no names and the check is dropped with no
+  // decision, its names left shown in the old persona's store.
+  // queueMemoryCheck records a refused submit itself; a throw out of it is
+  // one decision here and stops neither the entries behind it nor the block
+  // below. A subagent's completion sends nothing and leaves the list as it
+  // is.
+  if (removedOwnEntry && !completesSubagent && sess.memoryChecksOwed.length > 0) {
+    for (let owed = sess.memoryChecksOwed.shift(); owed !== undefined; owed = sess.memoryChecksOwed.shift()) {
+      try {
+        queueMemoryCheck(expectedTurns, owed.goalId, owed.title, owed.goalIds);
+      } catch (err) {
+        sess.state.decisions.push({
+          timestamp: Date.now(),
+          loop: "memory",
+          action: "memory_check_refused",
+          detail: headPoints(`${owed.goalId}: the check owed at a turn's end threw: ${safeErrorText(err)}`, 200),
+        });
+      }
+    }
+  }
   if (removedOwnEntry && !completesSubagent && sess.isOwner && !turnOpenAfterDelete && !submittedReplyBackstop && drain !== null) {
     void Promise.resolve().then(async () => {
       // The ring is read by identity as well as length, since a save
