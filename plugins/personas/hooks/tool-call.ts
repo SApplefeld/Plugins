@@ -2395,6 +2395,10 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       });
       sess.state.updatedAt = liftedAt;
       const rootWritten = await persistAnswering(ctx, "goal_resume", budgetRoot.id);
+      if (rootWritten === false) {
+        setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
+      }
       const rootResumed = `Resumed root ${budgetRoot.id} "${budgetRoot.title}". ${budget === undefined ? "The root carries no turn budget now, so no count restarts." : `Turn budget restarted: ${budget} turns again.`} ${returned} paused ${returned === 1 ? "entry" : "entries"} returned to pending; the controller's next tick starts one.`;
       return { result: typeof rootWritten === "boolean" ? rootResumed : rootResumed + goalWriteFailedText(rootWritten.failed, false) };
     }
@@ -2487,6 +2491,10 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     setCountResetSinceNudgeOpened(true);
     sess.lastNudgeAt = 0;
     const written = await persistAnswering(ctx, "goal_resume", target.id);
+    if (written === false) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
+    }
     // The result names the active entry whenever it is not the target. After
     // resumeGoalNode that happens on one path alone: the target sits above
     // the active entry, which stays active while the target goes pending
