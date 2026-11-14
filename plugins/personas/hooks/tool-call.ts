@@ -138,6 +138,7 @@ export interface ToolCallContext extends SharedHandlerState {
   noteStandingRefusal: () => void;
   hookBudget: HookBudget;
   COMPACT_HOLD_REMINDER_TEXT: string;
+  SUPERVISOR_STOP_NOTICE_TEXT: string;
   urgentCheckMinMs: number;
   breakInAfterMs: number;
   toolErrorsThisTurn: () => number;
@@ -378,7 +379,7 @@ export function noteRoutineWithheld(sess: Pick<ToolCallContext["sess"], "persona
 // with before the served answer's scrub, from the off-arming path to the
 // break-in scan.
 export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Promise<ToolCallResult> {
-  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, opensWithSeatLead, opensWithQueueLead, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsWorkersRecordToArchitect, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, noteModelReplyCall, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
+  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, opensWithSeatLead, opensWithQueueLead, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsWorkersRecordToArchitect, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, SUPERVISOR_STOP_NOTICE_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, noteModelReplyCall, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
   // An "off" session runs the guard and after-hook region around next(e)
   // and the compaction pass's rerun watch, and nothing else: no call
   // counting, no persona tool, no constraint. The watch counts a call
@@ -3634,6 +3635,41 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         }
       }
     }
+  }
+
+  // The stop notice, on a main-loop call the model made in an owner
+  // session that a hook beneath did not deny: the supervisor's stop request
+  // the mailbox pass holds while a turn is open opens no turn until this
+  // one ends, so the plugin's own line for it rides this result's context,
+  // after any line already there, once per request. A subagent's result, a
+  // plugin-raised call's and a denied one carry none and leave the notice
+  // unshown, so the main loop's next call carries it: a subagent cannot
+  // stop the session, the engine drops a plugin call's context, and a deny
+  // takes none. The line is the plugin's own words with two fills, the
+  // record's id, which parseSupervisorMailboxLine holds to the bracket
+  // rule, and the whole minutes since the record's time, held to 0 through
+  // 999 because a mailbox writer controls that time. No part of the
+  // record's text enters it. Both fills go in one pass, so an id holding
+  // the text {minutes} stays as written, and through a function, so no
+  // dollar sequence in a value is read as a replacement pattern. The line
+  // is attached before the save, and a save that throws withholds nothing.
+  // The notice acknowledges nothing: the request stays in the mailbox, and
+  // the first idle tick still delivers it as a prompt, unless the session
+  // has answered it with supervisor_shutdown by then.
+  if (modelMadeCall && !inSubagent && sess.isOwner && typeof r.deny !== "string" && sess.stopNotice !== null && !sess.stopNotice.shown) {
+    const notice = sess.stopNotice;
+    const minutes = Math.min(999, Math.max(0, Math.floor((Date.now() - notice.at) / 60_000)));
+    const line = SUPERVISOR_STOP_NOTICE_TEXT.replace(/\{id\}|\{minutes\}/g, (fill) => (fill === "{id}" ? notice.id : String(minutes)));
+    const prior = Array.isArray(r.context) ? r.context : [];
+    r = { ...r, context: [...prior, line] } as typeof r;
+    notice.shown = true;
+    sess.state.decisions.push({
+      timestamp: Date.now(),
+      loop: "monitor",
+      action: "supervisor_shutdown_noticed",
+      detail: `mailbox record ${headPoints(notice.id, 200)} shown inside the running turn as context on ${e.tool}`,
+    });
+    try { await persist(); } catch { /* persist could not read or write the store; the decision waits in memory */ }
   }
 
   // Plan item 8.3: a record from a writer that may reach this persona

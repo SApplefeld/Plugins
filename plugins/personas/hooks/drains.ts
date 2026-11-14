@@ -46,7 +46,7 @@ import { boundedText, safeErrorText, stripBom } from "./text";
 
 // The session fields the drains read and write, which the session object in
 // hooks/index.ts satisfies.
-export type DrainsSession = Pick<SessionState, "persona" | "mySessionId" | "isOwner" | "state" | "memqWrittenThisSession" | "memoryFork" | "askBriefFork" | "pairFork" | "pairDraftOwed" | "pairDrafts">;
+export type DrainsSession = Pick<SessionState, "persona" | "mySessionId" | "isOwner" | "state" | "memqWrittenThisSession" | "memoryFork" | "askBriefFork" | "pairFork" | "pairDraftOwed" | "pairDrafts" | "stopNotice">;
 
 // What hooks/index.ts hands the drains: the session; the host, the commons
 // store and the prompt-cache clock; the persist with its rollback for a
@@ -636,16 +636,33 @@ export async function drainPairDraftOwed(deps: DrainsDeps, turnOpen: (turnId: st
 // moment the line is reached, is passed over with the line neither
 // acknowledged nor delivered, and the pass goes on to the probes after it: a
 // turn submitted into an open turn is queued rather than answered, so the
-// record stays in the mailbox for the first idle tick's pass, and no state
-// is kept between the two. The ack line is
-// written before the submit, and a pass that cannot read or write the ack
-// file acts on nothing, so a record can never be delivered without the line
-// that keeps it from being delivered again; a submit that opens no turn adds
-// a failed line beside it. A line that is not a record is never acknowledged,
-// and is logged once per session under the key `skipped` holds. A missing,
-// empty or unreadable mailbox is a pass that does nothing. Nothing here
-// throws. The [SUPERVISOR] turn's text and its submit are
-// submitSupervisorShutdown's, in hooks/index.ts.
+// record stays in the mailbox for the first idle tick's pass. The pass
+// leaves a notice on the session for the running turn instead: the first
+// shutdown it holds sets the session's stopNotice to the record's id and
+// time, not yet shown, unless the field already names that id, and the
+// tool.call handler puts the plugin's own line for it on the result of the
+// next main-loop call it passes to the tool beneath that comes back with no
+// deny. A later held shutdown in the same pass sets nothing, so two
+// held records never swap the field between ticks. The notice acknowledges
+// nothing, and the pass that delivers a shutdown as a prompt clears the
+// field before its submit, so no notice rides the turn the prompt opens.
+// A shutdown the session has already answered, by a shutdown_requested or
+// park_requested decision stamped at or after the record's time, is passed
+// over with a turn open or not: no ack line, no prompt and no change to the
+// notice, since the launcher stops the child on either decision. The two
+// differ after the stop: a shutdown_requested ends the run at exit 0 and
+// removes the stop request file, and a park_requested ends it at exit 6,
+// the park, and leaves that file for the next start to read. A second
+// shutdown still in the mailbox after one is delivered as a prompt is held
+// on the next pass, and its notice can ride the turn that prompt opened.
+// The ack line is written before the submit, and a pass that cannot read or
+// write the ack file acts on nothing, so a record can never be delivered
+// without the line that keeps it from being delivered again; a submit that
+// opens no turn adds a failed line beside it. A line that is not a record
+// is never acknowledged, and is logged once per session under the key
+// `skipped` holds. A missing, empty or unreadable mailbox is a pass that
+// does nothing. Nothing here throws. The [SUPERVISOR] turn's text and its
+// submit are submitSupervisorShutdown's, in hooks/index.ts.
 export async function drainSupervisorMailbox(
   deps: DrainsDeps,
   mailboxPath: string,
@@ -695,6 +712,8 @@ export async function drainSupervisorMailbox(
   // a malformed record.
   const lines = mailboxText.split("\n");
   if (!mailboxText.endsWith("\n")) lines.pop();
+  // Whether this pass has reached a shutdown it holds for an open turn.
+  let heldShutdown = false;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (line.trim() === "") continue;
@@ -719,12 +738,30 @@ export async function drainSupervisorMailbox(
       newAcks.push(JSON.stringify({ id: rec.id, at: Date.now(), action: "ack" }));
       continue;
     }
+    // A shutdown the session has already answered is passed over: a
+    // shutdown_requested or park_requested decision stamped at or after the
+    // record's time, both milliseconds since the epoch, is the call
+    // supervisor_shutdown records, and the launcher stops the child on either,
+    // a park at exit 6 with the stop request file left in place. The pass
+    // writes no ack line, submits nothing and leaves stopNotice as it is.
+    if (deps.session.state.decisions.some((d) => (d.action === "shutdown_requested" || d.action === "park_requested") && d.timestamp >= rec.at)) continue;
     // A shutdown with a turn open is left for the next idle pass, neither
     // acknowledged nor delivered; the probes around it, before and after,
-    // are acknowledged all the same.
-    if (turnOpen()) continue;
+    // are acknowledged all the same. The first one a pass holds leaves the
+    // notice for the running turn on the session, where the field does not
+    // already name it, so a notice already shown is not shown again.
+    if (turnOpen()) {
+      if (!heldShutdown) {
+        heldShutdown = true;
+        if (deps.session.stopNotice === null || deps.session.stopNotice.id !== rec.id) deps.session.stopNotice = { id: rec.id, at: rec.at, shown: false };
+      }
+      continue;
+    }
     newAcks.push(JSON.stringify({ id: rec.id, at: Date.now(), action: "delivered" }));
     if (!(await writeAcks())) return outcome;
+    // The prompt carries the request from here, so no notice rides the turn
+    // it opens.
+    deps.session.stopNotice = null;
     const shutdownOutcome = await deps.submitSupervisorShutdown(expectedTurns, rec);
     // A submit that opened no turn keeps its delivered line, which is what
     // keeps the record from being submitted again, and gains a failed line

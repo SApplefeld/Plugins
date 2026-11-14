@@ -340,6 +340,16 @@ export interface SessionState {
   // that ends.
   pairDraftOwed: { turnId: string; pairs: ScanPair[]; notDrafted: number; at: number } | null;
   pairDrafts: { turnId: string; block: string } | null;
+  // The supervisor's stop request the mailbox pass in hooks/drains.ts read
+  // with a turn open and holds for the first idle tick, which delivers it
+  // unless the session has answered it by then: the record's id and
+  // `at`, and whether the tool.call handler has put the notice for it on a
+  // main-loop tool result yet. It lives in memory alone, never in `state`:
+  // the request itself stays in the mailbox file, so a reload or a restart
+  // loses only the note that the notice was shown, and the next pass leaves
+  // one again. The pass sets it to null where it delivers a stop request as
+  // a prompt.
+  stopNotice: { id: string; at: number; shown: boolean } | null;
   // The [MEMORY CHECK] turns goal_done's closes owe, oldest first, each as
   // queueMemoryCheck in hooks/index.ts takes it: the closed goal's id, its
   // title and every goal the close completed. The engine rejects a

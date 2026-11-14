@@ -1130,8 +1130,9 @@ export async function drainInboxOnce(ctx: TickContext, owns: () => boolean): Pro
 // a probe is acknowledged with no turn spent, during a long turn as
 // between turns, so a supervisor probing a session inside a long turn
 // reads it alive; a shutdown is delivered once as a labelled turn where
-// no turn is open, after which the tick ends as the inbox drain's does,
-// so nothing else queues behind a session that has been asked to leave;
+// no turn is open and the session has not already answered it, after
+// which the tick ends as the inbox drain's does, so nothing else queues
+// behind a session that has been asked to leave;
 // a shutdown read while a turn is open stays in the mailbox for the first
 // idle tick's pass. Then the orphan sweeper's findings file, where the
 // orphanSweepFindings option names one and the mailbox pass delivered no

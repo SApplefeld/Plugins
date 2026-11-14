@@ -187,7 +187,7 @@
       "type": "string",
       "default": "",
       "title": "Supervisor mailbox path",
-      "description": "The mailbox file the supervisor that launched this session writes, <rundir>/mailbox.jsonl. The controller tick reads it and writes mailbox.ack.jsonl beside it: a probe is acknowledged with no turn spent, and a shutdown request is delivered once as a turn opening [SUPERVISOR id=<id>]. The supervisor writes this; left unset, as in an interactive session, the tick reads no mailbox."
+      "description": "The mailbox file the supervisor that launched this session writes, <rundir>/mailbox.jsonl. The controller tick reads it and writes mailbox.ack.jsonl beside it: a probe is acknowledged with no turn spent, and a shutdown request the session has not already answered with supervisor_shutdown is delivered once as a turn opening [SUPERVISOR id=<id>]. The supervisor writes this; left unset, as in an interactive session, the tick reads no mailbox."
     },
     "orphanSweepFindings": {
       "type": "string",

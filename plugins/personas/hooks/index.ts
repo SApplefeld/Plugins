@@ -1758,6 +1758,7 @@ const sess: SessionState = {
   pairFork: FORK_IDLE,
   pairDraftOwed: null,
   pairDrafts: null,
+  stopNotice: null,
   memoryChecksOwed: [],
 };
 
@@ -2652,6 +2653,15 @@ const LAUNCH_INSTRUCTIONS_OPENING_TEXT = "[LAUNCH INSTRUCTIONS REPEATED] The con
 // command, each filled where the line is attached. It is a named literal of
 // its own so the injection ledger can size it.
 const COMPACT_HOLD_REMINDER_TEXT = "[COMPACTION HELD] The persona module is holding this session's automatic compaction offers at {percent} percent of the context window, because this session has declared no boundary for them to land at. Unheld, they ride to the valve at {valve} percent, which lands the compaction at whatever this session happens to be doing then. At the end of this turn, answer the durability question: are your own worktree edits none or handed to a named owner, is every decision from this stretch on disk, and are the messages you owe sent? If all three are yes, run {command}, and the next offer lands there. If any is no, finish it first and declare at that point: the declaration covers this moment only and lapses the moment new work arrives.";
+
+// The notice a supervisor's stop request held for an open turn puts, once per
+// request, on the result of the main loop's next tool call that the plugin
+// passes to the tool beneath and that comes back with no deny. {id} is the
+// mailbox record's id and {minutes} the whole minutes since the record's
+// time, held to 0 through 999, both filled in one pass where the line is
+// attached. The line carries no part of the record's text. It is a named
+// literal of its own so the injection ledger can size it.
+const SUPERVISOR_STOP_NOTICE_TEXT = "[SUPERVISOR id={id}, in turn] The launcher asked this session to stop {minutes} min ago, and its request opens no turn while this one runs. This line is that request shown early: your launch instructions name it as a prompt opening [SUPERVISOR id=<id>], it widens no plan, and the prompt still comes if this turn ends first. Start no new work. Put the plan doc, the goal tree and every message you owe on disk, then call supervisor_shutdown inside this turn. The launcher waits a set time for that call and then ends the session by force.";
 
 // The opening clause every level sentence below shares: the level scopes
 // only what the persona does with work it finds on its own, never a turn the
@@ -7809,6 +7819,7 @@ export const register: Register = async (on, options) => {
         noteStandingRefusal,
         hookBudget,
         COMPACT_HOLD_REMINDER_TEXT,
+        SUPERVISOR_STOP_NOTICE_TEXT,
         urgentCheckMinMs,
         breakInAfterMs,
         toolErrorsThisTurn: () => toolErrorsThisTurn,
