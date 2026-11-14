@@ -170,11 +170,11 @@ Written by `docs/plans/claude-kit_liaison-seat_spec_v1.md` section 1 on 2026-09-
 - passage: The seat requests status from the coordinator persona the way it sends a brief. The ask names by bare filename each plan the seat wants status on, and the coordinator answers on those plans alone.
 
 ### BM002
-- key: Tell the thread from the seat's own record that a request whose brief the architect has not yet answered with a plan is still with the architect, and ask the coordinator nothing on it.
+- key: Tell the thread from the seat's own record that a request whose brief the architect has not yet answered with a plan or a close is still with the architect, and ask the coordinator nothing on it.
 - class: rule
 - source: plugins/grimoire/skills/liaison/SKILL.md:38
-- provenance: `docs/plans/claude-kit_liaison-status-answer-stays-scoped_spec_v1.md` section 1 2026-11-12, whose Approach paragraph "The ask that names its plans" states it.
+- provenance: `docs/plans/claude-kit_liaison-status-answer-stays-scoped_spec_v1.md` section 1 2026-11-12, whose Approach paragraph "The ask that names its plans" states it. Amended by `docs/plans/claude-kit_design-seat-starts-from-no_spec_v1.md` section 2 2026-11-13, on the architect's ruling at that plan's finishing pass, record `DEV-GRIMOIRE-e9f2ea3d-0566-4867-9b15-c360b8a6ecc1-23`.
 - verdict: keep
 - landed: 133ea936e section 1
-- reason: A request with no plan yet has no filename for a status ask to carry, and the coordinator answers an ask that names no plan with a question (the coordinator ledger's O016). The seat already holds the fact: it sent the brief and no answer has returned. So it answers the thread from its own record, and spends no record each way on an ask that could draw nothing.
-- passage: A request whose brief the architect has not yet answered with a plan is still with the architect. The seat says so from its own record and asks the coordinator nothing on it.
+- reason: A request with no plan yet has no filename for a status ask to carry, and the coordinator answers an ask that names no plan with a question (the coordinator ledger's O016). The seat already holds the fact: it sent the brief and no answer has returned. So it answers the thread from its own record, and spends no record each way on an ask that could draw nothing. A close is an answer too, since the architect closes with a reason a brief that passes no ground of the worth test, and the seat relays that close and its reason as it relays any answer.
+- passage: A request whose brief the architect has not yet answered with a plan or a close is still with the architect. The seat says so from its own record and asks the coordinator nothing on it.

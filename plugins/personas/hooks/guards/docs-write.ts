@@ -13,7 +13,8 @@
 // >, >> or >| redirect and no tee may aim at docs/. Any other command word
 // naming a docs/ path refuses, so no list of writers is kept. An assignment
 // whose own value is a docs/ path or the docs directory (f=docs/x.md, d=docs)
-// is a command word off the list naming one, and refuses where it stands.
+// is a command word off the list naming one, and refuses where it stands,
+// except on a line of reads, below.
 // A pipeline is read whole: where any command in it names a docs/ path,
 // every command in it must be a read, so
 // ls docs/*.md | xargs sed -i s/a/b/ and Get-ChildItem docs | Remove-Item
@@ -27,6 +28,25 @@
 // process substitution (<(...)) naming a docs/ path at any depth makes the
 // command around it name one, so rm $(ls docs/x.md) refuses while
 // echo $(cat docs/x.md) runs.
+//
+// One exception runs on the Bash tool, a line of reads. A shell text runs,
+// whatever docs/ path it names, binds to a variable or changes into, where
+// every simple command in it and in every substitution inside it is a read
+// under the list's conditions, a for header, a bare assignment, a directory
+// switch, or a closing done, fi or }, each after any leading do, then, else,
+// elif, while, until, if or !. Such a text carries no tee, no heredoc body
+// and no output process substitution, and each output redirect in it goes to
+// a descriptor, to /dev/null, or to a literal path outside docs/, which is
+// absolute where the text, or a text around it, changes directory. So
+// for f in docs/a.md docs/b.md; do sed -n 1,5p $f; done,
+// f=docs/x.md; grep -n foo $f and cd docs && ls | head run, while
+// for f in docs/*.md; do rm $f; done, f=docs/x.md; echo hi > $f and
+// cd docs && echo hi > y.md refuse. A text that is not a line of reads is
+// judged by the rules above. awk reads where no > stands after a { in any
+// word of its command: awk's grammar takes a redirect only in a print or
+// printf statement inside an action's braces, so a comparison in a pattern
+// (NR>=505, $3 > 5 {print $1}) runs and a comparison inside an action
+// ({ if (NF>3) print $1 }) refuses.
 //
 // A line continuation is read as the tool's shell reads it. On Bash a
 // backslash-newline is joined as bash joins it, so the next line's words are
@@ -50,7 +70,21 @@
 // are writes a read word performs only when spelled on purpose: sed's w and e
 // script commands, awk's system(), print | cmd and | getline, gawk's
 // --dump-variables, --pretty-print and --profile and their short forms, git's
-// -c values, grep -O and --ext-diff, and sort's --compress-program. A control
+// -c values, grep -O and --ext-diff, and sort's --compress-program. On a line
+// of reads the guard tests each read word's words as they are written, so such
+// a write reaches docs/ wherever the piece that writes is carried outside the
+// word. That piece can be a path, a writing option, a second operand or a whole
+// sed or awk program in a variable (f=docs/x.md; sed -n "w $f" a.md, d=docs;
+// o=-delete; find $d $o, p='{print > "docs/y.md"}'; awk "$p" a.md). It can be a
+// path made relative by a directory switch (cd docs && sed -n 'w y.md' a.md),
+// or an absolute path that leads back into the directory, such as one under
+// /proc/self/cwd. On any line, awk writes through a redirect where the guard
+// does not see its action's brace: the brace spelled by an escape ($'\x7b'), or
+// the program read through -f. read, test -v and [[ run a substitution inside
+// an array subscript they evaluate (read 'a[$(rm docs/y.md)]' <<< x). A
+// variable the environment exports, such as PATH, changes
+// what a read word runs once an assignment or a read sets it. These are
+// examples of the class, which is open. A control
 // character splits or joins commands where the shell and this lexer disagree:
 // Bash keeps a \x01 byte inside a word the lexer splits at, and PowerShell
 // breaks a line at a lone carriage return the lexer does not. A whole-tree git
@@ -62,20 +96,26 @@
 // against the session's directory. A session whose working directory is
 // inside docs/ is a residual too: only a word shaped like a docs/ path is
 // judged, so a bare relative target there (echo hi > y.md) runs unjudged.
+// A cd into docs/ reaches no later call of an Agent-tool agent, whose shell
+// the harness returns to the session's directory between calls. No record
+// states that for a Workflow-dispatched agent or a teammate, so a relative
+// redirect in such an agent's later call after that cd is a residual.
 // Six false denies are accepted. A line that is wholly a # comment naming a
-// docs/ path refuses, though bash runs nothing on it. An option's value ending in a docs
+// docs/ path refuses, though bash runs nothing on it, and on a line that
+// binds a docs/ path or changes into one, a comment anywhere but after a
+// read, a directory switch or a for header's word list refuses. An option's value ending in a docs
 // directory is read as that directory on any command off the read list, so
 // node --test --test-name-pattern=docs x.test.js refuses. A clustered short
 // option whose leading letters end in docs is read as the docs directory,
 // so cp -tmydocs .kit/x.md refuses. An assignment's value naming the docs
-// directory refuses whatever the line does with it, so d=docs; ls $d
-// refuses. An unquoted heredoc body (cat > .kit/ch.md <<EOF) is read as
-// commands, so a body line naming a docs/ path refuses where the quoted
-// <<'EOF' spelling runs. And a lone cat's quoted heredoc inside a
-// substitution names the docs/ paths its body names to the command around
-// it, since that text is what the substitution hands on: node x.js
-// "$(cat <<'EOF' ...)" refuses on a body naming docs/, as
-// rm $(cat <<'EOF' ...) must.
+// directory refuses on a line that is not a line of reads, so
+// d=docs; node tool.js $d refuses. An unquoted heredoc body
+// (cat > .kit/ch.md <<EOF) is read as commands, so a body line naming a
+// docs/ path refuses where the quoted <<'EOF' spelling runs. And a lone
+// cat's quoted heredoc inside a substitution names the docs/ paths its body
+// names to the command around it, since that text is what the substitution
+// hands on: node x.js "$(cat <<'EOF' ...)" refuses on a body naming docs/,
+// as rm $(cat <<'EOF' ...) must.
 //
 // The tree the guard protects is the session project's own: a target is
 // resolved and judged by containment against the git root above the
@@ -183,8 +223,9 @@ const DIRECTORY_SWITCHES: ReadonlySet<string> = new Set([
 // names a docs/ path, lowercased, since both shells' command words are
 // compared case-insensitively. Each is a read, and nine read only under a
 // condition `readsOnly` holds them to: sed without -i or --in-place, less
-// without a log-file flag, rg without --pre or --pre-glob, awk with no > in
-// its command, no -i, --include, -l or --load and no inplace operand, find
+// without a log-file flag, rg without --pre or --pre-glob, awk with no >
+// after a { in any word of its command, no -i, --include, -l or --load and no
+// inplace operand, find
 // without a primary that runs a command, deletes or writes a file, sort
 // without -o or --output, uniq with at most one operand, file without -C or
 // --compile, and git only with a read subcommand and no --output. A long flag
@@ -192,9 +233,10 @@ const DIRECTORY_SWITCHES: ReadonlySet<string> = new Set([
 // abbreviates. The word is
 // compared as written: a directory prefix (/usr/bin/cat) or a leading
 // VAR=value assignment makes a word the list does not hold, and refuses.
+// fold, od, read, true and [[ take no option that writes a file.
 export const DOCS_READ_COMMANDS: ReadonlySet<string> = new Set([
   "cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "sed", "awk", "ls", "wc", "diff", "cmp",
-  "stat", "file", "test", "[", "find", "sort", "uniq", "cut", "tr", "jq", "md5sum", "sha256sum",
+  "stat", "file", "test", "[", "[[", "find", "sort", "uniq", "cut", "tr", "fold", "od", "read", "true", "jq", "md5sum", "sha256sum",
   "shasum", "realpath", "readlink", "dirname", "basename", "echo", "printf", "git",
   "get-content", "gc", "select-string", "sls", "get-childitem", "gci", "get-item", "gi", "test-path",
   "resolve-path", "compare-object", "measure-object", "get-filehash",
@@ -303,10 +345,16 @@ function docsPathsIn(word: string): string[] {
   return [...found];
 }
 
-// One simple command of a shell line: its words in order, the targets of its
-// output redirects, the quoted heredoc bodies it receives, the pipeline it
-// stands in, and the span of the line it covers.
-type SimpleCommand = { words: string[]; outputs: string[]; bodies: string[]; pipeline: number; from: number; to: number };
+// One simple command of a shell line: its words in order, with whether each
+// is spelled bare, holding no quote or escape, whether each is the operand
+// of an input redirect, and whether each opens with an unquoted NAME=, the
+// shape bash reads as an assignment whatever the value's quoting; the targets
+// of its output redirects, with whether each is a descriptor duplication's,
+// its operator ending in & (>&2, 2>&1); the quoted heredoc bodies it
+// receives, the pipeline it stands in, and the span of the line it covers.
+type SimpleCommand = {
+  words: string[]; bare: boolean[]; inputs: boolean[]; assignments: boolean[]; outputs: string[]; duplicates: boolean[]; bodies: string[]; pipeline: number; from: number; to: number;
+};
 
 // The heredoc introductions the reading took a data body for, each mapped
 // from the index of its << to the index of its body in `bodies`. The
@@ -363,8 +411,14 @@ function bodyIntros(cmd: string, maskAt: (i: number) => string, bodies: readonly
 // The simple commands of a masked command line, walked one `segment` at a
 // time. A segment ends at a separator, a pipe, a redirect or a line break; at
 // a redirect the command goes on, and the first word after a >, >>, >|, &> or
-// >& is an output target while the word after a < or << is read as an
-// operand. A single | or |& ends the command and keeps its pipeline, and so
+// >& is an output target, a descriptor duplication's where the operator ends
+// in &, while the word after a < or << is read as an operand, marked as an
+// input redirect's. A word is bare where its masked spelling, in which a
+// quoted run keeps its quotes and blanks its inside, is the word itself; where
+// the masked piece splits into a different count of words than the piece, no
+// word of it is bare. A word is an assignment where its masked spelling opens
+// with NAME=, under the same alignment, so f="x" is one and 'x=y' and "x"=y
+// are not. A single | or |& ends the command and keeps its pipeline, and so
 // does a line break whose next non-blank character is such a |; every other
 // cut ends both, except that an empty command after a pipe (the blank space
 // and line breaks a trailing | continues across) keeps it. A quoted-delimiter
@@ -374,9 +428,9 @@ function simpleCommands(cmd: string, masked: string, bodies: readonly Span[], in
   const out: SimpleCommand[] = [];
   const n = cmd.length;
   let pipeline = 0;
-  const fresh = (at: number): SimpleCommand => ({ words: [], outputs: [], bodies: [], pipeline, from: at, to: at });
+  const fresh = (at: number): SimpleCommand => ({ words: [], bare: [], inputs: [], assignments: [], outputs: [], duplicates: [], bodies: [], pipeline, from: at, to: at });
   let cur = fresh(0);
-  let pending: "out" | "in" | null = null;
+  let pending: "out" | "dup" | "in" | null = null;
   let afterPipe = false;
   const owners: SimpleCommand[] = [];
   const close = (at: number, pipe: boolean) => {
@@ -418,11 +472,20 @@ function simpleCommands(cmd: string, masked: string, bodies: readonly Span[], in
     const next = b < bodies.length && bodies[b].from < p + piece.length ? bodies[b] : null;
     if (next) piece = piece.slice(0, next.from - p);
     const end = p + piece.length;
-    for (const word of tokens(piece)) {
-      if (pending === "out") cur.outputs.push(word);
-      else cur.words.push(word);
+    const words = tokens(piece);
+    const spelled = masked.slice(p, end).split(/\s+/).filter(Boolean);
+    words.forEach((word, i) => {
+      if (pending === "out" || pending === "dup") {
+        cur.outputs.push(word);
+        cur.duplicates.push(pending === "dup");
+      } else {
+        cur.words.push(word);
+        cur.bare.push(spelled.length === words.length && spelled[i] === word);
+        cur.inputs.push(pending === "in");
+        cur.assignments.push(spelled.length === words.length && ASSIGNMENT_WORD.test(spelled[i]));
+      }
       pending = null;
-    }
+    });
     cur.to = end;
     if (next || end >= n) {
       close(end, false);
@@ -434,7 +497,7 @@ function simpleCommands(cmd: string, masked: string, bodies: readonly Span[], in
     const pipeAt = c === "\n" ? pipeAfterBreak(q) : -1;
     if (c === ">" || (c === "&" && masked[q] === ">")) {
       while (q < n && /[>|&]/.test(masked[q])) q++;
-      pending = "out";
+      pending = masked[q - 1] === "&" ? "dup" : "out";
     } else if (c === "<") {
       const owned = intros.get(end);
       if (owned !== undefined) owners[owned] = cur;
@@ -454,24 +517,31 @@ function simpleCommands(cmd: string, masked: string, bodies: readonly Span[], in
   return out;
 }
 
-// True when a simple command naming a docs/ path is a read the list admits:
-// its command word is on DOCS_READ_COMMANDS, no tee stands among its words,
-// and the word's own condition holds.
-function readsOnly(c: SimpleCommand, raw: string): boolean {
-  const word = (c.words[0] ?? "").toLowerCase();
+// True when a simple command's words are a read the list admits: the command
+// word is on DOCS_READ_COMMANDS, no tee stands among the words, and the
+// word's own condition holds. awk's is that no word after the first holds a >
+// anywhere after a {. awk reads a redirect only in a print or printf
+// statement, and those stand only inside an action's braces, so a > with no {
+// before it in its word is a comparison in a pattern. The test reads no string,
+// parenthesis or regular expression, so none of them hides a redirect from it.
+// It reads the word as it is written, so it does not see a brace spelled by an
+// escape such as $'\x7b', carried in a variable or read from a program file,
+// and the documents state that residual.
+function readsOnly(words: readonly string[]): boolean {
+  const word = (words[0] ?? "").toLowerCase();
   if (!DOCS_READ_COMMANDS.has(word)) return false;
-  if (c.words.some((w) => /^(?:tee|tee-object)$/i.test(w))) return false;
-  const args = c.words.slice(1);
+  if (words.some((w) => /^(?:tee|tee-object)$/i.test(w))) return false;
+  const args = words.slice(1);
   switch (word) {
     case "sed":
-      return !inPlaceRewrite(c.words);
+      return !inPlaceRewrite(words);
     case "less":
       return !args.some((a) => /^-[A-Za-z]*[oO]/.test(a) || a.startsWith("--log-file") || a.startsWith("--LOG-FILE")
         || longFlag(a, "--log-file") || longFlag(a, "--LOG-FILE"));
     case "rg":
       return !args.some((a) => a.startsWith("--pre"));
     case "awk":
-      return !raw.includes(">") && !inPlaceRewrite(c.words);
+      return !args.some((a) => a.includes("{") && a.indexOf(">", a.indexOf("{")) >= 0) && !inPlaceRewrite(words);
     case "find":
       return !args.some((a) => FIND_WRITE_PRIMARIES.has(a));
     case "sort":
@@ -520,6 +590,83 @@ function changesDirectory(c: SimpleCommand): boolean {
   return git >= 0 && c.words.slice(git + 1).some((w) => GIT_DIRECTORY_FLAG.test(w));
 }
 
+// The shell words dropped from the front of a command before it is asked
+// whether it is a member of a line of reads, and the words that close a
+// compound command. Each is compared as written and only where it is bare,
+// since bash reads a reserved word in that one spelling, unquoted.
+const LINE_LEADERS: ReadonlySet<string> = new Set(["do", "then", "else", "elif", "while", "until", "if", "!"]);
+const LINE_CLOSERS: ReadonlySet<string> = new Set(["done", "fi", "}"]);
+
+// A NAME=value word, and a word that is a descriptor number, which is what
+// the cut leaves of a redirect such as 2>&1.
+const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const DESCRIPTOR = /^\d+$/;
+
+// A NAME, the word a for header binds.
+const NAME_WORD = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+// The directory switches bash runs as builtins, compared as written. The
+// other DIRECTORY_SWITCHES words are PowerShell's, which bash runs as
+// external programs with any operands.
+const BASH_DIRECTORY_SWITCHES: ReadonlySet<string> = new Set(["cd", "pushd", "popd"]);
+
+// True when a simple command is a member of a line of reads. The command is
+// first reduced: a leading ( or { is stripped from its first word, a first
+// word emptied by the strip is dropped, and then each leading bare
+// LINE_LEADERS word is dropped. A reduced command whose second word is bare
+// and opens with a ( is a function definition (cat () { ...; }) and is never
+// a member. Otherwise the reduced command is a member where it is empty,
+// which is also what a closing ) leaves, since the cut ends a command at it;
+// where its first word is a bare LINE_CLOSERS word and each word after it is
+// an input redirect's operand or a descriptor number, since bash takes only a
+// redirect there; where it is a for header, a bare for, a NAME, and either
+// nothing more or a bare in and the words of its list, with no do or { among
+// them; where each of its words is a NAME=value whose NAME= is unquoted or a
+// descriptor number and at least one is such a NAME=value, a bare assignment,
+// since bash runs a quoted 'x=y' or "x"=y as a command word; where its first
+// word is on BASH_DIRECTORY_SWITCHES; or where `readsOnly` holds for its
+// words. So tee, a command with an assignment in front of its command word,
+// xargs, eval, a nested shell, an interpreter, a function definition and a
+// command word that is a variable or a substitution are never members.
+function lineMember(c: SimpleCommand): boolean {
+  const words = [...c.words];
+  let k = 0;
+  if (/^[({]/.test(words[0] ?? "")) {
+    words[0] = words[0].slice(1);
+    if (!words[0]) k = 1;
+  }
+  const reserved = (i: number, set: ReadonlySet<string>): boolean => c.bare[i] && set.has(words[i]);
+  while (k < words.length && reserved(k, LINE_LEADERS)) k++;
+  if (k === words.length) return true;
+  const rest = words.slice(k + 1);
+  if (c.bare[k + 1] && rest[0].startsWith("(")) return false;
+  if (reserved(k, LINE_CLOSERS)) return rest.every((w, j) => c.inputs[k + 1 + j] || DESCRIPTOR.test(w));
+  if (c.bare[k] && words[k] === "for") {
+    return NAME_WORD.test(rest[0] ?? "") && (rest.length === 1 || (c.bare[k + 2] && rest[1] === "in"))
+      && !rest.some((w) => w === "do" || w === "{");
+  }
+  const reduced = words.slice(k);
+  const assigns = (i: number): boolean => c.assignments[k + i] && ASSIGNMENT_WORD.test(reduced[i]);
+  if (reduced.every((w, i) => assigns(i) || DESCRIPTOR.test(w)) && reduced.some((_, i) => assigns(i))) return true;
+  return BASH_DIRECTORY_SWITCHES.has(reduced[0]) || readsOnly(reduced);
+}
+
+// The characters an output redirect's target holds where the guard cannot
+// read it to its end: an expansion, a glob, a brace, a home prefix, an
+// escape, or the sentinel a substitution rides as.
+const UNREAD_TARGET = /[$`*?[\]{}~\\\x02]/;
+
+// True when an output redirect's target is safe on a line of reads: a
+// descriptor number where `duplicate` is true, the operator having ended in &,
+// /dev/null, or a plain literal path that is absolute where `switched` is
+// true, a command having changed directory in the text or in a text around
+// it. A number after any other operator (> 2, 2>1) names a file. The caller
+// has already refused a target the judge reads as inside docs/.
+function safeTarget(target: string, duplicate: boolean, switched: boolean): boolean {
+  if ((duplicate && DESCRIPTOR.test(target)) || target === "/dev/null") return true;
+  return !UNREAD_TARGET.test(target) && (!switched || /^(?:\/|[A-Za-z]:\/)/.test(target));
+}
+
 // What one shell text does to docs/: whether it writes or may write there,
 // and whether any command in it, at any depth, names a docs/ path in the
 // project in its words, any heredoc body it receives (a lone cat's data
@@ -529,19 +676,20 @@ function changesDirectory(c: SimpleCommand): boolean {
 // `heredocWalk` directly on the exact one, that stopped the read before any
 // body was taken, at any depth, or null. `capped` is true where a text at any
 // depth carried more in-word line continuations than `IN_WORD_PAIR_CAP`, so
-// it was refused unread.
-type ShellReading = { writes: boolean; names: boolean; delimiter: DelimiterFault | null; capped: boolean };
+// it was refused unread. `reads` is true where the text was allowed as a line
+// of reads, which the text around a substitution asks of it.
+type ShellReading = { writes: boolean; names: boolean; delimiter: DelimiterFault | null; capped: boolean; reads: boolean };
 
 // The reading of a text refused unread for its in-word continuations.
-const CAPPED: ShellReading = { writes: true, names: true, delimiter: null, capped: true };
+const CAPPED: ShellReading = { writes: true, names: true, delimiter: null, capped: true, reads: false };
 
 // Whether a reading is a refusal rather than an allow.
 const refusedReading = (r: ShellReading): boolean => r.delimiter !== null || r.capped || r.writes;
 
 // The allow composed from the allows of every reading of one text: it names
 // a docs/ path where any reading does, so the caller weighing `names` loses
-// none.
-const allowedReading = (rs: readonly ShellReading[]): ShellReading => ({ writes: false, names: rs.some(r => r.names), delimiter: null, capped: false });
+// none, and it is a line of reads only where every reading is one.
+const allowedReading = (rs: readonly ShellReading[]): ShellReading => ({ writes: false, names: rs.some(r => r.names), delimiter: null, capped: false, reads: rs.every(r => r.reads) });
 
 // Reads a shell command for a docs/ write: a simple command whose output
 // redirect aims at the project's docs/, or a pipeline in which a command
@@ -585,8 +733,19 @@ const allowedReading = (rs: readonly ShellReading[]): ShellReading => ({ writes:
 // keyed on the text, its depth, its judge and `exact`. A call holds two
 // judges, the one placed against its cwd and `SHAPE_JUDGE`, so the key names
 // which of the two the interior is read under.
-async function readShell(command: string, placed: DocsJudge, depth: number, join: boolean, boundary: number, exact: boolean, exclusion: PairExclusion, memo: VerdictMemo): Promise<ShellReading> {
-  const WRITES: ShellReading = { writes: true, names: true, delimiter: null, capped: false };
+// `bash` is true where the tool is Bash, carried unchanged to every depth as
+// `exclusion` is, and there a text that is a line of reads is allowed,
+// whatever docs/ path it names, binds or changes into. It is one where every
+// command the cut found is a `lineMember`, the text holds no heredoc body and
+// no output process substitution, each output redirect's target is a
+// `safeTarget`, and each substitution inside it was read as a line of reads,
+// one past DEPTH_BOUND never being one. The rule is asked on this reading's
+// own commands, after every output redirect is judged and every substitution
+// read, and before the pipeline check, so a redirect into docs/ and a write
+// inside a substitution refuse first. A text that is not a line of reads goes
+// on to the pipeline check.
+async function readShell(command: string, placed: DocsJudge, depth: number, join: boolean, boundary: number, exact: boolean, exclusion: PairExclusion, bash: boolean, memo: VerdictMemo): Promise<ShellReading> {
+  const WRITES: ShellReading = { writes: true, names: true, delimiter: null, capped: false, reads: false };
   const subs: Span[] = [];
   let bodies: Span[];
   let cmd: string;
@@ -594,7 +753,7 @@ async function readShell(command: string, placed: DocsJudge, depth: number, join
   let intros: Map<number, number>;
   if (exact) {
     const walk = heredocWalk(command, "", true);
-    if (walk.fault !== null) return { writes: true, names: true, delimiter: walk.fault, capped: false };
+    if (walk.fault !== null) return { writes: true, names: true, delimiter: walk.fault, capped: false, reads: false };
     // The splice is handed the data bodies and the exact mask of the text as
     // handed in, whose comment test the exclusion reads, and the data and
     // live spans the masker reads are shifted through its map; the
@@ -613,7 +772,7 @@ async function readShell(command: string, placed: DocsJudge, depth: number, join
   } else {
     const bare = maskQuoted(command);
     const delimiter = offendingDelimiter(command, bare);
-    if (delimiter !== null) return { writes: true, names: true, delimiter, capped: false };
+    if (delimiter !== null) return { writes: true, names: true, delimiter, capped: false, reads: false };
     // The introduction map is built on the text as handed in, where the
     // body-blind mask reads, and each << index is then read through the
     // splice's map onto the joined text.
@@ -627,18 +786,21 @@ async function readShell(command: string, placed: DocsJudge, depth: number, join
   const commands = simpleCommands(cmd, masked, bodies, intros);
   const judge = commands.some(changesDirectory) ? SHAPE_JUDGE : placed;
   const subNames: boolean[] = [];
+  let subsRead = true;
   for (const s of subs) {
     const text = cmd.slice(s.from, s.to);
     if (depth >= DEPTH_BOUND) {
       if (await namesGuardedDocs([text], judge)) return WRITES;
       subNames.push(false);
+      subsRead = false;
       continue;
     }
     const inner = await memoized(memo, `${depth + 1}:${judge === SHAPE_JUDGE ? "shape" : "placed"}:${exact ? "exact" : "legacy"}`, text, () =>
-      readUnderContinuations(text, exact, (t, j, b) => readShell(t, judge, depth + 1, j, b, exact, exclusion, memo), refusedReading, () => CAPPED, allowedReading, exclusion));
+      readUnderContinuations(text, exact, (t, j, b) => readShell(t, judge, depth + 1, j, b, exact, exclusion, bash, memo), refusedReading, () => CAPPED, allowedReading, exclusion));
     if (inner.delimiter !== null || inner.capped) return inner;
     if (inner.writes) return WRITES;
     subNames.push(inner.names);
+    subsRead &&= inner.reads;
   }
   const sizes = new Map<number, number>();
   for (const c of commands) sizes.set(c.pipeline, (sizes.get(c.pipeline) ?? 0) + 1);
@@ -655,12 +817,17 @@ async function readShell(command: string, placed: DocsJudge, depth: number, join
     named ||= inWords || inBodies || inSubs;
     // A tee or Tee-Object that names no docs/ path itself copies the
     // pipeline's text off docs/, so it reads in the pipeline check.
-    const reads = readsOnly(c, cmd.slice(c.from, c.to)) || (/^(?:tee|tee-object)$/.test(word) && !names);
+    const reads = readsOnly(c.words) || (/^(?:tee|tee-object)$/.test(word) && !names);
     const seen = pipelines.get(c.pipeline) ?? { names: false, reads: true };
     pipelines.set(c.pipeline, { names: seen.names || names, reads: seen.reads && reads });
   }
+  // The mask shows a heredoc introduction as a << that is no part of a <<<
+  // here-string, and an output process substitution as its >(.
+  const lineOfReads = bash && subsRead && bodies.length === 0 && !/(?<!<)<<(?!<)|>\(/.test(masked)
+    && commands.every((c) => lineMember(c) && c.outputs.every((o, i) => safeTarget(o, c.duplicates[i], judge === SHAPE_JUDGE)));
+  if (lineOfReads) return { writes: false, names: named, delimiter: null, capped: false, reads: true };
   for (const { names, reads } of pipelines.values()) if (names && !reads) return WRITES;
-  return { writes: false, names: named, delimiter: null, capped: false };
+  return { writes: false, names: named, delimiter: null, capped: false, reads: false };
 }
 
 // The fixed words of the hook's refusal after the agent type, which the
@@ -723,7 +890,7 @@ export function docsWriteGuard(deps: DocsWriteDeps): BeforeGuard {
       // stands. The memo holds each nested text's composed reading for this
       // call.
       const memo: VerdictMemo = new Map();
-      const under = (exact: boolean) => readUnderContinuations(command, exact, (text, join, boundary) => readShell(text, judge, 0, join, boundary, exact, exclusion, memo), refusedReading, () => CAPPED, allowedReading, exclusion);
+      const under = (exact: boolean) => readUnderContinuations(command, exact, (text, join, boundary) => readShell(text, judge, 0, join, boundary, exact, exclusion, e.tool === "Bash", memo), refusedReading, () => CAPPED, allowedReading, exclusion);
       let reading = await under(false);
       if (!refusedReading(reading) && exactReadingDiffers(command)) reading = await under(true);
       // A delimiter fault stops the read before any docs/ path is weighed, so

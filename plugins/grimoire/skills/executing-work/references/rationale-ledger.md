@@ -5828,15 +5828,16 @@ Extracted at `6bc07fb`: lines 1-96 (`skills.executing-work.c1.md`); lines 97-358
 - passage: 8. Declare the compaction boundary: read [references/closing.md](references/closing.md) before acting.
 
 ### J001
-- key: Know the persona controller as the personas plugin's supervisor, which drives a persona session from its goal tree and stops prompting it to continue while its last turn opens with `WAITING:` or `BLOCKED:`.
+- key: Know the persona controller as the personas plugin's supervisor, which drives a persona session from its goal tree and stops prompting it while its last turn opens with `BLOCKED:`, or for an hour after one that opens with `WAITING:`.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/SKILL.md:66
-- provenance: `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4, 2026-10-06, which made the persona controller one of the two holders of a run to completion and the reader of the `BLOCKED:` and `WAITING:` leads.
-- verdict: keep
+- provenance: `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4, 2026-10-06, which made the persona controller one of the two holders of a run to completion and the reader of the `BLOCKED:` and `WAITING:` leads. Amended in place by `docs/archive/claude-kit_untrue-passages-corrected_spec_v1.md` section 10, 2026-11-13, which narrowed the hold on a `WAITING:` lead to the hour the plugin keeps it.
+- verdict: rewrite
 - landed: 4ae66c4a section 4
 - landed: dd8cf5bb finishing
+- landed: cb3f248c section 10
 - reason: The completion contract's leads are written for this reader (c1.C129 for `BLOCKED:`, V002 for a park's `WAITING:`), so the skill names what the reader is and what it does with a lead. Without the definition a session cannot tell which holder it runs under or why the lead must open the message.
-- passage: The persona controller is the personas plugin's supervisor, which drives a persona session from its goal tree and stops prompting it to continue while its last turn opens with `WAITING:` or `BLOCKED:`.
+- passage: The persona controller is the personas plugin's supervisor, which drives a persona session from its goal tree and stops prompting it while its last turn opens with `BLOCKED:`, or for an hour after one that opens with `WAITING:`.
 
 ### J002
 - key: Hold yourself to the completion contract whether the persona controller, the operator's `/goal` or neither holds the run.
@@ -9291,7 +9292,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries step 4 of the section loop. It owns addressing a review's findings: the Minor list and close pass, the advisory disposition, the claim-class region, provenance and the held-finding judge, the add-decision line and the design stop, the review-round backstop, the loop's end condition, the recurrence and adoption triggers, the fix-delta bar, the close gate and the out-of-scope route. Load class: `plan-run` - the main file's contents table and its skeleton line for step 4 tell a session to read it when a review returns and before any fix.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: T135, T137, T138 and T139 rewritten to their passages as they now read, and the reasons of T059, T074, T093, T130, T135 and T137 reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the scope adjudicator to Opus: T047, T091 and T093 rewritten to their passages as they now read, and Q001 added for the ungated-judge route. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: c3.C137 rewritten to its passage as it now reads, c3.C138 and S082 retired, and A001 through A003 added under the plan's letter A for the fix writer rule. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: S080 rewritten to its passage as it now reads, and E006 to E008 added under the plan's letter E for the repost, `APPROACH:` and class-finding readings. Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` section 3 on 2026-10-20: T186, S069 and S070 rewritten to their passages as they now read, and AC001 to AC005 added under the plan's letter AC for the finding verifier's paragraph. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below). Amended by `docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md` section 1 on 2026-11-04 (`AR` entries below, and S080 and E007 rewritten in place). Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 on 2026-11-10 (`BA` entries below, T048, T088 and c3.C125 rewritten in place, and T049, T050 and T163 retired). Amended by `docs/plans/claude-kit_finishing-resumes-from-disk_spec_v1.md` section 1 on 2026-11-11: BJ001 added under the plan's letter BJ for the round ledger the backstop reads its count from, appended inside the paragraph at line 45 so no line of the source moved. Its fix round 1 on the same day rewrote BJ001 to its passage as it now reads and added BJ002 for the restart line, appended inside the paragraph at line 47, so no `source:` line moved. Its finishing pass, fix round 1 on the same day, keyed the restart to the stop's answer, the operator's or a seat's direction: T126, T127 and BJ002 rewritten to their passages as they now read, each edit inside its paragraph, so no `source:` line moved.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: T135, T137, T138 and T139 rewritten to their passages as they now read, and the reasons of T059, T074, T093, T130, T135 and T137 reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the scope adjudicator to Opus: T047, T091 and T093 rewritten to their passages as they now read, and Q001 added for the ungated-judge route. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: c3.C137 rewritten to its passage as it now reads, c3.C138 and S082 retired, and A001 through A003 added under the plan's letter A for the fix writer rule. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: S080 rewritten to its passage as it now reads, and E006 to E008 added under the plan's letter E for the repost, `APPROACH:` and class-finding readings. Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` section 3 on 2026-10-20: T186, S069 and S070 rewritten to their passages as they now read, and AC001 to AC005 added under the plan's letter AC for the finding verifier's paragraph. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below). Amended by `docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md` section 1 on 2026-11-04 (`AR` entries below, and S080 and E007 rewritten in place). Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 on 2026-11-10 (`BA` entries below, T048, T088 and c3.C125 rewritten in place, and T049, T050 and T163 retired). Amended by `docs/plans/claude-kit_finishing-resumes-from-disk_spec_v1.md` section 1 on 2026-11-11: BJ001 added under the plan's letter BJ for the round ledger the backstop reads its count from, appended inside the paragraph at line 45 so no line of the source moved. Its fix round 1 on the same day rewrote BJ001 to its passage as it now reads and added BJ002 for the restart line, appended inside the paragraph at line 47, so no `source:` line moved. Its finishing pass, fix round 1 on the same day, keyed the restart to the stop's answer, the operator's or a seat's direction: T126, T127 and BJ002 rewritten to their passages as they now read, each edit inside its paragraph, so no `source:` line moved. Amended by `docs/plans/claude-kit_design-seat-starts-from-no_spec_v1.md` section 3 on 2026-11-13, which puts the worth test in front of the out-of-scope route: c3.C155 and c3.C156 rewritten to their passages as they now read, and BP001 added under the plan's letter BP for the fourth destination. The new bullet moved every line below it down one. The two rewritten entries and BP001 carry the line at the write, and the `source:` lines of the other entries citing them are not re-pointed.
 
 ### I023
 - key: Title the reference file carrying step 4 of the section loop `Addressing Review Findings`.
@@ -9532,22 +9533,24 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: A surface contradicting a section already written is a contradiction inside the spec and earns the loud leading `BLOCKED:`, never a quiet amendment.
 
 ### c3.C155
-- key: Route a surface out of this plan when it serves another goal, primarily as a handoff spec or prompt written now to the bar the doctrine's found-work rule sets.
+- key: Route a surface out of this plan when it serves another goal and passes on one of the worth test's three grounds, primarily as a handoff spec or prompt written now to the bar the doctrine's found-work rule sets.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/findings.md:91
-- provenance: 61b9f52 2026-08-19, correcting the approved spec, which sent every different-goal surface to the backlog against the doctrine's ranking.
-- verdict: keep
-- reason: A pointer at the doctrine's bar stating the route's form; the probes compose with the blocker set and the kaizen rule rather than exposing a gap here (A083 to A087).
-- passage: **Route it out of this plan** when it serves another goal, as a handoff, a fresh spec or prompt written now to the bar the doctrine's found-work rule sets.
+- provenance: 61b9f52 2026-08-19, correcting the approved spec, which sent every different-goal surface to the backlog against the doctrine's ranking. Rewritten by `docs/plans/claude-kit_design-seat-starts-from-no_spec_v1.md` section 3 2026-11-13, which put the worth test in front of the route on the operator's rulings of that day.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_design-seat-starts-from-no_spec_v1.md` section 3
+- reason: A pointer at the doctrine's bar stating the route's form; the probes compose with the blocker set and the kaizen rule rather than exposing a gap here (A083 to A087). Only a surface passing a ground earns a route, since a run that hands off every true finding writes the plans the worth test exists to refuse (BP001).
+- passage: **Route it out of this plan** when it serves another goal and passes on one of the three grounds of the worth test `brainstorming` states, as a handoff, a fresh spec or prompt written now to the bar the doctrine's found-work rule sets.
 
 ### c3.C156
-- key: Use `docs/backlog.md`, with the reason the work is not being done here, as the floor for a routed surface that earns no handoff.
+- key: Use `docs/backlog.md`, with the reason the work is not being done here, as the floor for a routed surface that passes the worth test and earns no handoff.
 - class: mechanic
-- source: plugins/grimoire/skills/executing-work/references/findings.md:85
-- provenance: 61b9f52 2026-08-19.
-- verdict: keep
-- reason: Names the file, the reason field and curating-docs as the format's owner; the doctrine ranks it last and this is its residue (A088, A089).
-- passage: The floor, for a surface earning no handoff, is `docs/backlog.md` with the reason it is not done here, in the format `curating-docs` owns.
+- source: plugins/grimoire/skills/executing-work/references/findings.md:91
+- provenance: 61b9f52 2026-08-19. Rewritten by `docs/plans/claude-kit_design-seat-starts-from-no_spec_v1.md` section 3 2026-11-13, which limited the floor to a passing surface.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_design-seat-starts-from-no_spec_v1.md` section 3
+- reason: Names the file, the reason field and curating-docs as the format's owner; the doctrine ranks it last and this is its residue (A088, A089). The floor holds only a passing surface, since a failing one takes the Chapter line instead (BP001).
+- passage: The floor, for a passing surface earning no handoff, is `docs/backlog.md` with the reason it is not done here, in the format `curating-docs` owns.
 
 ### c3.C157
 - key: Never leave a surface only in the agent's report.
@@ -11384,6 +11387,16 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: `docs/plans/claude-kit_finishing-resumes-from-disk_spec_v1.md` section 1
 - reason: The count is read from the file (BJ001), so a restart held only in context is lost to a compaction, and a session counting after a continue would re-declare at once. A line in the same file carries the restart to whoever reads the count. A seat's direction under the standing delegation buys what a continue buys (BA002 under this heading), so it restarts the count and writes the line as the operator's answer does.
 - passage: At that answer, append `restart: <date>` to the section's round file. The count then reads only the rounds after the file's last restart line.
+
+### BP001
+- key: Record a surface that serves another goal and passes on no ground of the worth test as one `Seen, not built:` line on the Chapter's `Decisions / Surprises` line, naming the surface, the fault and why no ground holds, and give it no backlog line, issue or spec.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/findings.md:92
+- provenance: `docs/plans/claude-kit_design-seat-starts-from-no_spec_v1.md` section 3 2026-11-13, on the operator's rulings on the architect's thread of that day quoted in that plan's `## Intent`.
+- verdict: keep
+- landed: `docs/plans/claude-kit_design-seat-starts-from-no_spec_v1.md` section 3
+- reason: The operator ruled that a true finding stays in the plan where it was seen rather than in the backlog or an issue list. The Chapter keeps the sighting where the worth test's search finds it, so a later author's search finds the earlier sighting and looks for the failure behind it, and the fixed lead is what that search reads (`test/doctrine-parity.test.js` holds it in the documents that write and read it). A run judges the three grounds alone, since the wider search is the plan author's.
+- passage: **Record it and build nothing** when it serves another goal and passes on none of them. It takes one line on the Chapter's `Decisions / Surprises` line opening `Seen, not built:`, naming the surface, the fault and why no ground holds, and it takes no backlog line, no issue and no spec.
 
 ## plugins/grimoire/skills/executing-work/references/closing.md
 

@@ -40,13 +40,13 @@ This is the create path. Run it when `brainstorming` writes a new spec, before `
 1. Check that `docs/briefs/<plan stem>.md` exists for the new plan, the brief `brainstorming` step 9 writes in the form the `prose-register` skill's Plan Brief section states. A plan with no brief goes back to that step before the path continues.
 2. Seed a missing `docs/verification.md` from the templates, and add a row per instrument the spec's `Verify:` lines name that it lacks. Seed the Failure by Area table, and a row per top-level area the spec's Files in scope touch, where either is missing.
 3. If it builds on or supersedes another plan, cross-reference it per the close path's step 4. The new plan takes the moving plan's part there, the archived-plan carve-out included.
-4. Add any cross-effort next-steps that surfaced during design to `docs/backlog.md`.
+4. Add each cross-effort next-step that surfaced during design and passes `brainstorming`'s worth test to `docs/backlog.md`. One that passes on no ground stays under the plan's `## Out of Scope` as a `Seen, not built:` line.
 
 ## Backlog Pruning
 
 Move a done item into the quarter's snapshot at `docs/archive/backlog-YYYY-QN.md`, creating it if absent and appending within the quarter. Do not strike items through in place.
 
-The prune pass is also the aging check. Name every active item parked over 90 days, with its date, for a promote, retire or keep call. Promote: spec it now. Retire: move it to the snapshot with the reason. Keep: write the fresh adjudication date ahead of the original, `(YYYY-MM-DD, parked YYYY-MM-DD)`, with the reason it stays. An undated item is past the threshold: date it from git history, or today's marked `backfilled`, and adjudicate it in the same pass.
+The prune pass is also the aging check. Name every active item parked over 90 days, with its date, for a promote, retire or keep call. Promote: spec it now, where it passes `brainstorming`'s worth test. An item that passes on no ground retires instead, its reason naming the test. Retire: move it to the snapshot with the reason. Keep: write the fresh adjudication date ahead of the original, `(YYYY-MM-DD, parked YYYY-MM-DD)`, with the reason it stays. An undated item is past the threshold: date it from git history, or today's marked `backfilled`, and adjudicate it in the same pass.
 
 When no close-out is near and `hooks/session-start.js`'s block reports an oldest item past the threshold, offer the prune pass in one line. 90 days is the tunable knob.
 
