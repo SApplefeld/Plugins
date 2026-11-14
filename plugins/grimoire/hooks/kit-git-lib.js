@@ -27,11 +27,13 @@
 // wholesale and case-insensitive, since Windows environment keys are not the
 // casing a plain-object copy is indexed by, and GIT_TERMINAL_PROMPT is set
 // after it so no invocation can block a session on a credential prompt. The
-// only GIT_* names the child carries are the guard's own: the prompt refusal
-// and the environment-config pins that hold core.fsmonitor and core.hooksPath
-// inert. Those two pins close two named routes by which a repository nobody
-// has vetted runs its own code on a read; the class is wider than the two,
-// and gitChildEnv's comment names what stays open.
+// only GIT_* names the child carries are the guard's own: the prompt refusal,
+// the on-demand fetch refusal, and the environment-config pins that hold
+// core.fsmonitor and core.hooksPath inert. Those two pins close two named
+// routes by which a repository nobody has vetted runs its own code on a read,
+// and the fetch refusal keeps a read in a partial clone from reaching the
+// remote, where the repository's transport settings run. The class is wider
+// than these, and gitChildEnv's comment names what stays open.
 //
 // The boundary is shared rather than per-caller because an unexported one is
 // the fix the next author reimplements by not implementing it: both properties
@@ -61,9 +63,10 @@ const DEFAULT_TIMEOUT_MS = 4000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
 // The environment a git child runs under: this process's environment with every
-// GIT_* key removed case-insensitively, plus the terminal-prompt refusal and
-// the two config pins below. None of the stripped variables is needed, since
-// every call below passes `-C <repoDir>` to name the repository it means.
+// GIT_* key removed case-insensitively, plus the terminal-prompt refusal, the
+// on-demand fetch refusal and the two config pins below. None of the stripped
+// variables is needed, since every call below passes `-C <repoDir>` to name
+// the repository it means.
 //
 // core.fsmonitor and core.hooksPath are ordinary repo-local keys git honours,
 // so a status against a wrong or planted repository runs its fsmonitor
@@ -82,16 +85,30 @@ const MAX_OUTPUT_BYTES = 1024 * 1024;
 // exists in git 2.31 and later; an older git ignores it silently and this
 // guard degrades to the strip alone, with nothing here to say so.
 //
-// Two keys are pinned by name, and the class they belong to is not closed:
-// any key git documents as a command or program, and any remote URL scheme or
-// helper a remote's config selects, also makes git run a command on the verbs
-// the hooks use. The one write-shaped verb here is branch-reaper-nudge's
-// fetch against whatever repository a session opened, where a repo-local
-// core.sshCommand, credential.helper or upload-pack setting runs under these
-// pins exactly as before them. So the coverage is the two named members
-// rather than the class. The hooksPath pin also reaches an operator's global
-// hooks, since the environment channel cannot tell a repo-local hooksPath
-// from a global one; on the read verbs here that costs nothing. HOME and
+// Two keys are pinned by name, and the class they belong to is not closed.
+// Some other keys git documents as a command or program also make git run a
+// command on the verbs the hooks use. A repo-local filter.<name>.clean runs on
+// a plain status in a repository with no remote, for a path the repository's
+// attributes map to that filter, whenever the status has to hash that file to
+// tell whether it changed. A repo-local log.showSignature runs gpg.program
+// when a log that does not pass --no-show-signature meets a signed commit. Any
+// remote URL scheme or helper a remote's config selects makes git run a
+// command once a call reaches the remote, and GIT_NO_LAZY_FETCH keeps a read
+// from reaching it. A read in a partial clone that needs an object the clone
+// left out would otherwise
+// fetch that object on demand, running the repo-local core.sshCommand,
+// credential.helper or upload-pack setting. With the variable set the read
+// does not reach the remote and exits nonzero on the missing object, and a
+// partial clone that holds the objects a read needs reads as a full one does.
+// Git 2.45 is the oldest that knows the variable; an older git ignores it
+// silently and fetches on demand. An explicit fetch does reach the remote
+// under the variable: branch-reaper-nudge's fetch and plan-cleanup's run
+// against whatever repository they are pointed at, where those transport
+// settings run under these pins exactly as without them. So the coverage is
+// the two named keys and the on-demand fetch rather than the class. The
+// hooksPath pin also reaches an operator's global hooks, since the
+// environment channel cannot tell a repo-local hooksPath from a global one;
+// on the read verbs here that costs nothing. HOME and
 // XDG_CONFIG_HOME are not stripped, since git needs HOME for its legitimate
 // config, so they still select the global config every guarded call reads;
 // docs/security-model.md carries that residual.
@@ -101,6 +118,7 @@ function gitChildEnv() {
         if (/^GIT_/i.test(k)) delete env[k];
     }
     env.GIT_TERMINAL_PROMPT = '0';
+    env.GIT_NO_LAZY_FETCH = '1';
     // Defence in depth for anything git itself spawns through a shell (an
     // alias, a credential helper): cmd.exe reads this variable from its own
     // environment and then resolves a bare command name against PATH alone.

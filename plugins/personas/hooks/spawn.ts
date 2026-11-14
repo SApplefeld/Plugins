@@ -49,12 +49,17 @@ export function gitHooksPathOf(tempRoot: string, suffix: string): string {
 
 /**
  * The pins every git the module spawns carries: no terminal prompt, no
- * optional locks, and two environment-config entries that turn
- * core.fsmonitor off and point core.hooksPath at `hooksPath`, so a
- * repository's own config cannot make `git status` run a monitor or a hook
- * of its choosing. GIT_CONFIG_COUNT names exactly these two entries, which
+ * optional locks, no fetch on demand, and two environment-config entries
+ * that turn core.fsmonitor off and point core.hooksPath at `hooksPath`, so
+ * a repository's own config cannot make `git status` run a monitor or a
+ * hook of its choosing. GIT_NO_LAZY_FETCH makes the child refuse to fetch a
+ * missing object from the repository's remote on demand, so a read in a
+ * partial clone cannot run a program the repository's transport settings
+ * name. Git 2.45 is the oldest that knows the variable, and an older git
+ * ignores it. GIT_CONFIG_COUNT names exactly the two config entries, which
  * overrides any ambient count. The pins match the kit's own git calls in
- * the grimoire plugin's kit-git-lib.js; the strip of every ambient `GIT_*`
+ * the grimoire plugin's kit-git-lib.js save GIT_OPTIONAL_LOCKS, which that
+ * lib's environment does not set; the strip of every ambient `GIT_*`
  * key that lib performs first is absent here, because the host contract
  * sets a child's env over the host's own and cannot delete a variable. A
  * host that itself passes `-c core.hooksPath` and `-c core.fsmonitor` to any
@@ -65,6 +70,7 @@ export function gitPinsOf(hooksPath: string): Record<string, string> {
   return {
     GIT_TERMINAL_PROMPT: "0",
     GIT_OPTIONAL_LOCKS: "0",
+    GIT_NO_LAZY_FETCH: "1",
     GIT_CONFIG_COUNT: "2",
     GIT_CONFIG_KEY_0: "core.fsmonitor",
     GIT_CONFIG_VALUE_0: "false",
