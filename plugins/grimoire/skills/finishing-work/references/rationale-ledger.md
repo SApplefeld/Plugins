@@ -1589,8 +1589,8 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:46
 - provenance: f8c0649 2026-06-10, the kit's initial consolidation; `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` section 3 swapped in the lane script, 2026-10-17.
 - verdict: keep
-- reason: Finishing-work owns the pass per the ownership map; the doctrine's "QA verification first" is its pointer and the qa-verifier charter is the receiving side (A011, A013). The base is the effort's, since on a trunk checkout `origin/<integration>` already holds the plan's commits.
-- passage: Dispatch the `qa-verifier` agent with the spec path: full build, every acceptance criterion checked with evidence, and the suite `node <plugin-root>/scripts/gate-lane.js report --repo <root> --base <base ref>` sizes. **The brief carries its verdict line and every command it prints, or the full suite on `lane: whole`.**
+- reason: Finishing-work owns the pass per the ownership map; the doctrine's "QA verification first" is its pointer and the qa-verifier charter is the receiving side (A011, A013). The base is the effort's, since on a trunk checkout `origin/<integration>` already holds the plan's commits. Commands ride the brief on `lane: targeted` alone, since a whole verdict resting on the daily record also prints them.
+- passage: Dispatch the `qa-verifier` agent with the spec path: full build, every acceptance criterion checked with evidence, and the suite `node <plugin-root>/scripts/gate-lane.js report --repo <root> --base <base ref>` sizes. **The brief carries its verdict line, then `lane: targeted` commands or the full suite on any `lane: whole`.**
 
 ### c2.C022
 - key: Put the contention lane's own command in the QA brief, or state that this repo defines none.

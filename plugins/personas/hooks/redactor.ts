@@ -18,7 +18,8 @@
 // places the steps so that its guards and its bookkeeping see a tool call as
 // the model wrote it, placeholders included, the tool receives the real value,
 // and the handler reads the result once it is scrubbed. The refusal of a
-// store surface runs first, before any guard answers.
+// file writer holding a placeholder the vault cannot restore, or of a store
+// surface, runs first, before any guard answers.
 //
 // The shell rule on this engine, for Bash and PowerShell alike. A shell
 // command is a restore tool, so a placeholder in its command becomes the
@@ -66,6 +67,15 @@
 // gh workflow run or gh agent-task with an input or task text, or git
 // filter-branch or git mktag, is a use line too. The list is closed, and
 // nothing joins a split name.
+//
+// The unknown-placeholder rule. A placeholder restores only where the vault
+// knows its tag, and a tag it does not know, one it never minted or one a
+// gone plugin instance minted, would go down as written. The four file
+// writers, Write, Edit, MultiEdit and NotebookEdit, are refused before they
+// run where their input holds such a tag of any kind, SECRET, EMAIL or
+// LITERAL, so the marker never becomes file content. Any other tool runs,
+// and its row names the cause where its input holds one and no live
+// placeholder.
 //
 // A memq line is a store line named by its own surface, a memq write, since
 // the shared memory database is the store it reaches. The Write tool
@@ -151,7 +161,11 @@ import {
 // the entropy floors 3.6 and 3.0, the length floor 24, no extra prefixes.
 // restoresInto reads the set, the server set and REFUSED_TOOLS: a tool none
 // admits restores nothing, whatever the store rule says of its line.
-const RESTORE_TOOLS = "Bash,PowerShell,Write,Edit,MultiEdit,NotebookEdit";
+// FILE_WRITERS is the file-writing part of the six: the four whose input
+// becomes a file's content, where toolCallRefusal refuses a placeholder the
+// vault cannot restore.
+const FILE_WRITERS: ReadonlySet<string> = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+const RESTORE_TOOLS = ["Bash", "PowerShell", ...FILE_WRITERS].join(",");
 const DETECTOR_OPTIONS: Record<string, unknown> = {
   secrets: true,
   pii: false,
@@ -498,8 +512,14 @@ function countHidden(tags: Set<string>): number {
 // go on, a use line whatever it carries included. index.ts runs it first,
 // before any guard answers, and a non-null answer is the call's deny. An
 // input too large to scan inside `remainingMs` is refused the same way:
-// unscanned, it may carry a secret.
+// unscanned, it may carry a secret. Before either test, a file writer whose
+// input holds a placeholder the vault cannot restore is refused with the
+// sentence cannotRestoreRefusal builds, so the tag never lands in a file.
 export function toolCallRefusal(e: ToolCallInput, remainingMs: number): string | null {
+  if (FILE_WRITERS.has(e.tool)) {
+    const unknown = unknownPlaceholders(e);
+    if (unknown.size > 0) return cannotRestoreRefusal(e.tool, unknown.size);
+  }
   const stores = storingShell(e);
   if (!stores && !REFUSED_TOOLS.has(e.tool)) return null;
   const surface = stores ? (storesMemq((e as { command: string }).command) ? MEMQ_SURFACE : storeSurfaceOf(e.tool)) : e.tool;
@@ -677,6 +697,9 @@ export const NOT_RESTORE_TOOL_REASON = "it is not a restore tool; name an MCP to
 export const STORE_LINE_REASON = "a shell line that writes a store keeps its placeholders";
 export const REFUSED_TOOL_REASON = "a refused tool never receives a real value";
 export const SERVED_TOOL_REASON = "the plugin serves this tool itself and restores nothing into it";
+// The fifth reason, for a placeholder the vault cannot restore on any tool
+// but the file writers.
+export const UNKNOWN_PLACEHOLDER_REASON = "the redactor cannot restore this placeholder; read the value's source again in this session";
 
 // The depth the live-placeholder search reads to, the detector walk's own
 // bound, so a cyclic or very deep input ends the search rather than the stack.
@@ -701,22 +724,63 @@ function holdsLivePlaceholder(v: unknown, depth = 0): boolean {
   return false;
 }
 
+// A placeholder tag of any kind, the shape the detector's own TAG reads.
+const ANY_TAG = /\[REDACTED-(?:SECRET|EMAIL|LITERAL)-[0-9a-f]{8}\]/g;
+
+// The distinct unknown placeholders under `v`, to LIVE_SEARCH_DEPTH: each
+// SECRET, EMAIL or LITERAL tag restore() leaves as written, because the vault
+// never minted it or the instance that minted it is gone. The mirror of
+// holdsLivePlaceholder: it reads in place, decodes nothing, and leaves the
+// envelope's own fields out at the top level. A LITERAL tag counts, since
+// one the vault cannot restore lands as its own marker just the same.
+function unknownPlaceholders(v: unknown, found = new Set<string>(), depth = 0): Set<string> {
+  if (typeof v === "string") {
+    if (!v.includes("[REDACTED-")) return found;
+    for (const t of v.match(ANY_TAG) ?? []) if (restore(t) === t) found.add(t);
+    return found;
+  }
+  if (v === null || typeof v !== "object" || depth >= LIVE_SEARCH_DEPTH) return found;
+  for (const [k, x] of Object.entries(v)) {
+    if (depth === 0 && (k === "tool" || k === "tool_use_id" || k === "agentId")) continue;
+    unknownPlaceholders(x, found, depth + 1);
+  }
+  return found;
+}
+
+// The refusal a file writer gets where its input holds `count` distinct
+// unknown placeholders. It quotes no tag, since a refusal is scrubbed on its
+// way back and a tag in it would be rewritten, and it names no cause, since
+// a tag from a gone instance and one typed by hand read alike.
+function cannotRestoreRefusal(tool: string, count: number): string {
+  return `redactor: ${tool} would write ${count} placeholder(s) the redactor cannot restore into a file. Read each value's source again in this session and write from the fresh placeholder.`;
+}
+
 // The notice index.ts posts under the tool row where a call went down with a
-// live placeholder as written, or null where the call restores or holds
-// none. `nextRan` says whether the handler's next(e) ran with this call: a
-// call the module served itself never reached toolCallDown, so nothing was
-// restored into it whatever restoresInto reads. A live placeholder is a
-// SECRET token the vault restores, one restore() turns into another string;
-// a LITERAL token, or a SECRET token the vault does not know, is not one.
-// The reason is the first rule that kept the value out: a shell store line,
-// then the refused list, then a call the module served, then the restore
-// set. The text names the tool and the reason, never a value. It never
-// throws: an input the search cannot read earns no notice.
+// placeholder as written, or null where it carried none that did. `nextRan`
+// says whether the handler's next(e) ran with this call: a call the module
+// served itself never reached toolCallDown, so nothing was restored into it
+// whatever restoresInto reads. A live placeholder is a SECRET token the
+// vault restores, one restore() turns into another string; a LITERAL token
+// is not one. A call that restores earns no notice for its live ones. For
+// any other call holding one, the reason is the first rule that kept the
+// value out: a shell store line, then the refused list, then a call the
+// module served, then the restore set. A call holding no live placeholder
+// and an unknown one, on any tool but the file writers, which are refused
+// before they run, names UNKNOWN_PLACEHOLDER_REASON, whether or not it
+// restores; a call holding both kinds keeps the live one's answer. The text
+// names the tool and the reason, never a value. It never throws: an input
+// the search cannot read earns no notice.
 export function unrestoredNotice(e: ToolCallInput, nextRan: boolean): string | null {
   try {
-    if (nextRan && restoresInto(e)) return null;
-    if (!holdsLivePlaceholder(e)) return null;
-    const reason = storingShell(e) ? STORE_LINE_REASON : REFUSED_TOOLS.has(e.tool) ? REFUSED_TOOL_REASON : !nextRan ? SERVED_TOOL_REASON : NOT_RESTORE_TOOL_REASON;
+    let reason: string;
+    if (holdsLivePlaceholder(e)) {
+      if (nextRan && restoresInto(e)) return null;
+      reason = storingShell(e) ? STORE_LINE_REASON : REFUSED_TOOLS.has(e.tool) ? REFUSED_TOOL_REASON : !nextRan ? SERVED_TOOL_REASON : NOT_RESTORE_TOOL_REASON;
+    } else if (!FILE_WRITERS.has(e.tool) && unknownPlaceholders(e).size > 0) {
+      reason = UNKNOWN_PLACEHOLDER_REASON;
+    } else {
+      return null;
+    }
     return `redactor: ${e.tool} received the placeholder as written: ${reason}`;
   } catch {
     return null;

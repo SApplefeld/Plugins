@@ -7731,7 +7731,8 @@ export const register: Register = async (on, options) => {
 
   // --- tool.call: serve tools, enforce constraints ---
   on("tool.call", async ($, e, next) => {
-    // The redactor's refusal first: a store surface carrying a raw secret
+    // The redactor's refusal first: a file writer holding a placeholder the
+    // redactor cannot restore, or a store surface carrying a raw secret,
     // ends the call before any guard or branch below reads it.
     if (redactorOn) {
       let refusal: string | null;

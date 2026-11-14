@@ -9,11 +9,20 @@
 //   <path>: row <entry>               one line per changed path, naming the
 //   <path>: whole <entry> (<reason>)  map entry or the reason that placed it
 //   <path>: unmapped
+//   targeted lane, for a fix round or a section close:
+//                                     whole on the record alone, see below
 //   node --test --test-timeout=1800000 <test files>
-//                                     targeted only: the matched rows' tests
+//                                     the matched rows' tests
 //   PERSONAS_SUITE_LIST=<suites> node --test --test-timeout=1800000 test/personas-offline.test.js
-//                                     targeted only, where a row names suites,
-//                                     each as its path under test-personas/
+//                                     where a row names suites, each as its
+//                                     path under test-personas/
+//
+// The two command lines print under a targeted verdict and under a whole
+// verdict whose sole reason is the daily record below. There the label line
+// prints above them, even where the lane names no test. That verdict keeps the
+// finishing gate whole, while a fix round or a section close, which take the
+// targeted lane whatever the verdict, still read the lane here. Any other
+// whole reason prints no label and no command.
 //
 // Where the map holds `layers`, one line per layer follows the verdict line, in
 // the map's order, so the verdict stays the first line printed:
@@ -120,6 +129,8 @@ const GIT_TIMEOUT_MS = 30000;
 // passed over.
 const VERDICT_OUTCOMES = ['green', 'red', 'did_not_run'];
 const NO_RECORD = 'no green daily gate on record';
+// The line a whole verdict on the record alone prints above the row commands.
+const TARGETED_LABEL = 'targeted lane, for a fix round or a section close:';
 // Ceilings on the two files read. Each sits far above its file's size, so it
 // binds only on a file nobody meant to be read, which then reads as unreadable.
 const MAX_MAP_BYTES = 4 * 1024 * 1024;
@@ -214,17 +225,22 @@ function classify({ map, mapProblem, changes, recordText, now, exists }) {
     const layerList = map.layers || [];
     const contention = contentionOf(map);
     const places = changes.map((p) => ({ path: p, place: placePath(map, p) }));
-    const reasons = [];
+    // The record is held apart from the reasons the map gives, since it alone
+    // leaves the row lists sound: it says the trunk is unproven, not the lane.
     const record = recordProblem(recordText, now);
-    if (record) reasons.push(record);
+    const reasons = [];
     for (const { path: p, place } of places) {
         if (place.self) reasons.push(place.reason);
         else if (place.kind === 'whole') reasons.push(p + ' is held by whole entry ' + place.entry);
         else if (place.kind === 'unmapped') reasons.push(p + ' is unmapped');
     }
-    const whole = () => {
-        const more = reasons.length > 1 ? ', and ' + (reasons.length - 1) + ' more' : '';
-        return { lane: 'whole', reason: reasons[0] + more, places, tests: [], suites: [], layers: layerList, contention };
+    // The record leads the verdict text wherever it stands. The lists ride only
+    // on a whole verdict the record alone sends whole, marked recordOnly.
+    const whole = (lists) => {
+        const all = record ? [record].concat(reasons) : reasons;
+        const more = all.length > 1 ? ', and ' + (all.length - 1) + ' more' : '';
+        return { lane: 'whole', reason: all[0] + more, places, tests: lists ? lists.tests : [], suites: lists ? lists.suites : [],
+            layers: layerList, contention, recordOnly: Boolean(lists) };
     };
     if (reasons.length > 0) return whole();
     const tests = new Set(map.always.map((a) => a.test));
@@ -255,6 +271,7 @@ function classify({ map, mapProblem, changes, recordText, now, exists }) {
     }
     if (reasons.length > 0) return whole();
     const present = (list) => [...list].filter((f) => exists(f)).sort();
+    if (record) return whole({ tests: present(tests), suites: present(suites) });
     return { lane: 'targeted', places, tests: present(tests), suites: present(suites), layers: layerList, contention };
 }
 
@@ -284,7 +301,11 @@ function render(result) {
         else if (place.kind === 'whole') lines.push(safePath(p) + ': whole ' + safePath(place.entry) + ' (' + safePath(place.reason) + ')');
         else lines.push(safePath(p) + ': unmapped');
     }
-    if (result.lane === 'targeted') {
+    // A whole verdict the record alone sent whole prints the label even over an
+    // empty lane, so it never reads as a verdict the map cannot bound. The label
+    // names the moments the commands serve, so they never pass for the gate.
+    if (result.lane === 'whole' && result.recordOnly) lines.push(TARGETED_LABEL);
+    if (result.lane === 'targeted' || result.recordOnly) {
         if (result.tests.length > 0) lines.push(NODE_TEST + ' ' + result.tests.join(' '));
         if (result.suites.length > 0) {
             lines.push('PERSONAS_SUITE_LIST=' + result.suites.map((s) => path.posix.relative('test-personas', s)).join(',')
@@ -423,7 +444,7 @@ function main(argv) {
     return 0;
 }
 
-module.exports = { classify, render, recordProblem, placePath, holds, localDate, parseArgs, readMap, isProse, SELF, NO_RECORD };
+module.exports = { classify, render, recordProblem, placePath, holds, localDate, parseArgs, readMap, isProse, SELF, NO_RECORD, TARGETED_LABEL };
 
 if (require.main === module) {
     try {

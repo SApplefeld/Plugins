@@ -50,7 +50,7 @@ export const RECOGNITION_PATTERN_MAX = 256;
 // entry counts toward it, and the entries past it are not read.
 export const RECOGNITION_ENTRIES_MAX = 32;
 
-// Characters of a row's joined triggers value read, memq's TRIGGER_VALUE_CAP:
+// Code points of a row's joined triggers value read, memq's TRIGGER_VALUE_CAP:
 // its longest entry and a separator, for each of RECOGNITION_ENTRIES_MAX
 // entries. A longer value loses its last piece whole.
 export const RECOGNITION_VALUE_MAX = 8_448;
@@ -238,14 +238,11 @@ function cmdPatternAdmitted(pattern: string): boolean {
 // entry that is not a string, is empty, holds a line break or holds a comma,
 // and reads that text to RECOGNITION_ROW_TEXT_MAX, so a text past it has no
 // closing fence and gives no triggers. memq reads the triggers value from its
-// first character that is not a space, to RECOGNITION_VALUE_MAX, splits it at
-// each comma, trims each piece, skips an empty one, reads at most
+// first character that is not a space, to RECOGNITION_VALUE_MAX code points,
+// splits it at each comma, trims each piece, skips an empty one, reads at most
 // RECOGNITION_ENTRIES_MAX, and keeps each `cmd:` entry whose pattern it
 // admits. A value cut at the bound loses its last piece, the one the cut may
-// have split. The hook counts that bound in code points where memq counts
-// UTF-16 units, so on a value holding astral characters and past the bound in
-// units, the hook can read triggers that memq drops as past its bound, up to
-// RECOGNITION_ENTRIES_MAX.
+// have split.
 function cmdTriggersOf(row: Record<string, unknown>): Array<{ entry: string; folded: string }> {
   const list = (value: unknown): string[] => (Array.isArray(value)
     ? value.filter((e): e is string => typeof e === "string" && e !== "" && !/[\r\n\u2028\u2029]/.test(e) && !e.includes(","))
