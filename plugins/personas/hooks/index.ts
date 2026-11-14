@@ -2995,7 +2995,7 @@ const NUDGE_STATUS_LINE_TEXT = "Open your closing text with one status line: WOR
 
 // The sentence every nudge adds after the status-line request. Leads are
 // read on every entry, so the hold it names exists wherever a nudge goes.
-const NUDGE_LEAD_HOLD_TEXT = "On this entry a WAITING: or BLOCKED: line holds the controller's nudges.";
+const NUDGE_LEAD_HOLD_TEXT = "On this entry a BLOCKED: line holds the controller's nudges, and a WAITING: line holds them for one hour. For a longer wait, pause the entry with goal_edit, naming who releases it, rather than write WAITING: again.";
 
 // The question the nudge cap's ask puts to the operator once the count
 // reaches its cap. The entry's title is operator- or worker-supplied text, so
