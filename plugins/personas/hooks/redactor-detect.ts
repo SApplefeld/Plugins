@@ -185,17 +185,37 @@ function keyedHash(text: string): string {
 // A value that only an earlier hide's placeholder carried to this mint is
 // marked nothing either, so it is never spared, since no hide judged it
 // whole on its own evidence.
+// A `token` mint is the one widenKnown makes for the token or slash run
+// around a known value. It counts the hide and collects the placeholder as
+// any mint does, and it marks nothing and joins neither the session-wide
+// search nor the same-text list: the known part is already in the search, so
+// every later spot of the same key is found through it. A value the vault
+// holds only from such a mint stays out of both under a `known` mint too,
+// and under a mint that only its own placeholder carried the value to. It
+// joins once a detector mints the value itself on evidence of its own.
+// Text that is exactly one scan-private placeholder of the scan in hand, as
+// scanMark writes one, is handled as the vault's placeholder of the same
+// value is, and comes back as it was handed: the hide is counted and
+// collected under the vault's placeholder, and the text keeps the record
+// that a re-hide pass made the hide.
 export function mint(kind: Kind, raw: string, evidence: Evidence = 'named'): string {
   if (kind === 'SECRET' && refuseOwnId(raw)) return raw
+  const marked = kind === 'SECRET' && marks !== null && marks.vault.has(raw)
   hidden++
   const unparked = kind === 'LITERAL' ? raw : unpark(raw, false)
   const value = kind === 'LITERAL' ? raw : restore(unparked)
-  if (kind === 'SECRET' && evidence !== 'known' && value === unparked) (evidence === 'shape' ? shapeOnly : namedHide).add(value)
+  if (kind === 'SECRET' && evidence !== 'known' && evidence !== 'token' && value === unparked) (evidence === 'shape' ? shapeOnly : namedHide).add(value)
   const seen = byValue.get(value)
+  if (kind === 'SECRET') {
+    if (evidence === 'token') {
+      if (seen === undefined) tokenOnly.add(value)
+    } else if (evidence !== 'known' && value === unparked) tokenOnly.delete(value)
+  }
+  const joins = kind === 'SECRET' && evidence !== 'token' && !tokenOnly.has(value)
   if (seen) {
-    if (kind === 'SECRET') remember(value)
+    if (joins) remember(value)
     minted?.add(seen)
-    return seen
+    return marked ? raw : seen
   }
   let tag = ''
   for (let i = 0; ; i++) {
@@ -204,7 +224,7 @@ export function mint(kind: Kind, raw: string, evidence: Evidence = 'named'): str
   }
   byValue.set(value, tag)
   byTag.set(tag, value)
-  if (kind === 'SECRET') remember(value)
+  if (joins) remember(value)
   minted?.add(tag)
   return tag
 }
@@ -297,16 +317,64 @@ const seeded = new Set<string>()
 // pair, a URL part and a vendor shape among such evidence, and is what a
 // caller that passes nothing records. `known` records nothing: its caller
 // hides again a value the vault already holds, as the re-hide passes here
-// and rehideHanded in redactor.ts do.
-type Evidence = 'named' | 'shape' | 'known'
+// and rehideHanded in redactor.ts do. `token` records nothing either:
+// widenKnown hides with it the token or slash run around a distinctive
+// known value, and that text joins no search, as mint states.
+type Evidence = 'named' | 'shape' | 'known' | 'token'
 // The values hidden by their shape alone, and the values hidden on any other
 // evidence. A value may be in both, and no mark is ever removed. The passes
 // that hide a known value again spare one only where it is in the first set
 // and not in the second, so a value with no mark at all is never spared.
 const shapeOnly = new Set<string>()
 const namedHide = new Set<string>()
+// The values the vault holds only because widenKnown hid them as the token
+// or slash run around a known value. None is in the session-wide search,
+// and a value leaves the set when a detector mints it as written.
+const tokenOnly = new Set<string>()
 // The values minted during the current scan, to hide at their other spots.
 let local: Set<string> | null = null
+
+// The scan-private placeholders of the scan in hand, and null outside a
+// scan. A re-hide pass writes each hide it makes as one, so the placeholder
+// is the record of the hide and moves with it when a later pass rewrites the
+// text around it. `of` gives the scan-private placeholder for a vault
+// placeholder and `vault` the reverse, `text` is the text the scan was
+// handed, and `held` is every hash a placeholder body in that text shows,
+// read at the first hide. scrubSecrets saves and restores the record as it
+// does `local`, so a scan that runs inside another keeps its own, and takes
+// every scan-private placeholder out of the vault on each path out.
+type Marks = { text: string; held: Set<string> | null; of: Map<string, string>; vault: Map<string, string> }
+let marks: Marks | null = null
+
+// The scan-private placeholder for the hide a re-hide pass makes under the
+// vault placeholder `tag`, or `tag` itself outside a scan and where mint
+// handed back the session's own id. It has a vault placeholder's form, so
+// every detector reads it as one. Its hash is one no placeholder of the
+// vault carries and no placeholder body in the scanned text shows, so no
+// text the scan was handed can pass for it. One scan uses one for each
+// value, at every spot of the value. While the scan runs the vault restores
+// it to the value, so a later pass that takes it inside a hide of its own
+// stores the real text.
+function scanMark(tag: string): string {
+  const m = marks
+  const value = byTag.get(tag)
+  if (m === null || value === undefined) return tag
+  let mark = m.of.get(tag)
+  if (mark !== undefined) return mark
+  if (m.held === null) {
+    m.held = new Set()
+    if (m.text.includes('REDACTED-')) for (const body of clocked(m.text).matchAll(TAG_BODY)) m.held.add(body[0].slice(-8))
+  }
+  for (let i = 0; ; i++) {
+    const hash = keyedHash(`MARK\u0000${i}\u0000${tag}`)
+    mark = `[REDACTED-SECRET-${hash}]`
+    if (!m.held.has(hash) && !byTag.has(mark) && !byTag.has(`[REDACTED-EMAIL-${hash}]`) && !byTag.has(`[REDACTED-LITERAL-${hash}]`)) break
+  }
+  m.of.set(tag, mark)
+  m.vault.set(mark, tag)
+  byTag.set(mark, value)
+  return mark
+}
 
 // The clock check the current scan runs before each whole-text pass, the
 // tick scrubSecrets was handed, and null where no caller set one. It throws
@@ -399,15 +467,22 @@ function buildEchoIndex(values: Iterable<string>): EchoIndex {
   return { hashes, byPrefix, top }
 }
 
+// Hides every value of the session-wide search found in the text, each
+// alone, before every detector, so each detector reads the text with no
+// more than the known value taken out of it. Each hide is written as the
+// scan-private placeholder scanMark gives, and widenKnown widens it once
+// the scan's last pass has run.
 function rehideKnown(text: string): string {
   if (echo.size === 0 || text.length < PREFIX) return text
   return rehideWith(clocked(text), (echoIndex ??= buildEchoIndex(echo)))
 }
 
-// The values minted in one scan, hidden at their other spots in it. A few
-// values are found faster one by one than by the rolling hash. Each spot
-// is judged on the text as the longer values' hides left it, so a value
-// glued after a placeholder's closing bracket opens a token of its own.
+// The values minted in one scan, hidden at their other spots in it, each
+// alone, as rehideKnown hides one, and each hide written as a scan-private
+// placeholder. A few values are found faster one by one than by the rolling
+// hash. Each spot is judged on the text as the longer values' hides left
+// it, so a value glued after a placeholder's closing bracket opens a token
+// of its own.
 function rehideLocal(text: string, values: Set<string>): string {
   if (values.size > 64) return rehideWith(clocked(text), buildEchoIndex(values))
   let out = text
@@ -417,7 +492,9 @@ function rehideLocal(text: string, values: Set<string>): string {
 
 // Hides one value at each of its spots in the text that opensRecordId does
 // not spare, under one placeholder minted once, and only where a spot is
-// hidden. After a spared spot the search goes on from the next character.
+// hidden. The value is hidden alone: the text glued to it stays as written.
+// Each hide is written as the value's scan-private placeholder, as scanMark
+// gives it. After a spared spot the search goes on from the next character.
 function rehideOne(text: string, value: string): string {
   const parts: string[] = []
   let last = 0
@@ -432,14 +509,17 @@ function rehideOne(text: string, value: string): string {
   }
   if (last === 0) return text
   parts.push(text.slice(last))
-  return parts.join(mint('SECRET', value, 'known'))
+  return parts.join(scanMark(mint('SECRET', value, 'known')))
 }
 
-// Hides every indexed value found in the text. Where several match at one
+// Hides every indexed value found in the text, each alone: the text glued
+// to a value stays as written. Where several match at one
 // position the longest that opensRecordId does not spare is hidden, so a
 // seeded value that shares its opening with a longer spared one is still
 // hidden. Where every match is spared the walk goes on from the next
 // character, so a known value further into the same token is still found.
+// Each hide is written as the value's scan-private placeholder, as scanMark
+// gives it.
 function rehideWith(text: string, ix: EchoIndex): string {
   if (text.length < PREFIX) return text
   const parts: string[] = []
@@ -459,7 +539,7 @@ function rehideWith(text: string, ix: EchoIndex): string {
         }
       }
       if (found) {
-        parts.push(text.slice(last, i), mint('SECRET', found, 'known'))
+        parts.push(text.slice(last, i), scanMark(mint('SECRET', found, 'known')))
         i += found.length
         last = i
         if (i + PREFIX <= text.length) h = prefixHash(text, i)
@@ -471,6 +551,303 @@ function rehideWith(text: string, ix: EchoIndex): string {
     i++
   }
   if (last === 0) return text
+  parts.push(text.slice(last))
+  return parts.join('')
+}
+
+// A placeholder of the finished text that restores to a distinctive known
+// value: where it starts and ends, the value, the end of the placeholder
+// before it and the start of the one after it, of any kind, or the text's
+// own start and end. `act` is true where the placeholder is scan-private,
+// the record that a re-hide pass of this scan made the hide, so widenKnown
+// acts there, and false where the fixed-format step only reads through the
+// placeholder. `open` is false where neither side
+// holds text that could be hidden with the value. `run` is the stretch of
+// text the fixed-format step read the spot in and `r` where the value
+// starts in it. `fixed` is the fixed-format match the value stands inside
+// or overlaps, as its start and end in the run's text, and whether it is a
+// whole match.
+type Spot = { at: number; end: number; value: string; prev: number; next: number; act: boolean; open: boolean; r: number; run?: Run; fixed?: [from: number, to: number, whole: boolean] }
+
+// The text the fixed-format step reads for the spots `first` to `last`,
+// which stand with no other placeholder between them: the text from `base`
+// on with each of those spots' values put back.
+type Run = { text: string; base: number; first: number; last: number }
+
+// The widening pass, run on the finished text after the scan's last pass
+// and after unpark. A session that holds part of a key, as one does after a
+// display cut the key to a fixed width, must show no more of the key than a
+// session that holds none. The passes before this one hide a known value
+// alone, so every detector has read the text as it would with that value
+// hidden and nothing else. This pass acts only at the hides the two re-hide
+// passes made of a distinctive known value in this scan. Those passes write
+// each hide as a scan-private placeholder, and a spot is one that stands
+// whole in the text, so no text is lined up against another to find a hide.
+// A placeholder a detector minted, one the scanned text already held, and a
+// hide a later pass took inside a hide of its own or cut are no spot, so a
+// scan in which no known value was hidden again
+// comes back as its passes left it. At a spot the pass reads the text with
+// the value put back and swaps the placeholder and the text beside it that
+// makes one key with the value for one placeholder. No pass rewrites text
+// it does not hide, except in two shapes: a length-bounded pattern can cut
+// an earlier placeholder, and a password assignment can drop a trailing
+// space. This pass only swaps a spot's
+// placeholder and unhidden text beside it for one placeholder, so it hides
+// every character the passes before it hid, in those two shapes too.
+//
+// The fixed-format step comes first, and readFixed asks it. It reads the
+// spots that stand with no other placeholder between them as one text with
+// every one of their values put back, so a key that an earlier scan hid as
+// two known values is read whole. It reads through a placeholder the pass
+// does not act at as well, where that placeholder restores to a distinctive
+// known value whose whole length stands within FIXED_REACH characters of a
+// spot's value. Over one scan the values put back for such placeholders
+// total no more than twice the length of the text the scan was handed,
+// `scanned`, counted in the order the pass reads them and once for each
+// time a value is put back, so the text the step reads is never more than
+// a fixed multiple of the scanned text, whatever its placeholders stand
+// for. A spot's own value always goes back, since the scanned text held it
+// there. In a text whose placeholders stand for more than that total, the
+// step stops reading through the placeholders the pass does not act at,
+// and a key beside one of them is hidden by the slash run and the token
+// alone. Any other placeholder ends that text, one that would pass the
+// total among them, and so does a gap of
+// more than FIXED_REACH characters. A match counts for a spot whose value
+// it holds or shares a character with. It is hidden for the first such
+// spot, from FIXED_REACH characters before that spot's value to FIXED_REACH
+// after it at most, and a spot a hidden match covers is not acted at again.
+// A whole match that holds the value is minted as scrubVendors and
+// scrubJwtChain mint one, so it joins the search as it does on a session
+// that holds no part of it. A match the reach cut, or one that starts or
+// ends inside the spot's value or inside the value of a placeholder the
+// step read through, is hidden with each such whole placeholder under one
+// placeholder that joins no search. Each match is judged by itself, and one
+// that a spot's value holds whole gives the step nothing more to hide.
+//
+// A spot at which the step hides nothing, whether it stands in no
+// fixed-format match or holds one whole, takes the slash run or the token
+// knownSpan
+// reads, under a placeholder that restores to that text and joins no search.
+// Every neighbouring placeholder ends a run and a token, and so does the end
+// of the hide before the spot.
+//
+// A placeholder the pass took into a wider one, and that the text no longer
+// holds, leaves the scan's collected set, so a hook counts one hidden value
+// where one placeholder shows.
+//
+// The pass hands the text back with its scan-private placeholders still in
+// it, where it hid nothing more. scrubSecrets swaps each for the vault's
+// placeholder of its value.
+function widenKnown(text: string, cfg: Config, scanned: number): string {
+  const vault = marks!.vault
+  let spots: Spot[] = []
+  const distinctive = new Map<string, boolean>()
+  // How many times each placeholder stands in the text, kept where a caller
+  // collects the scan's placeholders. A scan-private placeholder is counted
+  // as the vault's placeholder of its value, which the caller collected.
+  const shown = minted === null ? null : new Map<string, number>()
+  const count = (tag: string, by: number): void => {
+    const held = vault.get(tag) ?? tag
+    if (shown !== null) shown.set(held, (shown.get(held) ?? 0) + by)
+  }
+  // The length of the values put back so far for placeholders the pass does
+  // not act at.
+  let putBack = 0
+  let open: Spot | undefined
+  let prev = 0
+  // TAG is shared, and the walk ends with it back at its start.
+  TAG.lastIndex = 0
+  for (let m = TAG.exec(clocked(text)); m !== null; m = TAG.exec(text)) {
+    if (open !== undefined) open.next = m.index
+    open = undefined
+    count(m[0], 1)
+    const value = byTag.get(m[0])
+    const act = vault.has(m[0])
+    // A value longer than the step's reach is read through nowhere.
+    if (value !== undefined && (act || value.length <= FIXED_REACH)) {
+      let wide = distinctive.get(value)
+      if (wide === undefined) distinctive.set(value, (wide = echo.has(value) && echoable(value)))
+      if (wide) spots.push((open = { at: m.index, end: m.index + m[0].length, value, prev, next: text.length, act, open: true, r: 0 }))
+    }
+    prev = m.index + m[0].length
+  }
+  // A placeholder the pass does not act at is read through only where its
+  // whole value stands within FIXED_REACH characters of a spot's value, with
+  // every value between them put back and no other placeholder between.
+  const near = new Uint8Array(spots.length)
+  for (const step of [1, -1]) {
+    let reach = Infinity
+    for (let k = step === 1 ? 0 : spots.length - 1; k >= 0 && k < spots.length; k += step) {
+      const spot = spots[k]!
+      const from = spots[k - step]
+      if (spot.act) reach = 0
+      else {
+        const joined = from !== undefined && (step === 1 ? from.next === spot.at : spot.next === from.at)
+        reach = joined ? reach + (step === 1 ? spot.at - from!.end : from!.at - spot.end) + spot.value.length : Infinity
+        if (reach <= FIXED_REACH) near[k] = 1
+      }
+    }
+  }
+  spots = spots.filter((spot, k) => spot.act || near[k] === 1)
+  // A placeholder the pass does not act at is read through only while its
+  // value fits in the scan's total, and ends the text like any other
+  // placeholder once it does not.
+  const fits = (spot: Spot): boolean => {
+    if (spot.act) return true
+    if (putBack + spot.value.length > 2 * scanned) return false
+    putBack += spot.value.length
+    return true
+  }
+  for (let first = 0; first < spots.length; ) {
+    tickNow()
+    const head = spots[first]!
+    if (!fits(head)) {
+      first++
+      continue
+    }
+    let last = first
+    while (last + 1 < spots.length && spots[last]!.next === spots[last + 1]!.at && spots[last + 1]!.at - spots[last]!.end <= FIXED_REACH && fits(spots[last + 1]!)) last++
+    const tail = spots[last]!
+    // A spot with a stretch end, a placeholder of another kind or the text's
+    // edge on both sides has no text beside it to hide.
+    if (first === last && (head.at === head.prev || fixedEdge(text.charCodeAt(head.at - 1))) && (head.end === head.next || fixedEdge(text.charCodeAt(head.end)))) {
+      head.open = false
+      first++
+      continue
+    }
+    const from = Math.max(head.prev, head.at - FIXED_REACH)
+    const base = Math.max(0, from - FIXED_LOOK_BACK)
+    const lo = from - base
+    const pieces = [text.slice(base, head.at)]
+    const run: Run = { text: '', base, first, last }
+    let n = head.at - base
+    for (let k = first; k <= last; k++) {
+      const spot = spots[k]!
+      const gap = text.slice(spot.end, k < last ? spots[k + 1]!.at : Math.min(tail.next, tail.end + FIXED_REACH))
+      spot.r = n
+      spot.run = run
+      pieces.push(spot.value, gap)
+      n += spot.value.length + gap.length
+    }
+    const whole = (run.text = pieces.join(''))
+    // A stretch that ends at the reach's edge, and not at a placeholder or
+    // the text's own edge, may hold a match the reach cut.
+    const cutLo = head.at - FIXED_REACH > head.prev && !fixedEdge(whole.charCodeAt(lo - 1))
+    const cutHi = tail.end + FIXED_REACH < tail.next
+    for (let k = first; k <= last; ) {
+      tickNow()
+      let s = spots[k]!.r
+      while (s > lo && !fixedEdge(whole.charCodeAt(s - 1))) s--
+      // The stretch from `s` to `e` ends at a stretch end or the text's edge,
+      // and holds whole the value of every spot whose value starts in it, so
+      // a stretch end inside a value does not end it. Spots `k` to `m - 1`
+      // are those spots, and `acts` says whether the pass acts at any.
+      let e = spots[k]!.r + spots[k]!.value.length
+      let m = k + 1
+      for (;;) {
+        while (e < whole.length && !fixedEdge(whole.charCodeAt(e))) e++
+        let far = e
+        for (; m <= last && spots[m]!.r < e; m++) far = Math.max(far, spots[m]!.r + spots[m]!.value.length)
+        if (far === e) break
+        e = far
+      }
+      let acts = false
+      for (let a = k; a < m && !acts; a++) acts = spots[a]!.act
+      const cut = (s === lo && cutLo) || (e === whole.length && cutHi)
+      if (acts) {
+        readFixed(whole, s, e, cfg, (at, end) => {
+          // The first spot of the run whose value ends past `at`.
+          let a = first
+          for (let b = m; a < b; ) {
+            const mid = (a + b) >> 1
+            if (spots[mid]!.r + spots[mid]!.value.length <= at) a = mid + 1
+            else b = mid
+          }
+          for (; a < m && spots[a]!.r < end; a++) {
+            const spot = spots[a]!
+            if (!spot.act) continue
+            const stop = spot.r + spot.value.length
+            // A match the value holds whole leaves the step nothing to hide.
+            if (spot.r <= at && end <= stop) continue
+            if (spot.fixed !== undefined) continue
+            const f = Math.max(at, spot.r - FIXED_REACH)
+            const t = Math.min(end, stop + FIXED_REACH)
+            spot.fixed = [f, t, !cut && f === at && t === end]
+          }
+        })
+      }
+      k = m
+    }
+    first = last + 1
+  }
+  // Where the character at `p` of a run's text stands in `text`, and the
+  // spot whose value holds it.
+  const where = (run: Run, p: number): [number, Spot | undefined] => {
+    let a = run.first
+    for (let b = run.last + 1; a < b; ) {
+      const mid = (a + b) >> 1
+      if (spots[mid]!.r <= p) a = mid + 1
+      else b = mid
+    }
+    if (a === run.first) return [run.base + p, undefined]
+    const spot = spots[a - 1]!
+    const stop = spot.r + spot.value.length
+    return p < stop ? [spot.at, spot] : [spot.end + p - stop, undefined]
+  }
+  // The text around a spot with the value put back: the text itself, where
+  // the value starts in it, and where the text that may be hidden starts.
+  // The characters before that are there to be read only: as many as a
+  // slash run's body may hold before the value, the FIXED_LOOK_BACK a key's
+  // name is read in before the run, and one for the run's look-behind.
+  const around = (spot: Spot, floor: number): [string, number, number] => {
+    const lo = Math.max(floor, spot.at - FIXED_REACH)
+    const base = Math.max(0, lo - SLASHED_BODY_MAX - FIXED_LOOK_BACK - 1)
+    return [text.slice(base, spot.at) + spot.value + text.slice(spot.end, Math.min(spot.next, spot.end + FIXED_REACH)), spot.at - base, lo - base]
+  }
+  const parts: string[] = []
+  let last = 0
+  for (const spot of spots) {
+    tickNow()
+    if (!spot.act || !spot.open || spot.at < last) continue
+    if (spot.fixed !== undefined) {
+      const run = spot.run!
+      const [f, t, whole] = spot.fixed
+      // A match that starts or ends inside a value, the spot's own or
+      // another placeholder's, is hidden with that whole placeholder.
+      const s = Math.max(where(run, f)[0], last)
+      const [before, inside] = where(run, t - 1)
+      const e = inside === undefined ? before + 1 : inside.end
+      // Where what is left of the match to hide is the spot alone, the step
+      // hides nothing more there, and the spot takes the slash run or the
+      // token below.
+      if (s !== spot.at || e !== spot.end) {
+        const taken: string[] = []
+        const span = text.slice(s, e).replace(TAG, (tag) => (taken.push(tag), byTag.get(tag) ?? tag))
+        if (ownSessionId !== undefined && span.toLowerCase() === ownSessionId) continue
+        const tag = whole && span === run.text.slice(f, t) ? mint('SECRET', span) : mint('SECRET', span, 'token')
+        parts.push(text.slice(last, s), tag)
+        for (const inner of taken) count(inner, -1)
+        count(tag, 1)
+        last = e
+        continue
+      }
+    }
+    const [part, at, lo] = around(spot, Math.max(last, spot.prev))
+    const from = at
+    const value = spot.value
+    const [s, e] = knownSpan(part, from, value, lo, cfg)
+    const before = at - s
+    const after = e - at - spot.value.length
+    if (before === 0 && after === 0) continue
+    const span = part.slice(s, e)
+    const tag = mint('SECRET', span, span === value ? 'known' : 'token')
+    parts.push(text.slice(last, spot.at - before), tag)
+    count(text.slice(spot.at, spot.end), -1)
+    count(tag, 1)
+    last = spot.end + after
+  }
+  if (last === 0) return text
+  if (shown !== null) for (const [tag, n] of shown) if (n === 0) minted!.delete(tag)
   parts.push(text.slice(last))
   return parts.join('')
 }
@@ -709,11 +1086,17 @@ const VENDOR_SHAPES: readonly Shape[] = [
 // `-` or `_` inside a key cannot leave the tail of the key on screen.
 const VENDOR = VENDOR_SHAPES.map((s) => ({ hint: s.hint, re: new RegExp(`(?:${s.re})[A-Za-z0-9_-]{0,4096}`, 'g') }))
 
+// True where scrubVendors leaves a vendor pattern's match as written: the
+// allow list holds it, or it holds a placeholder.
+function keptByVendors(m: string, cfg: Config): boolean {
+  return cfg.allow.has(m) || m.includes('[REDACTED-')
+}
+
 function scrubVendors(text: string, cfg: Config): string {
   let out = text
   for (const { hint, re } of VENDOR) {
     if (typeof hint === 'string' ? !out.includes(hint) : !hint.test(out)) continue
-    out = clocked(out).replace(re, (m) => (cfg.allow.has(m) || m.includes('[REDACTED-') ? m : mint('SECRET', m)))
+    out = clocked(out).replace(re, (m) => (keptByVendors(m, cfg) ? m : mint('SECRET', m)))
   }
   return out
 }
@@ -1389,7 +1772,12 @@ const LOWER_NAME_UUID = new RegExp(`^[a-z0-9_-]+-${UUID}$`)
 //      mark nothing, or a cut hidden again where it stands cut would stop
 //      being spared.
 // A spared token reaches the later passes and is judged there as it would be
-// on a vault that never held the value.
+// on a vault that never held the value, and no placeholder stands there for
+// widenKnown to widen. A match that is not spared is hidden alone, and
+// widenKnown then hides with it the fixed-format match, slash run or token
+// it stands in where the value is distinctive, as knownSpan states. A slash
+// run or token so hidden joins no search: a longer token that opens with a
+// cut would carry no mark there and hide every later id it opens.
 function opensRecordId(text: string, at: number, value: string): boolean {
   if (at > 0 && CAND_CHAR_ONLY.test(text[at - 1]!)) return false
   if (seeded.has(value) || !shapeOnly.has(value) || namedHide.has(value)) return false
@@ -1400,6 +1788,160 @@ function opensRecordId(text: string, at: number, value: string): boolean {
   if (tail === 0 || value.length + tail > CAND_MAX) return false
   if (LOWER_NAME_UUID.test(value)) return false
   return isRecordId(text.slice(at, end + tail))
+}
+
+// SLASHED_SRC read from one position, with the character its body takes and
+// the longest body it takes, both read from the pattern's own source so they
+// cannot part from it.
+const SLASHED_AT = new RegExp(SLASHED_SRC, 'y')
+const SLASHED_BODY = /(\[[^\]]+\])\{\d+,(\d+)\}/.exec(SLASHED_SRC)!
+const SLASHED_CHAR_ONLY = new RegExp(`^${SLASHED_BODY[1]}$`)
+const SLASHED_BODY_MAX = Number(SLASHED_BODY[2])
+
+// The start and end of the text widenKnown hides for the distinctive known
+// value that stands at `at` in `text`, the text around its placeholder with
+// the value put back, where the value stands inside no fixed-format match.
+// widenKnown hides a value with the text that makes one key with it, found
+// in three steps:
+//   1. The fixed format. Where the value stands inside a match of a vendor
+//      pattern, or inside a JWT the chain walk finds, the whole match is
+//      hidden, as readFixed reads it and widenKnown hides it. Where the
+//      value only shares characters with the match, the match and the
+//      value's placeholder are hidden as one. A fresh
+//      session hides such a key whole across a character outside the token
+//      set, the dot in a `pat` key among them, and the token alone stops at
+//      that character.
+//   2. The slash run. Where the value stands inside a run SLASHED_SRC
+//      matches, the run holds a slash and slashedSecret passes it, the whole
+//      run is hidden. The key's name is read from the 64 characters before
+//      the run through NAMED, as the generic scan reads it, and the scan's
+//      protected spans are not read.
+//   3. The token. Otherwise the value is hidden with every candidate
+//      character that touches it on either side. A token of more than
+//      CAND_MAX characters hides the value alone. The token ends before a
+//      key's name, as nameStop reads one.
+// This function reads steps 2 and 3. The span never starts before `floor`,
+// the end of the text that may not be hidden again, though the slash step
+// still judges the whole run. A value whose span is exactly the session's
+// own id, which mint hands back as written, is hidden alone.
+function knownSpan(text: string, at: number, value: string, floor: number, cfg: Config): [number, number] {
+  const end = at + value.length
+  let from = at
+  let to = end
+  let slashed = false
+  // No slash within a body's length of the value means no run that holds
+  // both. A run starts where the body characters before the value start.
+  if (text.slice(Math.max(0, at - SLASHED_BODY_MAX), end + SLASHED_BODY_MAX).includes('/')) {
+    let s = at
+    while (s > 0 && at - s <= SLASHED_BODY_MAX && SLASHED_CHAR_ONLY.test(text[s - 1]!)) s--
+    SLASHED_AT.lastIndex = s
+    const run = SLASHED_AT.exec(text)?.[0]
+    if (run !== undefined && s + run.length >= end && run.includes('/') && slashedSecret(run, NAMED.test(text.slice(Math.max(0, s - 64), s)), cfg)) {
+      from = s
+      to = s + run.length
+      slashed = true
+    }
+  }
+  if (!slashed) {
+    // Read one character past the longest candidate, as opensRecordId does.
+    to += CAND_RUN.exec(text.slice(end, at + CAND_MAX + 1))![0].length
+    while (from > 0 && to - from <= CAND_MAX && CAND_CHAR_ONLY.test(text[from - 1]!)) from--
+    if (to - from > CAND_MAX) return [at, end]
+    to = nameStop(text, end, to)
+  }
+  from = Math.max(from, floor)
+  if (ownSessionId !== undefined && text.slice(from, to).toLowerCase() === ownSessionId) return [at, end]
+  return [from, to]
+}
+
+// The first character after a token's run that can open what a name stands
+// before: a candidate character or a slash.
+const NAME_NEXT = new RegExp(`${CAND_CHAR}|/`)
+// A name word with its colon or equals sign: the word, then at most a
+// closing quote and spaces or tabs, then the sign. Read from the position
+// NAMED found a name at.
+const NAME_SIGN = new RegExp(String.raw`(?:${NAME_WORDS})(?:(?<=key)[_-]?id)?(?:${Q})?[ \t]*[:=]`, 'iy')
+
+// Where the token's text after the known value, which ends at `end`, holds
+// the start of a key's name that NAMED reads for what follows the token,
+// and that name is a name word right before a colon or an equals sign, as
+// NAME_SIGN reads one, the token ends at the name's first character, so
+// the name stays on screen beside the value the detectors hid after it.
+// A name word that stands before no such sign, inside a list item or before
+// a space among such spots, ends no token, since a key's own rest may hold
+// one. NAMED reads from `end` up to the first candidate or slash character
+// after the token, and no further back than 64 characters before that
+// character, the reach the generic scan gives it. Returns `to` where no
+// such name starts in the token.
+function nameStop(text: string, end: number, to: number): number {
+  if (to === end) return to
+  let next = to
+  while (next < text.length && next - to < 64 && !NAME_NEXT.test(text[next]!)) next++
+  const base = Math.max(end, next - 64)
+  if (base >= to) return to
+  const read = text.slice(base, next)
+  const name = NAMED.exec(read)
+  if (name === null || base + name.index >= to) return to
+  NAME_SIGN.lastIndex = name.index
+  return NAME_SIGN.test(read) ? base + name.index : to
+}
+
+// How far before and after a known value's placeholder widenKnown reads,
+// and how far before a stretch a pattern's look-behind may read, the reach
+// the generic scan gives NAMED.
+const FIXED_REACH = 4096
+const FIXED_LOOK_BACK = 64
+// One test for the JWT walk's hint and every vendor pattern's, read from
+// the hints themselves, so a stretch that holds none costs one read.
+const FIXED_HINT = new RegExp(['eyJ', ...VENDOR.map((v) => v.hint)].map((h) => (typeof h === 'string' ? h.replace(/[\\^$.*+?()[\]{}|/]/g, '\\$&') : h.source)).join('|'))
+// The characters that end a stretch: a space, a control character, a
+// character past ASCII, and the quotes, brackets and backslash below. No
+// vendor pattern or DOTTED run takes one into its match, though a pattern's
+// look-behind may read one, so a pattern searched from the character after
+// one finds the matches a scan of the whole text finds there. A JSON or
+// markup line so falls into one stretch per value.
+const FIXED_EDGE = new Uint8Array(127)
+for (let c = 0; c <= 32; c++) FIXED_EDGE[c] = 1
+for (const c of `"'\`<>{}()\\`) FIXED_EDGE[c.charCodeAt(0)] = 1
+function fixedEdge(c: number): boolean {
+  return c >= 127 || FIXED_EDGE[c] === 1
+}
+
+// The fixed-format step for the stretch of `text` from `s` to `e`, which
+// holds a stretch end only inside a put-back value. `found` is told the start and end
+// of every fixed-format match that starts in the stretch: each JWT the
+// chain walk finds, then each vendor pattern's matches, in the order a scan
+// asks the patterns, so the first match told that holds a value is the one
+// a scan would hide it under. The JWT walk and the vendor patterns are asked
+// as scrubSecrets asks them: the walk over each DOTTED run, each pattern
+// behind its hint, with the FIXED_LOOK_BACK characters before the stretch
+// for a pattern's look-behind, and a match scrubVendors or the walk leaves
+// as written, for the allow list, is no match here.
+function readFixed(text: string, s: number, e: number, cfg: Config, found: (from: number, to: number) => void): void {
+  const base = Math.max(0, s - FIXED_LOOK_BACK)
+  const part = text.slice(base, e)
+  if (!FIXED_HINT.test(part)) return
+  // Every match of `re` from the stretch's start. The patterns are shared,
+  // so the search leaves each at its start.
+  const each = (re: RegExp, match: (m: RegExpExecArray) => void): void => {
+    re.lastIndex = s - base
+    for (let m = re.exec(part); m !== null; m = re.exec(part)) match(m)
+    re.lastIndex = 0
+  }
+  if (part.includes('eyJ')) {
+    each(DOTTED, (run) => {
+      scrubJwtChain(run[0], cfg, (jwt, o) => {
+        found(base + run.index + o, base + run.index + o + jwt.length)
+        return jwt
+      })
+    })
+  }
+  for (const { hint, re } of VENDOR) {
+    if (typeof hint === 'string' ? !part.includes(hint) : !hint.test(part)) continue
+    each(re, (m) => {
+      if (!keptByVendors(m[0], cfg)) found(base + m.index, base + m.index + m[0].length)
+    })
+  }
 }
 
 // A wiki fed name has the shape the wiki feeder writes into an inbox:
@@ -1499,20 +2041,27 @@ function scrubKeyBlocks(text: string, cfg: Config): string {
 }
 
 // Walks the dot-separated parts of a run: a part holding `eyJ` and the two
-// parts after it are a JWT, when each is long enough.
-function scrubJwtChain(chain: string, cfg: Config): string {
+// parts after it are a JWT, when each is long enough. Each JWT the allow list
+// does not hold is swapped for what `hide` returns for it, its placeholder
+// unless the caller says otherwise. `hide` is also told where the JWT starts
+// in the run, so readFixed can ask the walk where a JWT stands and hide none.
+function scrubJwtChain(chain: string, cfg: Config, hide: (jwt: string, at: number) => string = (jwt) => mint('SECRET', jwt)): string {
   if (!chain.includes('eyJ')) return chain
   const segs = chain.split('.')
   const out: string[] = []
   let k = 0
+  // Where segs[k] starts in the run.
+  let start = 0
   while (k < segs.length) {
     const i = k + 2 < segs.length ? segs[k]!.indexOf('eyJ') : -1
     if (i >= 0 && segs[k]!.length - i >= 11 && segs[k + 1]!.length >= 8 && segs[k + 2]!.length >= 8) {
       const jwt = `${segs[k]!.slice(i)}.${segs[k + 1]}.${segs[k + 2]}`
-      out.push(segs[k]!.slice(0, i) + (cfg.allow.has(jwt) ? jwt : mint('SECRET', jwt)))
+      out.push(segs[k]!.slice(0, i) + (cfg.allow.has(jwt) ? jwt : hide(jwt, start + i)))
+      start += i + jwt.length + 1
       k += 3
     } else {
       out.push(segs[k]!)
+      start += segs[k]!.length + 1
       k += 1
     }
   }
@@ -1548,7 +2097,7 @@ function urlParamSecret(raw: string, cfg: Config): boolean {
     // A broken escape: judge it as it stands.
   }
   if (cfg.allow.has(v) || v.length < 12) return false
-  // Decoding can turn `%5B` and `%5D` into the brackets of a placeholder.
+  // The checks below judge a copy in which a placeholder's hash reads as one fixed spelling.
   const read = withFixedHashes(v)
   if ([/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((r) => r.test(read)).length < 2) return false
   if (looksLikeName(read, true)) return false
@@ -1994,9 +2543,17 @@ export function scrubSecrets(text: string, cfg: Config, tick?: Tick): string {
   const outerTick = clockTick
   const outer = parked
   const outerLocal = local
+  const outerMinted = minted
+  const outerMarks = marks
+  const own: Marks = { text, held: null, of: new Map(), vault: new Map() }
   clockTick = tick ?? outerTick
   parked = startParking(text)
   local = new Set()
+  marks = own
+  // The placeholders this scan mints are collected apart, so widenKnown can
+  // take out one that its wider placeholder replaced, and joined to the
+  // caller's set once the scan ends.
+  if (outerMinted !== null) minted = new Set()
   try {
     // A whole value that is base64 (or base64url) of text holding a secret.
     if (text.length >= 256 && BASE64_VALUE.test(clocked(text)) && !cfg.allow.has(text) && base64HoldsSecret(text)) return mint('SECRET', text)
@@ -2015,11 +2572,25 @@ export function scrubSecrets(text: string, cfg: Config, tick?: Tick): string {
     // A value hidden at one spot in this text is hidden at its other spots
     // too: a HAR repeats each query parameter in `url` and `queryString`.
     if (local.size > 0) out = rehideLocal(out, local)
-    return unpark(out)
+    const done = unpark(out)
+    // A scan in which no known value was hidden again ends here.
+    if (own.vault.size === 0) return done
+    // A distinctive known value's placeholder takes in the rest of its key.
+    // Each scan-private placeholder that still stands whole is then swapped
+    // for the vault's placeholder of its value, so none is handed back.
+    return clocked(widenKnown(done, cfg, text.length)).replace(TAG, (tag) => own.vault.get(tag) ?? tag)
   } finally {
     clockTick = outerTick
     parked = outer
     local = outerLocal
+    // No scan-private placeholder outlives its scan, a scan a thrown
+    // deadline ends among them.
+    for (const mark of own.vault.keys()) byTag.delete(mark)
+    marks = outerMarks
+    if (outerMinted !== null) {
+      for (const tag of minted!) outerMinted.add(tag)
+      minted = outerMinted
+    }
   }
 }
 
