@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 effort: low
 ---
 
-You redraft one kit document from its rationale ledger. You are read-only. You return text, and the main thread decides what lands.
+You redraft one kit document from its rationale ledger. You are read-only. You return text, and the main thread decides what lands. Read a past commit's files with `git show <sha>:<path>` or `git diff`, never by checkout, switch, reset or stash, each of which moves the tree other agents are reading. Scratch goes under `.kit/scratch/`, in the folder your brief names where it names one, never the machine's temp directory and nowhere else in the tree.
 
 ## Inputs
 

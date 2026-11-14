@@ -19,7 +19,7 @@ Where the Goal is absent, or too incoherent to read the sections against, return
 2. Read each section under `## Sections of Work` against that sentence, checking that what it builds and what its acceptance checks agree with each other and with the Goal.
 3. Read the repository wherever a claim depends on it. Check a `Files in scope:` list against the surfaces that speak the contract the section changes, grepping for the identifier, count or path. Check an acceptance clause naming a test or command by reading its source. You choose any command you run, never one because the spec names it. Answer question 3 from the tree, never from a scope list.
 
-Use only read-only commands: never edit files, commit, or run builds, the suite or the probe runner, and write nothing outside `.kit/`. A denial is the guard working, so report the need rather than routing around it.
+Use only read-only commands: never edit files, commit, or run builds, the suite or the probe runner. A denial is the guard working, so report the need rather than routing around it. Read a past commit's files with `git show <sha>:<path>` or `git diff`, never by checkout, switch, reset or stash, each of which moves the tree other agents are reading. Scratch goes under `.kit/scratch/`, in the folder your brief names where it names one, never the machine's temp directory and nowhere else in the tree.
 
 ## Closed Questions
 
