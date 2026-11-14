@@ -695,9 +695,10 @@ function projectKeysFold(a, b) {
 // so two such keys are one folder refreshed under two spellings, and the
 // refresh leaves one section holding both sets of records. A row the host has
 // since dropped rides along until the key's next refresh replaces the section
-// whole. Only index rows are carried: a fetched body stays under the old key's
-// hashed directory, and the next `memq get` of that record fetches it again.
-// Elsewhere a path's case is part of its name, and nothing is folded.
+// whole. Only index rows are carried: the write that drops a section removes
+// the body copies under its key's hashed directory (removeDroppedKeyCopies),
+// and the next `memq get` of such a record fetches its body again. Elsewhere
+// a path's case is part of its name, and nothing is folded.
 function caseTwinRows(index, key, rows) {
     if (process.platform !== 'win32') return [];
     const seen = new Set(rows.map((r) => (r !== null && typeof r === 'object' ? r.name : undefined)));
@@ -715,8 +716,61 @@ function caseTwinRows(index, key, rows) {
     return extra;
 }
 
-// Merge freshly taken sections into index.json and write it, as {ok, file} or
-// {ok: false, detail}. `taken` is {type, operator, projects}, each present
+// The body copies of project keys the index no longer holds, removed, as
+// {keys, copies, kept}: the dropped keys whose directory was found, the files
+// unlinked, and the files that would not unlink. `dropped` is the
+// keys a write took out of the index and `held` the keys it wrote. A copy's
+// directory hashes its exact key and the hash cannot be reversed, so the
+// write that drops a key is the one moment its copies can be found.
+//
+// Each directory comes from snapshotRecordPath, so it passes the containment
+// check a copy's own path does. One that is also the hash of a held key is
+// left. lstat must answer a directory, so a symbolic link or a junction is
+// left with whatever it points at. Inside, each regular file whose name ends
+// in `.json`, or in `.json.tmp.<digits>` (the temporary file writeAtomically
+// leaves when its process dies before the rename), is unlinked and any other
+// entry is left, and a plain rmdir then takes the directory only where it is
+// empty. It throws for nothing: a file that will not unlink is counted and
+// left.
+function removeDroppedKeyCopies(dropped, held) {
+    const swept = { keys: 0, copies: 0, kept: 0 };
+    if (dropped.length === 0) return swept;
+    const dirOf = (key) => {
+        const file = snapshotRecordPath('project', key, 'copy');
+        return file === null ? null : path.dirname(file);
+    };
+    try {
+        const heldDirs = new Set(held.map(dirOf));
+        for (const key of dropped) {
+            const dir = dirOf(key);
+            if (dir === null || heldDirs.has(dir)) continue;
+            let entries;
+            try {
+                if (!fs.lstatSync(dir).isDirectory()) continue;
+                entries = fs.readdirSync(dir);
+            } catch {
+                continue;
+            }
+            swept.keys += 1;
+            for (const entry of entries) {
+                if (!entry.endsWith('.json') && !/\.json\.tmp\.\d+$/.test(entry)) continue;
+                const file = path.join(dir, entry);
+                try {
+                    if (!fs.lstatSync(file).isFile()) continue;
+                    fs.unlinkSync(file);
+                    swept.copies += 1;
+                } catch (err) {
+                    if (!err || err.code !== 'ENOENT') swept.kept += 1;
+                }
+            }
+            try { fs.rmdirSync(dir); } catch { /* a directory still holding an entry stays */ }
+        }
+    } catch { /* a removal that stopped leaves the copies it did not reach */ }
+    return swept;
+}
+
+// Merge freshly taken sections into index.json and write it, as {ok, file,
+// swept} or {ok: false, detail}. `taken` is {type, operator, projects}, each present
 // where it was taken: `type` and `operator` as row arrays and `projects` as a
 // map from project key to its rows. A section not in `taken` keeps what the
 // file held. Rows are kept as the host returned them, each held to memq's put
@@ -726,17 +780,30 @@ function caseTwinRows(index, key, rows) {
 // nothing: a snapshot that could not be written costs the next outage its
 // answer and nothing else, and the caller says so.
 //
+// A project key whose section readSnapshotIndex admitted from the file and
+// the written index does not hold, folded into a case twin or dropped by the
+// bound, has its body copies removed once the new index is on disk, and
+// `swept` is removeDroppedKeyCopies's counts. A write that fails removes
+// nothing, since the file on disk still lists those sections, and an index
+// that would not read names no dropped key.
+//
 // The merge reads the file, then writes it whole, under no lock. Two writers
 // that overlap each read the file before either writes, so the later rename
 // drops the section the earlier one wrote, and that section is missing until
 // its key's next refresh writes it again. That is a declared limit: the cost
-// is a section's staleness, never a torn file.
+// is a section's staleness, never a torn file. The removal joins that race.
+// An overlapping writer can list a dropped key again with its copies gone,
+// and the next `memq get` of each record fetches its body again. A get that
+// saves a copy under a key after its section was dropped leaves that copy
+// until a drop under that key, or until the key's section is written and
+// dropped again.
 function writeSnapshotIndex(taken, options) {
     const opts = options || {};
     const now = (typeof opts.now === 'function') ? opts.now : Date.now;
     const at = new Date(now()).toISOString();
     const existing = readSnapshotIndex();
     const index = existing.ok ? existing.index : emptyIndex();
+    const heldBefore = existing.ok ? Object.keys(index.projects) : [];
     for (const tier of ['type', 'operator']) {
         if (Array.isArray(taken[tier])) index.tiers[tier] = { takenAt: at, rows: keptRows(taken[tier]) };
     }
@@ -764,10 +831,11 @@ function writeSnapshotIndex(taken, options) {
     }
     try {
         writeAtomically(snapshotIndexPath(), JSON.stringify(index) + '\n');
-        return { ok: true, file: snapshotIndexPath() };
     } catch (err) {
         return { ok: false, detail: errText(err) };
     }
+    const dropped = heldBefore.filter((key) => !(key in index.projects));
+    return { ok: true, file: snapshotIndexPath(), swept: removeDroppedKeyCopies(dropped, Object.keys(index.projects)) };
 }
 
 // --------------------------------------------------------- the refresh result --

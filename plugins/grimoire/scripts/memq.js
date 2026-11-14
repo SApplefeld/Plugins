@@ -14163,6 +14163,14 @@ async function dbRefreshMiddleSteps(drained, passed, opts, deadline, run) {
     }
     process.stdout.write('db-refresh: index.json holds ' + listed.rows.length + ' row(s) for the shared tiers'
         + (key === null ? '' : ' and ' + sanitize(key, PATH_DISPLAY_CAP)) + '\n');
+    // The body copies the write removed with the sections it dropped, as
+    // counts alone, since a project key can carry a folder's path.
+    const swept = written.swept;
+    if (swept.copies > 0 || swept.kept > 0) {
+        process.stdout.write('db-refresh: removed ' + swept.copies + ' body copy file(s) of ' + swept.keys
+            + ' project key(s) index.json no longer holds'
+            + (swept.kept > 0 ? ', and ' + swept.kept + ' would not unlink' : '') + '\n');
+    }
 
     // The embed pass: every row the host lists without a vector, from the
     // body the host holds.
