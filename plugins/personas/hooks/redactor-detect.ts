@@ -198,22 +198,30 @@ function keyedHash(text: string): string {
 // value is, and comes back as it was handed: the hide is counted and
 // collected under the vault's placeholder, and the text keeps the record
 // that a re-hide pass made the hide.
+// In a scan's second reading, as scrubSecrets runs one, a value the vault
+// held when the reading began is held, the values the first reading added
+// among them. A mint of a held value marks nothing, takes no mark away and
+// joins the value to no session-wide search, so the session's record of what
+// it already held stays as the first reading left it. The value still joins
+// the reading's own same-text list wherever a mint outside a second reading
+// would remember it. A value new to the vault in that reading is recorded as
+// in any scan, at its first mint and at each later one.
 export function mint(kind: Kind, raw: string, evidence: Evidence = 'named'): string {
   if (kind === 'SECRET' && refuseOwnId(raw)) return raw
   const marked = kind === 'SECRET' && marks !== null && marks.vault.has(raw)
   hidden++
   const unparked = kind === 'LITERAL' ? raw : unpark(raw, false)
   const value = kind === 'LITERAL' ? raw : restore(unparked)
-  if (kind === 'SECRET' && evidence !== 'known' && evidence !== 'token' && value === unparked) (evidence === 'shape' ? shapeOnly : namedHide).add(value)
   const seen = byValue.get(value)
-  if (kind === 'SECRET') {
-    if (evidence === 'token') {
-      if (seen === undefined) tokenOnly.add(value)
-    } else if (evidence !== 'known' && value === unparked) tokenOnly.delete(value)
-  }
-  const joins = kind === 'SECRET' && evidence !== 'token' && !tokenOnly.has(value)
+  const held = gained !== null && seen !== undefined && !gained.has(value)
+  // True where a detector mints the value as written on evidence of its own.
+  const own = kind === 'SECRET' && evidence !== 'known' && evidence !== 'token' && value === unparked
+  if (own && !held) (evidence === 'shape' ? shapeOnly : namedHide).add(value)
+  if (kind === 'SECRET' && evidence === 'token' && seen === undefined) tokenOnly.add(value)
+  if (own && !held) tokenOnly.delete(value)
+  const joins = kind === 'SECRET' && evidence !== 'token' && (own || !tokenOnly.has(value))
   if (seen) {
-    if (joins) remember(value)
+    if (joins) remember(value, held)
     minted?.add(seen)
     return marked ? raw : seen
   }
@@ -224,6 +232,7 @@ export function mint(kind: Kind, raw: string, evidence: Evidence = 'named'): str
   }
   byValue.set(value, tag)
   byTag.set(tag, value)
+  gained?.add(value)
   if (joins) remember(value)
   minted?.add(tag)
   return tag
@@ -231,10 +240,12 @@ export function mint(kind: Kind, raw: string, evidence: Evidence = 'named'): str
 
 // A secret is hidden again wherever it turns up later: across the session
 // when it is distinctive enough (echoable), and within the text being
-// scanned right now when it is shorter but still not a plain word.
-function remember(value: string): void {
+// scanned right now when it is shorter but still not a plain word. A value
+// that is `held`, as mint reads it in a second reading, joins the same-text
+// list by the same test and stays out of the session-wide search.
+function remember(value: string, held = false): void {
   const echoes = echoable(value)
-  if (echoes && !echo.has(value)) {
+  if (echoes && !held && !echo.has(value)) {
     echo.add(value)
     echoIndex = null
   }
@@ -333,6 +344,11 @@ const namedHide = new Set<string>()
 const tokenOnly = new Set<string>()
 // The values minted during the current scan, to hide at their other spots.
 let local: Set<string> | null = null
+// The values the vault gained during the second reading in hand, and null
+// outside one. A value the vault holds that is not in the set was held when
+// the reading began, which is how mint tells a held value without a copy of
+// the vault. Saved and restored with `local`.
+let gained: Set<string> | null = null
 
 // The scan-private placeholders of the scan in hand, and null outside a
 // scan. A re-hide pass writes each hide it makes as one, so the placeholder
@@ -340,9 +356,9 @@ let local: Set<string> | null = null
 // text around it. `of` gives the scan-private placeholder for a vault
 // placeholder and `vault` the reverse, `text` is the text the scan was
 // handed, and `held` is every hash a placeholder body in that text shows,
-// read at the first hide. scrubSecrets saves and restores the record as it
-// does `local`, so a scan that runs inside another keeps its own, and takes
-// every scan-private placeholder out of the vault on each path out.
+// read at the first hide. readText saves and restores the record as it
+// does `local`, so a reading that runs inside another keeps its own, and
+// takes every scan-private placeholder out of the vault on each path out.
 type Marks = { text: string; held: Set<string> | null; of: Map<string, string>; vault: Map<string, string> }
 let marks: Marks | null = null
 
@@ -380,8 +396,8 @@ function scanMark(tag: string): string {
 // tick scrubSecrets was handed, and null where no caller set one. It throws
 // once the caller's deadline has passed, so a scan ends between two passes
 // rather than running on past the hook's budget. Saved and restored by
-// scrubSecrets as `parked` and `local` are, so a nested scan never leaves
-// the outer scan holding its tick.
+// scrubSecrets, as readText saves and restores `parked` and `local`, so a
+// nested scan never leaves the outer scan holding its tick.
 type Tick = () => void
 let clockTick: Tick | null = null
 
@@ -471,7 +487,10 @@ function buildEchoIndex(values: Iterable<string>): EchoIndex {
 // alone, before every detector, so each detector reads the text with no
 // more than the known value taken out of it. Each hide is written as the
 // scan-private placeholder scanMark gives, and widenKnown widens it once
-// the scan's last pass has run.
+// the scan's last pass has run. A placeholder written here breaks every
+// pattern that would have read across the value, so a scan in which this
+// pass hid a value takes a second reading of the text as written, as
+// scrubSecrets states, and hides what either reading hides.
 function rehideKnown(text: string): string {
   if (echo.size === 0 || text.length < PREFIX) return text
   return rehideWith(clocked(text), (echoIndex ??= buildEchoIndex(echo)))
@@ -577,7 +596,11 @@ type Run = { text: string; base: number; first: number; last: number }
 // The widening pass, run on the finished text after the scan's last pass
 // and after unpark. A session that holds part of a key, as one does after a
 // display cut the key to a fixed width, must show no more of the key than a
-// session that holds none. The passes before this one hide a known value
+// session that holds none. The second reading scrubSecrets takes of a text
+// in which rehideKnown hid a value is what holds that for every detector:
+// this pass repairs the vendor formats, the JWT, the slash run and the
+// token, and the second reading hides whatever else a session that holds
+// none hides. The passes before this one hide a known value
 // alone, so every detector has read the text as it would with that value
 // hidden and nothing else. This pass acts only at the hides the two re-hide
 // passes made of a distinctive known value in this scan. Those passes write
@@ -633,7 +656,7 @@ type Run = { text: string; base: number; first: number; last: number }
 // where one placeholder shows.
 //
 // The pass hands the text back with its scan-private placeholders still in
-// it, where it hid nothing more. scrubSecrets swaps each for the vault's
+// it, where it hid nothing more. readText swaps each for the vault's
 // placeholder of its value.
 function widenKnown(text: string, cfg: Config, scanned: number): string {
   const vault = marks!.vault
@@ -1562,8 +1585,12 @@ const PUBLIC_SHAPE =
 // Prefixes that name a PUBLIC object id, not a key. Stripe hands these out in
 // dashboards, invoices and source code; hiding them makes a session useless
 // and protects nothing. `pk_live_` is Stripe's publishable key, also public.
+// The vendors write these prefixes in lowercase, so the list matches by case
+// and an uppercase one, such as `PROD_`, names no public id. The detect
+// suite's public-prefix check holds its own copy of this list, so a prefix
+// added here is added there too.
 const PUBLIC_PREFIX =
-  /^(?:price|prod|cus|sub|sched|in|ch|pi|cs|py|re|txn|il|si|seti|evt|acct|promo|coupon|plan|card|ba|src|dp|du|iv|ii|rcpt|file|link|pm|tok|pk|test|toolu|msg|req|run|wf)_/i
+  /^(?:price|prod|cus|sub|sched|in|ch|pi|cs|py|re|txn|il|si|seti|evt|acct|promo|coupon|plan|card|ba|src|dp|du|iv|ii|rcpt|file|link|pm|tok|pk|test|toolu|msg|req|run|wf)_/
 // A public id is the prefix, maybe `live_` or `test_`, then one alnum body.
 // `prod_api_key_<random>` is not that shape, so it is judged like any token.
 const PUBLIC_ID_BODY = /^(?:(?:live|test)_)?[A-Za-z0-9]+$/
@@ -2623,30 +2650,48 @@ function scrubTokens(text: string, cfg: Config): string {
   })
 }
 
-// `tick`, where given, is called before every whole-text pass and before
-// each blob decode in parkMedia, and may throw to end the scan there. A call
-// made with none runs under the tick of the scan it is nested in, so the
-// outer deadline bounds its passes too.
-export function scrubSecrets(text: string, cfg: Config, tick?: Tick): string {
-  if (text.length < 8) return text
-  const outerTick = clockTick
+// One reading of the text a scan was handed: the output, and whether
+// rehideKnown hid a value in it. The first reading is the whole scan of a
+// session that holds no part of the text's secrets, with rehideKnown run
+// first. A reading `asWritten` is the second: the passes from the one after
+// rehideKnown on, over the text as it was handed, which is how a session
+// that holds none of its values reads it. So its rehideLocal step runs, and
+// its widenKnown step runs where rehideLocal wrote a scan-private
+// placeholder. Each reading is a scan of its own: it holds its own parking,
+// same-text list and scan-private placeholders, and takes every scan-private
+// placeholder out of the vault on each path out. The second also holds its
+// own collected set, joined to the scan's set when it ends, so its
+// widenKnown takes out no placeholder the first reading collected. The
+// first collects straight into the scan's set, which is empty when it
+// starts. A reading runs under the tick of the scan in hand, and a deadline
+// the tick throws ends the reading there and leaves it as any throw does.
+// One thrown in the first reading reaches the caller. One thrown in the
+// second is caught by scrubSecrets, where the scan was handed the tick,
+// which returns the first reading's output, as it states. During the second, mint records a held value as
+// nothing new, as mint states.
+function readText(text: string, cfg: Config, asWritten: boolean): [out: string, known: boolean] {
   const outer = parked
   const outerLocal = local
+  const outerGained = gained
   const outerMinted = minted
   const outerMarks = marks
   const own: Marks = { text, held: null, of: new Map(), vault: new Map() }
-  clockTick = tick ?? outerTick
   parked = startParking(text)
   local = new Set()
+  gained = asWritten ? new Set() : null
   marks = own
-  // The placeholders this scan mints are collected apart, so widenKnown can
-  // take out one that its wider placeholder replaced, and joined to the
-  // caller's set once the scan ends.
-  if (outerMinted !== null) minted = new Set()
+  if (asWritten && outerMinted !== null) minted = new Set()
   try {
-    // A whole value that is base64 (or base64url) of text holding a secret.
-    if (text.length >= 256 && BASE64_VALUE.test(clocked(text)) && !cfg.allow.has(text) && base64HoldsSecret(text)) return mint('SECRET', text)
-    let out = rehideKnown(text)
+    let out = text
+    let known = false
+    if (!asWritten) {
+      // A whole value that is base64 (or base64url) of text holding a secret.
+      if (text.length >= 256 && BASE64_VALUE.test(clocked(text)) && !cfg.allow.has(text) && base64HoldsSecret(text)) return [mint('SECRET', text), false]
+      out = rehideKnown(text)
+      // Read once, here: a scan-private placeholder rehideLocal writes later
+      // starts no second reading.
+      known = own.vault.size > 0
+    }
     out = parkOpaque(out)
     out = scrubKeyBlocks(out, cfg)
     if (out.includes('eyJ')) out = clocked(out).replace(DOTTED, (m) => scrubJwtChain(m, cfg))
@@ -2662,20 +2707,196 @@ export function scrubSecrets(text: string, cfg: Config, tick?: Tick): string {
     // too: a HAR repeats each query parameter in `url` and `queryString`.
     if (local.size > 0) out = rehideLocal(out, local)
     const done = unpark(out)
-    // A scan in which no known value was hidden again ends here.
-    if (own.vault.size === 0) return done
+    // A reading in which no known value was hidden again ends here.
+    if (own.vault.size === 0) return [done, known]
     // A distinctive known value's placeholder takes in the rest of its key.
     // Each scan-private placeholder that still stands whole is then swapped
     // for the vault's placeholder of its value, so none is handed back.
-    return clocked(widenKnown(done, cfg, text.length)).replace(TAG, (tag) => own.vault.get(tag) ?? tag)
+    return [clocked(widenKnown(done, cfg, text.length)).replace(TAG, (tag) => own.vault.get(tag) ?? tag), known]
   } finally {
-    clockTick = outerTick
     parked = outer
     local = outerLocal
-    // No scan-private placeholder outlives its scan, a scan a thrown
+    gained = outerGained
+    // No scan-private placeholder outlives its reading, a reading a thrown
     // deadline ends among them.
     for (const mark of own.vault.keys()) byTag.delete(mark)
     marks = outerMarks
+    if (minted !== outerMinted) {
+      for (const tag of minted!) outerMinted!.add(tag)
+      minted = outerMinted
+    }
+  }
+}
+
+// A hide of one reading, laid over the scanned text: where it starts and
+// ends there, and the placeholder the reading wrote for it.
+type Hide = { at: number; end: number; tag: string }
+
+// Lays a reading's output over the text the scan was handed and gives the
+// reading's hides in order, or null where the output cannot be laid. The
+// output is walked from its start. The text between two placeholders must
+// equal the scanned text at the same place. A placeholder the scanned text
+// holds as written at that place is carried, and is no hide. Any other
+// placeholder must restore, through the vault, to the scanned text at that
+// place, and is a hide of that length.
+function layOver(text: string, out: string): Hide[] | null {
+  const hides: Hide[] = []
+  let p = 0
+  let q = 0
+  // TAG is shared, and every path out leaves it back at its start.
+  TAG.lastIndex = 0
+  for (let m = TAG.exec(clocked(out)); m !== null; m = TAG.exec(out)) {
+    const tag = m[0]
+    const same = m.index === q || text.startsWith(out.slice(q, m.index), p)
+    p += m.index - q
+    q = m.index + tag.length
+    if (same && text.startsWith(tag, p)) {
+      p += tag.length
+      continue
+    }
+    const value = same ? byTag.get(tag) : undefined
+    if (value === undefined || !text.startsWith(value, p)) {
+      TAG.lastIndex = 0
+      return null
+    }
+    hides.push({ at: p, end: p + value.length, tag })
+    p += value.length
+  }
+  return out.length - q === text.length - p && text.startsWith(out.slice(q), p) ? hides : null
+}
+
+// The scan's output from its two readings' hides, or null where a joined
+// range cannot be written as one placeholder that restores to its text. Two
+// hides that share one or more characters join into one range, and hides
+// that only touch stay apart. Each range is written as one placeholder, and
+// the text outside every range is the text as scanned, so the output hides
+// every character either reading hides. The placeholder is the first
+// reading's where one hide of the first reading has the range's extent, and
+// the second reading's where one of its hides has that extent and none of
+// the first has. Any other range is minted over its text with the evidence
+// `token`, so it joins no search, as widenKnown mints a wider hide.
+function joinReadings(text: string, first: Hide[], second: Hide[]): string | null {
+  const parts: string[] = []
+  let last = 0
+  for (let i = 0, j = 0; i < first.length || j < second.length; ) {
+    let at = -1
+    let end = 0
+    // The longest hide of each reading that starts where the range starts.
+    let one: Hide | undefined
+    let two: Hide | undefined
+    for (;;) {
+      const a = first[i]
+      const b = second[j]
+      const fromFirst = a !== undefined && (b === undefined || a.at <= b.at)
+      const hide = fromFirst ? a : b
+      if (hide === undefined || (at !== -1 && hide.at >= end)) break
+      if (at === -1) at = hide.at
+      end = Math.max(end, hide.end)
+      if (fromFirst) {
+        if (hide.at === at && (one === undefined || hide.end > one.end)) one = hide
+        i++
+      } else {
+        if (hide.at === at && (two === undefined || hide.end > two.end)) two = hide
+        j++
+      }
+    }
+    let tag = one !== undefined && one.end === end ? one.tag : two !== undefined && two.end === end ? two.tag : undefined
+    if (tag === undefined) {
+      const span = text.slice(at, end)
+      tag = mint('SECRET', span, 'token')
+      // The session's own id, which mint hands back as written, and a span
+      // whose own text holds a placeholder the vault restores cannot stand
+      // under one placeholder.
+      if (byTag.get(tag) !== span) return null
+    }
+    parts.push(text.slice(last, at), tag)
+    last = end
+  }
+  parts.push(text.slice(last))
+  return parts.join('')
+}
+
+// `tick`, where given, is called before every whole-text pass and before
+// each blob decode in parkMedia, and may throw to end the scan there. A call
+// made with none runs under the tick of the scan it is nested in, so the
+// outer deadline bounds its passes too.
+//
+// The scan reads its text once where rehideKnown hid no value in it, and
+// its output is that reading's. Where rehideKnown hid one, its placeholder
+// has broken every pattern that would have read across the value, so the
+// scan reads the text a second time as written, once the first reading has
+// finished, and hides every character either reading hides. A session that
+// holds part of a secret then shows no character of the text that a session
+// holding none would hide, and none that the first reading hides. `again`,
+// where given, is asked once before the second reading, and the scan keeps
+// its first reading alone where it answers false: a hook charges the text a
+// second time there. A call made with none takes the second reading
+// unasked. Each reading's output is laid over the text, as layOver states,
+// and the output is written from the two readings' hides, as joinReadings
+// states. Where either cannot be done the scan returns the first reading's
+// output. The range placeholders are minted after the second reading has
+// ended, and nothing the second reading recorded is taken back on any path
+// out.
+//
+// The second reading and the join run under the first reading's tick. A
+// deadline the scan's own tick throws once the first reading has returned,
+// in the second reading or in the join after it, ends the second reading,
+// and the scan returns the first reading's output, so this scan never
+// withholds a text whose first reading finished in time. The caller's
+// deadline has then passed, so a later string of the same call still
+// throws at its first tick, and the caller withholds the whole call. The tick is
+// wrapped to record what it throws, and only that very throw is caught: any
+// other throw reaches the caller, as every throw in the first reading does.
+// A scan handed no tick wraps none and catches nothing, so a deadline it
+// meets under an outer scan's tick is that scan's to catch.
+//
+// The placeholders the scan mints are collected apart from the caller's
+// set and joined to it once the scan ends, so widenKnown can take out one
+// its wider placeholder replaced. After a second reading the scan's set
+// keeps only the placeholders its output shows, so a hook counts one hidden
+// value where one placeholder stands. That holds for a second reading the
+// deadline cut short too: the placeholders it minted leave the set, which is
+// read against the first reading's output with no read of the clock.
+export function scrubSecrets(text: string, cfg: Config, tick?: Tick, again?: () => boolean): string {
+  if (text.length < 8) return text
+  const outerTick = clockTick
+  const outerMinted = minted
+  // What this scan's own tick last threw, held so the catch below can tell
+  // that throw from every other.
+  const cut: { hit: boolean; thrown: unknown } = { hit: false, thrown: undefined }
+  clockTick =
+    tick === undefined
+      ? outerTick
+      : () => {
+          try {
+            tick()
+          } catch (thrown) {
+            cut.hit = true
+            cut.thrown = thrown
+            throw thrown
+          }
+        }
+  if (outerMinted !== null) minted = new Set()
+  try {
+    const [first, known] = readText(text, cfg, false)
+    if (!known || (again !== undefined && !again())) return first
+    let out = first
+    try {
+      const [second] = readText(text, cfg, true)
+      const hides = layOver(text, first)
+      const more = hides === null ? null : layOver(text, second)
+      out = (hides === null || more === null ? null : joinReadings(text, hides, more)) ?? first
+    } catch (thrown) {
+      if (!cut.hit || cut.thrown !== thrown) throw thrown
+      out = first
+    }
+    if (minted !== null) {
+      const shown = new Set<string>(out.match(TAG) ?? [])
+      for (const tag of minted) if (!shown.has(tag)) minted.delete(tag)
+    }
+    return out
+  } finally {
+    clockTick = outerTick
     if (outerMinted !== null) {
       for (const tag of minted!) outerMinted.add(tag)
       minted = outerMinted
@@ -2721,7 +2942,7 @@ export function scrubPii(text: string, cfg: Config): string {
 // whole.
 const MEDIA_KEYS = new Set(['data', 'base64', 'b64_json', 'imageData', 'thumbnail', 'blob'])
 const BASE64_VALUE = /^[A-Za-z0-9+/_-]{256}[A-Za-z0-9+/_-]*={0,2}$/
-const MAX_DEPTH = 64
+export const MAX_DEPTH = 64
 
 // `incomplete` is set when the walk met a part it could not rewrite: deeper
 // than MAX_DEPTH, or an object that is not plain data. A hook that finds a
