@@ -1238,44 +1238,65 @@ elseif (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Report "INFO" "Kit state directory exposure" @("Skipped (git is not on PATH, so tracked and ignored status cannot be read).")
 }
 else {
-    & git -C $kitStateDir rev-parse --is-inside-work-tree 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Report "PASS" "Kit state directory exposure" @("$kitStateDir is not a git working tree, so .kit/ cannot be committed from here.")
-    }
-    else {
-        # Order matters: git stops reporting a path as ignored once it is
-        # tracked, so the tracked case must be tested first or it renders as
-        # merely unignored and understates the damage. A repository can also
-        # ignore .kit/ and still track a file inside it (git add -f), so the
-        # two readings are taken over the same directory rather than one
-        # standing in for the other. The ignore reading takes two questions,
-        # neither about .kit itself: the kit writes .kit/.gitignore containing
-        # *, which git applies to the files under .kit/ and never to .kit, so
-        # asking about the folder would read a self-ignored one as exposed.
-        # First, git add -A would stage no file present there now. Second, a
-        # probe name with no extension, which no file of the kit's carries, is
-        # ignored too, so the rule covers the whole folder and not only the
-        # names present today: a root *.json passes the first question while
-        # leaving the next .jsonl the kit writes exposed.
-        $kitTracked = @(& git -C $kitStateDir ls-files -- ".kit")
-        $kitExposed = @(& git -C $kitStateDir ls-files --others --exclude-standard -- ".kit")
-        & git -C $kitStateDir check-ignore -q -- ".kit/kit-exposure-probe"
-        $kitIgnored = ($LASTEXITCODE -eq 0) -and ($kitExposed.Count -eq 0)
-        if ($kitTracked.Count -gt 0) {
-            Report "WARN" "Kit state directory exposure" (@(
-                "$($kitTracked.Count) path(s) under $kitStatePath are tracked by git, so their contents are in this repo's history and reach every clone:"
-            ) + ($kitTracked | ForEach-Object { "  " + (Get-SanitizedLine $_ 200) }) + @(
-                "Fix: git rm --cached each path above, then add .kit/ to this repo's .gitignore."
-            ))
-        }
-        elseif (-not $kitIgnored) {
-            Report "WARN" "Kit state directory exposure" @(
-                "$kitStatePath is neither tracked nor ignored, so the next 'git add -A' commits it and this repo's kit state reaches every clone.",
-                "Fix: add .kit/ to this repo's .gitignore."
-            )
+    # The launch folder is any project, and git obeys that project's own
+    # config. So each of the four calls below disables the pager and the
+    # repository's file-system monitor, and GIT_NO_LAZY_FETCH is set around
+    # them so that, on a git that knows the variable, a partial clone's
+    # on-demand fetch runs no transport program. A rule file such a clone
+    # holds in its index, marked skip-worktree, and not on disk then goes
+    # unread, so a folder only that file ignores reads as not ignored and the
+    # step warns. The variable's earlier value is put back afterward, so no
+    # later step inherits it.
+    $priorNoLazyFetch = $env:GIT_NO_LAZY_FETCH
+    $env:GIT_NO_LAZY_FETCH = "1"
+    try {
+        & git --no-pager -c core.fsmonitor=false -C $kitStateDir rev-parse --is-inside-work-tree 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Report "PASS" "Kit state directory exposure" @("$kitStateDir is not a git working tree, so .kit/ cannot be committed from here.")
         }
         else {
-            Report "PASS" "Kit state directory exposure" @("$kitStatePath is gitignored, so this repo's kit state stays on this machine.")
+            # Order matters: git stops reporting a path as ignored once it is
+            # tracked, so the tracked case must be tested first or it renders as
+            # merely unignored and understates the damage. A repository can also
+            # ignore .kit/ and still track a file inside it (git add -f), so the
+            # two readings are taken over the same directory rather than one
+            # standing in for the other. The ignore reading takes two questions,
+            # neither about .kit itself: the kit writes .kit/.gitignore containing
+            # *, which git applies to the files under .kit/ and never to .kit, so
+            # asking about the folder would read a self-ignored one as exposed.
+            # First, git add -A would stage no file present there now. Second, a
+            # probe name with no extension, which no file of the kit's carries, is
+            # ignored too, so the rule covers the whole folder and not only the
+            # names present today: a root *.json passes the first question while
+            # leaving the next .jsonl the kit writes exposed.
+            $kitTracked = @(& git --no-pager -c core.fsmonitor=false -C $kitStateDir ls-files -- ".kit")
+            $kitExposed = @(& git --no-pager -c core.fsmonitor=false -C $kitStateDir ls-files --others --exclude-standard -- ".kit")
+            & git --no-pager -c core.fsmonitor=false -C $kitStateDir check-ignore -q -- ".kit/kit-exposure-probe"
+            $kitIgnored = ($LASTEXITCODE -eq 0) -and ($kitExposed.Count -eq 0)
+            if ($kitTracked.Count -gt 0) {
+                Report "WARN" "Kit state directory exposure" (@(
+                    "$($kitTracked.Count) path(s) under $kitStatePath are tracked by git, so their contents are in this repo's history and reach every clone:"
+                ) + ($kitTracked | ForEach-Object { "  " + (Get-SanitizedLine $_ 200) }) + @(
+                    "Fix: git rm --cached each path above, then add .kit/ to this repo's .gitignore."
+                ))
+            }
+            elseif (-not $kitIgnored) {
+                Report "WARN" "Kit state directory exposure" @(
+                    "$kitStatePath is neither tracked nor ignored, so the next 'git add -A' commits it and this repo's kit state reaches every clone.",
+                    "Fix: add .kit/ to this repo's .gitignore."
+                )
+            }
+            else {
+                Report "PASS" "Kit state directory exposure" @("$kitStatePath is gitignored, so this repo's kit state stays on this machine.")
+            }
+        }
+    }
+    finally {
+        if ($null -eq $priorNoLazyFetch) {
+            Remove-Item -LiteralPath Env:GIT_NO_LAZY_FETCH -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:GIT_NO_LAZY_FETCH = $priorNoLazyFetch
         }
     }
 }
