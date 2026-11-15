@@ -4794,14 +4794,14 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - passage: | The roadmap seat's conduct: the roadmap document, an epic's brief and done statements, an epic's start and a change to a running epic | `roadmap` |
 
 ### BS001
-- key: Read `coordinator`'s idle sweep passage for sweeping idle worktrees, scratch entries and build output no finishing pass cleared, `role`'s Standing Grants for the grant, and `plugins/grimoire/scripts/plan-cleanup.js` for the script's mechanics.
+- key: Read `coordinator`'s idle sweep passage for sweeping idle worktrees, scratch entries and build output no finishing pass cleared, `role`'s `references/grants.md` for the grant, and `plugins/grimoire/scripts/plan-cleanup.js` for the script's mechanics.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:71
 - provenance: `docs/plans/claude-kit_work-folders-and-git-reads_spec_v1.md` section 6, 2026-11-14, on the operator's words of 2026-11-10 quoted in that plan's `## Intent`.
 - verdict: keep
 - landed: `docs/plans/claude-kit_work-folders-and-git-reads_spec_v1.md` section 6
 - reason: The sweep is a moment of its own, apart from the finish-time clearing in the row above it (BD001): it runs weekly, by the Coordinator seat, over trees whose sessions never reached a finish. Two documents hold it with a stated split, so the row names each part beside its owner, the form the changelog row (BK001) takes. The coordinator skill states when the seat runs the sweep and what it reports, and the role skill states on whose word, since the role skill owns every standing grant by the row under Coordination and Seats. The script holds every test and every delete, so the row names it as the mechanics, the form the map's legend gives a script in the owner column.
-- passage: | Sweeping idle worktrees, scratch entries and build output no finishing pass cleared | `coordinator` (the idle sweep passage) for the moment, `role` (Standing Grants, the idle sweep grant) for the grant, with the script's mechanics in `plugins/grimoire/scripts/plan-cleanup.js` |
+- passage: | Sweeping idle worktrees, scratch entries and build output no finishing pass cleared | `coordinator` (the idle sweep passage) for the moment, `role` (`references/grants.md`, the idle sweep grant) for the grant, with the script's mechanics in `plugins/grimoire/scripts/plan-cleanup.js` |
 
 ### BR001
 - key: Read the `explainers` skill for an explainer video or a diagram made for the operator: the machine check, the brief, the builder's dispatch, the review and what the delivery message names.
