@@ -31,7 +31,7 @@ Close a step with `goal_done` once its plan has merged, has landed by a push, or
 
 ## Memory
 
-Write to kit memory what the seat learns while holding the goal: a design the architect could not plan, a statement harder than it read, a plan that failed and why. The memory-system skill owns how a record is written.
+Write to kit memory what the seat learns while holding the goal: a design the architect could not plan, a statement harder than it read, a plan that failed and why, each where it passes the memory-system skill's write bar. The memory-system skill owns how a record is written.
 
 ## Turn Budget
 

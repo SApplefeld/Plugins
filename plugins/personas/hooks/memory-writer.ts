@@ -4,7 +4,7 @@
 // memory drain takes the oldest item and writes its record, by a fork of the
 // session's own transcript while the prompt cache is warm and by the Haiku
 // completion over the item's two heads otherwise. This file holds the queue's
-// bounds and its two moves, the two prompts, the reader of the fork's reply,
+// bounds and its two moves, the write bar, the two prompts, the reader of the fork's reply,
 // the cut of its follow-ups and the fork ledger's sum. hooks/drains.ts holds
 // the drain, the memq put, the follow-up queue's read and write, the
 // decisions and the drain's fork watch, and hooks/index.ts the model calls,
@@ -47,6 +47,20 @@ export function takeMemoryOwed(queue: MemoryOwed[], now: number): { item: Memory
   return { item: null, dropped };
 }
 
+// The write bar each of the plugin's three writers carries in its prompt: the
+// rule sentence and the five exclusions of the Write Bar section of the
+// memory-system skill, word for word and in its order, one to a line. A fork
+// holds the transcript and loads no skill, so the prompt holds the copy. The
+// skill's section owns the text, and test-personas/memory-add-unit-test.mjs
+// fails where a line here differs from the skill's.
+export const MEMORY_WRITE_BAR =
+  "A record is written only where a different session, on a different task, would act differently for having read it, and the default is to write nothing.\n" +
+  "An account of what the session did, or of what happened, is never a record.\n" +
+  "The present state of work in flight is never a record: a plan's step, a pull request's or a branch's state, a queue's order, or who waits on whom.\n" +
+  "A measurement or a count with no rule drawn from it is never a record.\n" +
+  "A rule that a skill, the doctrine, or a document or code comment of the working repository already states is never a record.\n" +
+  "What reading one file shows about that file is never a record.";
+
 // The text the writer prompt names the owed turn by: its turnHead, the head
 // of what the turn itself opened with, and its promptHead where the turn head
 // is absent, as on an item stored before the field, or blank.
@@ -56,8 +70,8 @@ export function memoryTurnHead(item: MemoryOwed): string {
 
 // The one user message the fork answers over the session's transcript. It
 // names the plugin as the author and the turn by memoryTurnHead, states that what the transcript carries is data, gives the
-// gate's kind and asks for one JSON object of the shape parseMemoryWriterReply
-// reads.
+// gate's kind, asks for one JSON object of the shape parseMemoryWriterReply
+// reads and states the write bar a record must pass.
 export function memoryWriterPrompt(item: MemoryOwed): string {
   return `[persona memory] This message is from the persona plugin, not the operator. Do not use tools; answer in text only.\n` +
     `It concerns the turn that opened with this prompt: ${memoryTurnHead(item)}\n` +
@@ -67,15 +81,18 @@ export function memoryWriterPrompt(item: MemoryOwed): string {
     `Answer with one JSON object and nothing else:\n` +
     `{"record": {"kind": "fact"|"preference"|"lesson", "text": "<one durable statement, under 400 characters>"} | null, "existing": "<record name>" | null, "followups": [{"subject": "<path or phrase under 80 characters>", "text": "<one line under 200 characters>"}]}\n` +
     `A record is a fact, preference or lesson the operator stated or the work proved; a description of what happened is null.\n` +
+    `${MEMORY_WRITE_BAR}\n` +
     `"existing" names a record shown in a memory block this session that already holds the fact, else null.\n` +
     `Follow-ups are steps the turn promised or was asked and did not do, at most three; an empty list where the turn finished its work.`;
 }
 
 // The Haiku fallback's prompt over the item's two heads: the distiller's own
-// request, unchanged, the heads raw as it has always sent them.
+// request, then the write bar, then the heads raw as it has always sent
+// them. The reply is the fact or NONE.
 export function memoryFallbackPrompt(promptHead: string, answerHead: string): string {
   return `One durable fact about the user, their preferences, or this project that a future session should know. ` +
     `Reply NONE if there is none. No preamble, no labels, just the fact or NONE.\n` +
+    `${MEMORY_WRITE_BAR}\n` +
     `User asked: ${promptHead}\nWorker answered: ${answerHead}`;
 }
 

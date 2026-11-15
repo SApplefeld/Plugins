@@ -669,6 +669,11 @@ function stretchDepsOf(dp: any): StretchDeps {
       return { outcome: written.outcome, stop: written.outcome === "written" ? written.deferred === true : written.outcome === "failed" && !written.ran };
     },
     memq: (args: string[]) => kitMemq(dp, args, { timeoutMs: MEMQ_WRITE_TIMEOUT_MS }),
+    retireUnused: async (timeoutMs: number) => {
+      const notRun: { cause: "start" | "timeout" } = { cause: "start" };
+      const res = await kitMemq(dp, ["retire-unused"], { timeoutMs, onNotRun: (cause) => { notRun.cause = cause; } });
+      return res ?? notRun;
+    },
     enqueue: async (inputs) => {
       if (inputs.length === 0 || !meterSessionKnown(sess.mySessionId)) return;
       const store = commonsStoreOf(dp);
@@ -5736,7 +5741,8 @@ export const register: Register = async (on, options) => {
     await registerTool("memory_add", () => $.tool.register({
       name: "memory_add",
       description:
-        "Write one record to the kit's shared memory store for this persona. Returns the record's name.",
+        "Write one record to the kit's shared memory store for this persona, one that passes the memory-system skill's write bar. " +
+        "Returns the record's name.",
       inputSchema: {
         type: "object",
         properties: {

@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the operating manual for the kit memory store's extension layer: the memory records the shared memory database holds plus an outcome journal, used-tracking, tags, a decay lifecycle, a shared project-type tier, an operator tier, and the `memq` CLI that reaches all of them. It owns the moments where a session touches that store beyond reading one record: recalling the whole store at effort start or a seat takeover, reporting what the store recorded during a session, logging an action outcome, stamping a memory applied, tagging, running or reading the decay pass, pinning against decay, writing or repairing or deleting a shared-tier record, recording file anchors and recognition triggers on a record, and interpreting a refusal when a memory write is denied. It also owns how `memq` resolves which store answers from a given working directory, which verbs stand down on a network share, and how each verb's output and exit status must be read. Load class: `named-trigger` - the frontmatter description says to use it when working with the store beyond plain memory files and lists the specific verbs, fields and error states that trigger it, so it is loaded before one of those acts rather than at session start or at every plan run.
 
-Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 (`skills.memory-system.c2.md`); lines 147-208 (`skills.memory-system.c3.md`); lines 209-255 (`skills.memory-system.c4.md`); lines 256-316 (`skills.memory-system.c5.md`). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`T` entries below, their source lines read at that pass's fix rounds 1 and 2). Amended on 2026-09-25 by `docs/plans/claude-kit_persona-memory-port_spec_v1.md` sections 3, 5 and 6 (`D` entries below). Redrafted on 2026-09-26 by section 6 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `c3de1f16` with its fix round at `894c89d4`, so every live entry's `passage:` line quotes the text at `894c89d4` and the `flag:` lines record that pass's flags. Redrafted on 2026-10-01 by section 5 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied that plan's cut list, so every live entry's `passage:` line quotes the text that section landed, and the entries its drop rows retired carry `ruled: cut 2026-09-30`. Amended on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and `memq` its one door (`E` entries below); an entry whose rule that section kept in new words reads `rewrite` with its `passage:` quoting the new text, and an entry whose passage that section deleted reads `retire`, with a `superseded-by:` line only where an `E` entry's passage carries its rule. Amended on 2026-10-04 by section 6 of the same plan, which made `delete-type` and `delete-operator` mark the record's database row deleted rather than remove files (`E007` and `E008` below), and respelled the `forget` row to match the soft delete it already sent (`E009` below). Amended on 2026-10-04 by section 7 of the same plan, which stands a store root that is not the machine's own down from the memory database (`E010` below). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the markdown tiers, the store's git channel, the local search index, the write-door hook on the tier files, the type lock and the journal rollup with its malformed-line flag, and left `memq` reading no outcome journal: c1.C021, c1.C089, c2.C044 to c2.C051, c2.C099, c2.C141, c2.C142, c3.C021, c3.C041, c3.C043, c3.C093, c3.C108, c4.C077, c5.C035, c5.C052, c5.C053, c5.C056, c5.C057, c5.C058, c5.C064, c5.C070, c5.C074, c5.C080 to c5.C083, c5.C086, c5.C088, c5.C093, c5.C094, c5.C096, c5.C099, c5.C105, c5.C106, S015, S016, S021 and T001 deleted with their subjects; c1.C031, c1.C035, c1.C057, c1.C077, c1.C088, c1.C092, c1.C093, c1.C110, c2.C064, c2.C071, c2.C101, c2.C120, c3.C001, c3.C032, c3.C036, c4.C083, c5.C059, c5.C098, S006 and S007 rewritten to their passages as they now read, with their keys reworded where the key named a removed flag, path or reader; and the keys, reasons or provenance of c2.C067, c3.C006, c3.C033, c3.C035, c3.C044, c3.C103, c4.C032, c4.C043, c4.C082, D002 and E001 reworded where they stated the sync, the guard or a removed verb as present. Amended by `docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md` section 3 on 2026-10-12 (`N` entries below; c1.C077, c3.C016, c3.C033, c3.C036, S006 and S007 amended in place, carrying its provenance), and by its sections 1 and 2 the same day (c1.C086, c1.C052 and c3.C077 amended in place). Amended by `docs/archive/claude-kit_memq-recent-and-get-repairs_spec_v1.md` section 3 on 2026-10-12 (c2.C039 rewritten in place, carrying its provenance). Amended by `docs/plans/claude-kit_two-facts-pair-verdicts_spec_v1.md` section 2 on 2026-10-12, which added `memq two-facts` and the scan's withholding of a judged pair (c1.C086, N003 and N006 rewritten in place, carrying its provenance). Amended by `docs/plans/claude-kit_fork-drafted-pair-dispositions_spec_v1.md` section 4 on 2026-10-14, which named the persona plugin's `[PAIR DRAFTS]` block (N010 added, N003 and N004 reworded in place).
+Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 (`skills.memory-system.c2.md`); lines 147-208 (`skills.memory-system.c3.md`); lines 209-255 (`skills.memory-system.c4.md`); lines 256-316 (`skills.memory-system.c5.md`). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`T` entries below, their source lines read at that pass's fix rounds 1 and 2). Amended on 2026-09-25 by `docs/plans/claude-kit_persona-memory-port_spec_v1.md` sections 3, 5 and 6 (`D` entries below). Redrafted on 2026-09-26 by section 6 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `c3de1f16` with its fix round at `894c89d4`, so every live entry's `passage:` line quotes the text at `894c89d4` and the `flag:` lines record that pass's flags. Redrafted on 2026-10-01 by section 5 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied that plan's cut list, so every live entry's `passage:` line quotes the text that section landed, and the entries its drop rows retired carry `ruled: cut 2026-09-30`. Amended on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and `memq` its one door (`E` entries below); an entry whose rule that section kept in new words reads `rewrite` with its `passage:` quoting the new text, and an entry whose passage that section deleted reads `retire`, with a `superseded-by:` line only where an `E` entry's passage carries its rule. Amended on 2026-10-04 by section 6 of the same plan, which made `delete-type` and `delete-operator` mark the record's database row deleted rather than remove files (`E007` and `E008` below), and respelled the `forget` row to match the soft delete it already sent (`E009` below). Amended on 2026-10-04 by section 7 of the same plan, which stands a store root that is not the machine's own down from the memory database (`E010` below). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the markdown tiers, the store's git channel, the local search index, the write-door hook on the tier files, the type lock and the journal rollup with its malformed-line flag, and left `memq` reading no outcome journal: c1.C021, c1.C089, c2.C044 to c2.C051, c2.C099, c2.C141, c2.C142, c3.C021, c3.C041, c3.C043, c3.C093, c3.C108, c4.C077, c5.C035, c5.C052, c5.C053, c5.C056, c5.C057, c5.C058, c5.C064, c5.C070, c5.C074, c5.C080 to c5.C083, c5.C086, c5.C088, c5.C093, c5.C094, c5.C096, c5.C099, c5.C105, c5.C106, S015, S016, S021 and T001 deleted with their subjects; c1.C031, c1.C035, c1.C057, c1.C077, c1.C088, c1.C092, c1.C093, c1.C110, c2.C064, c2.C071, c2.C101, c2.C120, c3.C001, c3.C032, c3.C036, c4.C083, c5.C059, c5.C098, S006 and S007 rewritten to their passages as they now read, with their keys reworded where the key named a removed flag, path or reader; and the keys, reasons or provenance of c2.C067, c3.C006, c3.C033, c3.C035, c3.C044, c3.C103, c4.C032, c4.C043, c4.C082, D002 and E001 reworded where they stated the sync, the guard or a removed verb as present. Amended by `docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md` section 3 on 2026-10-12 (`N` entries below; c1.C077, c3.C016, c3.C033, c3.C036, S006 and S007 amended in place, carrying its provenance), and by its sections 1 and 2 the same day (c1.C086, c1.C052 and c3.C077 amended in place). Amended by `docs/archive/claude-kit_memq-recent-and-get-repairs_spec_v1.md` section 3 on 2026-10-12 (c2.C039 rewritten in place, carrying its provenance). Amended by `docs/plans/claude-kit_two-facts-pair-verdicts_spec_v1.md` section 2 on 2026-10-12, which added `memq two-facts` and the scan's withholding of a judged pair (c1.C086, N003 and N006 rewritten in place, carrying its provenance). Amended by `docs/plans/claude-kit_fork-drafted-pair-dispositions_spec_v1.md` section 4 on 2026-10-14, which named the persona plugin's `[PAIR DRAFTS]` block (N010 added, N003 and N004 reworded in place). Amended by `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 on 2026-11-15, which added the Write Bar section above Search Before Writing: BW001 to BW014 below, under the plan's letter BW. The section's 20 lines moved every line below it down 20, and the `source:` lines of the entries citing those lines are not re-pointed. Amended by section 3 of the same plan on 2026-11-15, which added `memq retire-unused`: BW015 to BW023 below, and c5.C015, S005 and S006 rewritten in place, carrying its provenance. Its table row moved every line below it down one, and its Decay Lifecycle paragraph every line below that down two more.
 
 ### c1.C001
 - key: Load this skill before any work on the kit memory store that goes beyond plain memory files.
@@ -5183,7 +5183,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: rewrite
 - landed: f92e99ec section 5
 - reason: `lastAliveMs` (memq.js:4967) computes the clock, but the pass's judgment step reads every nomination against it, and the plan that installed the formula decided it stay statable verbatim in both code and skill. Retiring the definition would leave the judgment with nothing to check the scan line against. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: A memory's idle clock runs from the freshest of its update time, its created date and its newest `applied` stamp.
+- passage: A memory's idle clock runs from the freshest of its update time, created date, newest `applied` stamp and newest `kept` stamp.
 - flag: stale
 
 ### c5.C002
@@ -5319,13 +5319,14 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - proposed: Delete the "Distinct days, not raw counts" sentence from line 268.
 
 ### c5.C015
-- key: Treat crossing a decay threshold as nominating a memory, never as retiring it.
+- key: Treat crossing a decay threshold as nominating a memory, never as retiring it, with `memq retire-unused` the one exception.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:270
-- provenance: f270e9c 2026-07-31, the plan's Approach: "crossing a threshold only nominates".
-- verdict: keep
-- reason: Nothing mechanically stops a session from treating a scan line as a verdict, and the whole pass is built around a judgment step between scan and prune. The drift-line bar at 207 shares the principle without stating this subject.
-- passage: Crossing a threshold nominates and never retires.
+- provenance: f270e9c 2026-07-31, the plan's Approach: "crossing a threshold only nominates"; narrowed by `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15, which added the one exception.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
+- reason: Nothing mechanically stops a session from treating a scan line as a verdict, and the whole pass is built around a judgment step between scan and prune. The drift-line bar at 207 shares the principle without stating this subject. The rule still binds every threshold the scan reads. The one exception is the class BW016 states, and the sentence names it here so a reader of the rule learns that one path archives with no judgment.
+- passage: Crossing a threshold nominates and never retires, with the one exception the next paragraph states.
 
 ### c5.C016
 - key: Read the tally `applied <date> (<n>d distinct)` off the scan line when judging a nomination.
@@ -6103,13 +6104,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - key: Run the decay pass at close-out.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:296
-- provenance: 8e22ff4 2026-07-31, which had finishing-work run the scan when the decay stamp is older than 14 days; last reworked ae2c70a 2026-08-22; re-extracted at 55c5abc 2026-09-09, which renumbered the step on this line.
+- provenance: 8e22ff4 2026-07-31, which had finishing-work run the scan when the decay stamp is older than 14 days; last reworked ae2c70a 2026-08-22; re-extracted at 55c5abc 2026-09-09, which renumbered the step on this line; reworded by `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15 to name the session's pass, since `memq retire-unused` runs outside it (BW022).
 - verdict: rewrite
-- landed: d2c43f1 section 22
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
 - reason: The rule holds because nothing in memq starts a pass; the safe change is merging it with S023 into one sentence, with this section owning the trigger and finishing-work step 8 calling it, which is the ownership map's assignment.
 - proposed: Merge with S023 into one sentence: the pass runs at close-out, called from finishing-work step 8, and never unprompted outside one.
 - baseline-test: yes
-- passage: The pass runs at close-out, called from `finishing-work` step 8, and never unprompted outside one.
+- passage: The session's pass runs at close-out, called from `finishing-work` step 8, and never unprompted outside one.
 
 ### S006
 - key: Treat a decay stamp older than 14 days, or an absent one, as the archive pass's trigger, which finishing-work step 8 calls.
@@ -6266,13 +6267,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - key: Do not run `decay-prune` unprompted outside a close-out.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:296
-- provenance: ae2c70a 2026-08-22; the pass was designed at 8e22ff4 2026-07-31 as a close-out act made where a human is near; re-extracted at 55c5abc 2026-09-09.
+- provenance: ae2c70a 2026-08-22; the pass was designed at 8e22ff4 2026-07-31 as a close-out act made where a human is near; re-extracted at 55c5abc 2026-09-09; reworded by `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15 to name the session's pass, since `memq retire-unused` runs outside it (BW022).
 - verdict: rewrite
-- landed: d2c43f1 section 22
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
 - reason: The bar holds and nothing enforces it on an attended session; merging it with S005 into the one sentence stating when the pass runs loses no instruction.
 - proposed: Merge with S005 into one sentence: the pass runs at close-out and never unprompted outside one.
 - baseline-test: yes
-- passage: The pass runs at close-out, called from `finishing-work` step 8, and never unprompted outside one.
+- passage: The session's pass runs at close-out, called from `finishing-work` step 8, and never unprompted outside one.
 
 ### D001
 - key: Expect a record's `MEMORY.md` index line description to win over its frontmatter `description:` line wherever the index line holds text, and expect a record with no index line, or an empty one, to rank, publish and be judged on that frontmatter value instead, left out of the `MEMORY.md` block session start prints but ranked in the session-start fleet block like any other record on a machine with the memory database.
@@ -6542,3 +6543,253 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: keep
 - reason: The recognition nudge reads the snapshot and spawns nothing, so a row outliving its record named a dead record. `mem.usp_GetRecord` answers an archived record too, so a miss proves the name deleted or absent, and an outage drops nothing (`cmdGet` in `scripts/memq.js`).
 - passage: A name the memory database answers absent for leaves this machine's snapshot.
+
+### BW001
+- key: Write a record only where a different session, on a different task, would act differently for having read it, and default to writing nothing.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:239
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15, on the operator's ask of the same day for a definition of what goes into the store and a process that takes it back out.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: Without a stated bar, each text telling a session to write reads as leave to write. The plan's Intent counts 1,258 project records written in seven days, and 83 percent of all project records never applied. A record earns its place when a later session acts on it, so the test names that reader, and a different task is named because the writing session already holds what it learned. The persona plugin copies this sentence word for word into its writers' prompts, so it stays one sentence with no backticks or asterisks.
+- passage: A record is written only where a different session, on a different task, would act differently for having read it, and the default is to write nothing.
+
+### BW002
+- key: Do not write a record while unsure whether it passes the test.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:239
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: The test asks the writer to predict a later reader, which no writer can know for sure, so a doubt has to resolve one way. It resolves to no record because every record delivered spends the reading session's context, and an unused one stays until a session or a decay pass removes it. The sentence sits outside the copy the persona plugin pins, so the pin holds the rule sentence alone.
+- passage: A session that is unsure does not write.
+
+### BW003
+- key: Treat the five kinds of text the Write Bar names as never a record, and the list as closed.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:241
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: A test alone leaves each writer to judge each candidate, and the plugin's compaction writer, offered five records each time, wrote 946 records in the week the plan's Intent counts. A closed list names the kinds a writer drops without judging, and its closure keeps a writer from reading a sixth kind into it. Each exclusion is one sentence of its own (BW004 to BW008) so the persona plugin can copy them word for word.
+- passage: Five kinds of text are never a record, and the list is closed:
+
+### BW004
+- key: Never write an account of what the session did or of what happened as a record.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:243
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: An account tells a later session what one session did and gives it no rule to act on, so it fails BW001. The Chapter and the commit message already hold that account (BW009).
+- passage: An account of what the session did, or of what happened, is never a record.
+
+### BW005
+- key: Never write the present state of work in flight as a record.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:244
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: A plan's step, a pull request's or a branch's state, a queue's order and who waits on whom change after the record is written, and the host, the plan doc and the seat's state file answer them fresh. A record of them is stale by the time a different task reads it.
+- passage: The present state of work in flight is never a record: a plan's step, a pull request's or a branch's state, a queue's order, or who waits on whom.
+
+### BW006
+- key: Never write a measurement or a count with no rule drawn from it as a record.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:245
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: A bare figure changes what a later session does only through a rule it supports, so the rule is the record and the figure its evidence. A figure the box sets also expires at the machine configuration epoch, as this skill's `machine:` Field section states.
+- passage: A measurement or a count with no rule drawn from it is never a record.
+
+### BW007
+- key: Never write a rule that a skill, the doctrine, or a document or code comment of the working repository already states as a record.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:246
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: A copy of a stated rule is a second carrier the doctrine's one-owner bullet forbids, and it goes stale when its owner changes. The session meeting the rule's moment reads the owner already.
+- passage: A rule that a skill, the doctrine, or a document or code comment of the working repository already states is never a record.
+
+### BW008
+- key: Never write what reading one file shows about that file as a record.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:247
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: The file is the record, so a later session reads it and sees its current bytes, while the record goes stale at the file's next edit. A fact that spans files, or that the file does not show, is not this kind.
+- passage: What reading one file shows about that file is never a record.
+
+### BW009
+- key: Send an account and the state of work in flight to the Chapter, the commit message or the seat's state file, a measurement to the Chapter or its run's log, and a stated rule or a file's content nowhere, routing a fault in a stated rule to that document's repair or the kaizen inbox.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:249
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: An exclusion with no destination reads as a loss, and a writer holding something true writes it anyway. Each destination already exists and is the surface the text's own reader opens: the doctrine's Chapter and commit-title bullets, and the kaizen skill for a fault in kit text.
+- passage: The first two go to the plan document's Chapter, the commit message or the seat's own state file. The third stays in the Chapter or in the log of the run that measured it. The fourth and the fifth go nowhere, since the document or the file is the record. A fault found in a stated rule goes to that document's own repair or to the kaizen inbox.
+
+### BW010
+- key: Apply the write bar to the creation of a record in every tier, beside the operator and type tiers' routing tests.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:251
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: The bar decides whether a record is written and the routing tests decide which tier takes it, so both apply to a shared-tier write and neither replaces the other.
+- passage: The bar governs the creation of a record in every tier. The operator and type tiers keep their routing tests beside it.
+
+### BW011
+- key: Leave an act that creates no record outside the write bar: an applied stamp, a keep, a tag or trigger edit, a correction to an existing record, and a `memq log` line.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:251
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: The bar answers whether the store gains a record, so an act on an existing record is outside it, and a correction keeps its own routing in the four remedies. A journal line is not a record, and Outcome Logging states its own log and skip lists.
+- passage: An act that creates no record is outside it: an applied stamp, a keep, a tag or trigger edit, a correction to a record that exists, which the four-remedies paragraph routes, and a `memq log` line, whose section has its own skip list.
+
+### BW012
+- key: Treat three creations as outside the write bar, a closed list: an operator decision recorded as "decided YYYY-MM-DD", the brainstorming worth test's `Seen, not built:` record, and a record a kit skill names as the home of one stated kind of content.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:253
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15; the doctrine's "Surface decisions in batches" bullet, the brainstorming skill's worth test and the test-gates skill's pinned-figure paragraph.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: Each of the three is a write another owner orders for a reader it names, so the owner has already judged the record's use and the bar would only contradict it. A decision record is read by a later session that would otherwise ask the operator again. A `Seen, not built:` record is read by the worth test's own search for an earlier sighting. The test-gates skill sends the deep evidence behind a pinned figure to memory, which BW006 would otherwise refuse. The list is closed so a skill's general invitation to write is not read as a fourth exemption (BW013).
+- passage: The bar does not reach three creations, and the list is closed. One is an operator decision recorded as the doctrine's "decided YYYY-MM-DD" bullet states. One is the brainstorming skill's worth-test record of a true finding no open plan can hold, whose description opens `Seen, not built:`. One is a record a kit skill names as the home of one stated kind of content, as the test-gates skill names memory for the deep evidence behind a pinned figure.
+
+### BW013
+- key: Read a skill that sends a session to write what it learned, with no kind stated, as naming no record the bar does not reach.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:253
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15, whose sweep found the goal-holder and finishing-work skills inviting volume with no test.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: Without this sentence the third exemption in BW012 would cover every skill that mentions memory, and the bar would reach nothing. Those two skills point at the bar in one clause each.
+- passage: A skill that sends a session to write what it learned, with no kind stated, names no such record.
+
+### BW014
+- key: Hold the persona plugin's writer prompts as a copy of the test and the five exclusions this section governs.
+- class: pointer
+- source: plugins/grimoire/skills/memory-system/SKILL.md:255
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1 2026-11-15; its section 2 puts the copy in the plugin and pins it to these six sentences.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 1
+- reason: The plan's Intent counts the plugin's writers at 1,015 of one week's 1,258 project records, and a fork holds the transcript and loads no skill, so the bar reaches them only as text in their prompts. The doctrine's one-owner bullet lets a copy stand whole under a parity pin, and this sentence names this section the owner so an edit lands here first.
+- passage: The persona plugin's writers carry the test and the five exclusions in their prompts, as a copy this section governs.
+
+### BW015
+- key: Run `memq retire-unused` with no argument to archive the project tier's unused records tagged `distilled`, at most 50 a call and the oldest first.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:47
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15, which added the verb to `plugins/grimoire/scripts/memq.js`.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
+- reason: The table is where a session looks a verb up, and this one differs from every other mutation in it: it takes no name, so a reader cannot tell from its arguments what it will archive. The row names the class by its tag rather than by its writer, since the selection reads the tag (BW016). It sends that reader to Decay Lifecycle for the selection instead of restating it, and states the three facts a caller acts on at the call: the bound of 50, which `RETIRE_UNUSED_MAX` in `memq.js` holds, the host that does not answer, which the test "retire-unused archives nothing and queues nothing where the memory database does not answer its read or goes away at a retirement, and exits non-zero saying so" pins, and the refusal under the engine store signals.
+- passage: | `memq retire-unused` | Archive the project tier's unused records tagged `distilled`, at most 50 a call and the oldest first. It takes no argument and names no record. Decay Lifecycle states what it selects and who runs it. A host that does not answer archives nothing and queues nothing. Refused under the engine store signals. |
+
+### BW016
+- key: Let `memq retire-unused` archive a live project-tier record with no session's judgment only where all six hold: tagged `distilled`, no applied stamp, no keep, not pinned, not archived, and created and last updated more than 21 days ago.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:214
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15, on the operator's ask of the same day for a process that takes records back out of the store; the plan's first Open Question asks the operator whether a record may be archived with no session's judgment, and the plan proceeds on yes.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
+- reason: The kit has three writers that add records by themselves and had no step that removed one without a session's judgment. A record a plugin writer wrote is a guess about what a later session will need, and the plan's Approach measures the guess as settled inside two weeks: 229 of 237 used records were used inside 14 days, and a week is added for a persona that was idle. Each condition excludes a record somebody judged or used. The selection reads the tag `distilled` and not the writer. `writeMemoryRecord` in `plugins/personas/hooks/drains.ts` sets that tag on every plugin writer's record through an ordinary `memq put --tag`, and memq reserves no tag, so a record any writer tagged `distilled` is in the class. The list is closed so no later reader widens the one unjudged archive, and it is the exception c5.C015 names. The test "retire-unused archives the distilled record nothing applied or kept inside the window and changes no record that fails one of its six conditions" holds one record per condition.
+- passage: **One verb archives with no session's judgment: `memq retire-unused`.** It selects a live project-tier record only where all six hold. The record carries the tag `distilled`, holds no applied stamp, holds no keep, is not pinned, is not archived, and was created and last updated more than 21 days ago.
+
+### BW017
+- key: Do not count a read stamp as protecting a record from `memq retire-unused`.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:214
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15, its Approach under "Why Never Applied Is a Fair Signal".
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
+- reason: The judged route puts a record's body in a prompt and writes no read stamp, so a read stamp neither proves a use nor marks every showing. The applied stamp is the evidence the selection reads (BW016), and a reader who assumed a `memq get` shields a record would leave one to be archived.
+- passage: A read stamp protects nothing, since a read is not a use.
+
+### BW018
+- key: Run `memq keep` on a record tagged `distilled` to take it out of the class `memq retire-unused` archives, whatever the keep's age.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:214
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
+- reason: A keep is a session's judgment that the record still holds, which is the judgment the verb archives for want of. The keep does not expire here as it does on the idle clock, so one keep hands the record to the aging pass's thresholds for good, and a session that means to hold a record has one act that does it.
+- passage: A keep of any age takes a record out of the class.
+
+### BW019
+- key: Expect `memq retire-unused` to touch no type, operator or pending record.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:214
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
+- reason: A shared-tier archival reaches every project and machine and takes `--confirm-shared` everywhere else in this skill, so a reader has to be told that the unjudged path has no shared reach. The plugin's writers write the project tier alone, so the class has no member elsewhere.
+- passage: The verb touches no type, operator or pending record.
+
+### BW020
+- key: Leave `memq retire-unused` to the persona plugin, which runs it once at each compaction whose stretch fork answered, after that fork's applied stamps are written.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:214
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15, which added the call to `stretchDistillation` in `plugins/personas/hooks/stretch-distillation.ts`.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
+- reason: The plugin is the only writer of the class, so it is the party that knows when the class grew, and the plan's Method has the process that adds be the process that subtracts. The order is the safeguard: a record the session was shown and used takes its applied stamp from the fork's reply, so a verb that ran first, or ran where the fork did not answer, could archive a record in use. The suite `test-personas/memory-add-unit-test.mjs` holds the order and the paths that run no verb.
+- passage: The persona plugin runs it once at each compaction whose stretch fork answered, after that fork's applied stamps are written.
+
+### BW021
+- key: Reinstate a record `memq retire-unused` archived by writing it again with `memq put --replace`.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:214
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
+- reason: An archive with no judgment behind it has to state its own undo where it is stated, or a session that finds a wanted record archived has no remedy in front of it. The verb archives through `mem.usp_ArchiveRecord` and deletes nothing, and the Recall section's reinstate sentence gives the same remedy for any retired record. The rewrite moves the record's update time, so the window of BW016 starts again.
+- passage: A record so archived keeps its row, and writing it again with `memq put --replace` reinstates it.
+
+### BW022
+- key: Do not treat `memq retire-unused` as part of the session's decay pass.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:230
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
+- reason: S005 and S006 bar a pass outside a close-out, and the plugin's call runs at a compaction. Without this sentence the two read as a contradiction, and a session reading the bar could take the verb for a step of its own pass and run it at close-out, where no fork has stamped what the session used.
+- passage: `memq retire-unused` is no part of that pass.
+
+### BW023
+- key: Expect the persona plugin to skip `memq retire-unused` where an applied stamp of the stretch failed to write, and to log `stretch_retire_unused` with the counts, the reason the call failed, or the skip.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:214
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3 2026-11-15, its first fix round, which stated the skip and the log line beside the order BW020 states.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 3
+- reason: A stamp that did not reach the host leaves its record reading as unused, so a verb run after it could archive a record the stretch used. The skip only defers the archive to the next answered stretch, and the comment over the call in `plugins/personas/hooks/stretch-distillation.ts` says so. The log line is how a reader of the decision journal tells an archive from a skip or a failure: a call that stopped partway logs its counts with the exit code, since what it counts stays archived. The test "retire-unused failing: each of a non-zero exit, a timeout, a start failure and a throw leaves the brief returned and cached, and one decision holds its reason, the counts leading it where a non-zero exit still printed its closing line" in `test-personas/memory-add-unit-test.mjs` holds the outcomes.
+- passage: It skips the verb where one of those stamps failed to write, and logs `stretch_retire_unused` with the counts, the reason the call failed, or the skip.
+
+### BW024
+- key: Expect the larger tiers to keep about equal shares where the recall digest's budget cuts, and pending to be cut last.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:58
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 4 2026-11-15.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` section 4
+- reason: A digest cut one tier after another in a fixed order prints no project line on a store whose operator tier is larger than the budget, and a session reading it meets none of its own project's records. `recallDigest` in `plugins/grimoire/scripts/memq.js` cuts every tier but the pending one to one level, and a tier holding fewer lines than the level keeps them all, so its unused share goes to the larger tiers. The hand walk reads descriptions from the digest, so the skill says a cut tier is still present. The test "recallDigest gives the surfaces over the level equal shares and leaves a small surface whole" in `test/memq.test.js` holds the shares.
+- passage: When the budget cuts, the larger tiers keep about equal shares, a smaller tier stays whole, and pending is cut last.
+
+### BW025
+- key: Read a memory's idle clock from the freshest of its update time, created date, newest applied stamp and newest kept stamp.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:210
+- provenance: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` finishing pass 2026-11-15, the docs curation's drift item on the idle clock.
+- verdict: keep
+- landed: `docs/plans/claude-kit_memory-earns-its-place_spec_v1.md` finishing pass
+- reason: The decay scan and the prune read a keep as a sign of life, as memq.js rowAliveMs does, so a list that leaves the keep out tells a reader that `memq keep` does not restart the clock it does restart.
+- passage: A memory's idle clock runs from the freshest of its update time, created date, newest `applied` stamp and newest `kept` stamp.

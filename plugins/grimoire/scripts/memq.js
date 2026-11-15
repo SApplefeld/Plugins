@@ -40,6 +40,7 @@
 //   memq keep <name> [--type|--type=<type>|--operator]
 //   memq decay-prune [--archive <name>]... [--archive-type <name>]...
 //                    [--archive-operator <name>]... [--confirm-shared]
+//   memq retire-unused
 //   memq decay-done
 //   memq declare-type <type>|--none
 //
@@ -391,7 +392,7 @@ const DRIFT_PATHS_SHOWN = 4;
 // inside a line that already carries columns and free text, where ten names
 // at the name cap would bury what the line is about.
 const SUPERSEDED_SHOWN = 4;
-const RECALL_MAX_LINES = 200;           // total lines `recall` emits before tier-ordered truncation
+const RECALL_MAX_LINES = 200;           // total lines `recall` emits before its surfaces share the cut
 const RECENT_MAX_LINES = 200;           // total lines `recent` emits before surface-ordered truncation
 const GIT_POINTER_READ_CAP = 4096;      // bytes read from a .git pointer file, which git writes as one line
 // Bytes of the project-type declarations file read to answer which type a
@@ -5266,6 +5267,8 @@ function usage(problem) {
         + '                (stamps the record kept; decay-scan lists it again once its summarize threshold passes since the keep)\n'
         + '       memq decay-prune [--archive <name>]... [--archive-type <name>]...\n'
         + '                        [--archive-operator <name>]... [--confirm-shared]\n'
+        + '       memq retire-unused\n'
+        + '                (archives the project tier\'s distilled records never applied or kept and over 21 days old, 50 a call)\n'
         + '       memq decay-done\n'
         + '       memq declare-type <type>|--none\n'
         + '                (records this project\'s type tier for bare --type and the session hook)\n'
@@ -8135,6 +8138,44 @@ function rowAliveMs(row) {
         applied === null ? undefined : { lastMs: applied, distinctDays: Number(row.appliedDays) || 0 });
 }
 
+// Index rows in the order of use: more applied days first, then the fresher
+// sign of life, then the name. The session-start blocks list a snapshot
+// section in this order (rowLines in hooks/memory-session.js), and the
+// snapshot writer keeps a full section's first rows by it (keptRows in
+// memory-database.js), so a full section keeps the rows that sort first by use,
+// before the block's space grouping or type filter. The sign of life is rowAliveMs's, with the row's creation
+// instant beside its created date, since a snapshot row carries both. A row is
+// host data: applied days that are no finite number read as none, a time that
+// does not parse is no sign of life, so a row with none is older than any row
+// with one, and a value that is not an object reads as a row with no columns.
+// A row's key is worked out once and held beside the row, so a sort parses
+// each row's times once rather than at every comparison. A key is fixed at a
+// row's first comparison, so a caller sorts rows it does not change afterwards.
+function compareByUse(a, b) {
+    const x = useKey(a);
+    const y = useKey(b);
+    if (x.days !== y.days) return y.days - x.days;
+    if (x.alive !== y.alive) return x.alive < y.alive ? 1 : -1;
+    return x.name < y.name ? -1 : x.name > y.name ? 1 : 0;
+}
+
+const useKeys = new WeakMap();
+
+function useKey(value) {
+    const isRow = value !== null && typeof value === 'object';
+    if (isRow && useKeys.has(value)) return useKeys.get(value);
+    const row = isRow ? value : {};
+    const alive = rowAliveMs(row);
+    const created = rowMs(row.createdAt);
+    const key = {
+        days: typeof row.appliedDays === 'number' && Number.isFinite(row.appliedDays) ? row.appliedDays : 0,
+        alive: created !== null && created > alive ? created : alive,
+        name: typeof row.name === 'string' ? row.name : ''
+    };
+    if (isRow) useKeys.set(value, key);
+    return key;
+}
+
 // memq get: the full record behind a find line. Precedence on a name
 // collision: this run's pending memory wins, then a project-tier memory, then
 // the type tier's, then the operator tier's, so the tier closest to the
@@ -8502,52 +8543,69 @@ function triggerlessCount(records) {
 // zero-record surfaces included: an empty surface is a stated fact, never a
 // silent absence), then each surface's lines in the fixed output order
 // archive, type, operator, fleet, project, pending. When the total tops
-// maxLines, record lines are cut tier by tier in the fixed order fleet,
-// project, type, operator, archive, pending, which ranks each surface by how
-// many other ambient paths a reader has to it: the project tier has the most
-// (`memq find`, `memq get`, and its index file sitting in
-// one known directory, pinned or not), so its floor of presence is the one
-// that can be given up first; the type tier follows because the SessionStart
-// hook emits its index; the operator tier follows the type tier because it is
-// deliberately not emitted at session start, leaving it one path fewer;
-// the archive follows both shared tiers because `find` never reaches retired
-// records at all; and the pending tier goes last because a run has no other
-// path to its own pending writes (its index line is exactly what the tier
-// withholds).
+// maxLines, the cut finds one level, a number of lines, and every surface
+// but pending keeps the smaller of its own line count and that level. The
+// level is the highest the budget holds once the header, the fence, the
+// pending lines and the remainder lines are counted, and it is never under
+// one line. So the surfaces that hold more than the level take equal shares,
+// a surface that holds less keeps all it has and its unused share goes to
+// the others, and no surface can crowd another out however large it is. The
+// lines the level leaves spare, always fewer than the surfaces it cut, go
+// one each to those surfaces in output order, and a surface that line leaves
+// one short of whole keeps all it has, since no cut takes one line alone, so
+// its share can run two or more past the others. The pending surface is cut
+// only where every other surface at one line still tops the budget, because
+// a run has no other path to its own pending writes (its index line is
+// exactly what the tier withholds).
 // A cut surface keeps its newest lines (the oldest are what
 // the cut takes) and ends with a counted remainder naming the narrowing
 // move. The coverage header, the remainder lines, and the fence are the
 // floor that survives any budget, because a truncation the output does not
 // announce is a silent one, the failure shape this command refuses
-// everywhere. A single-line surface is never cut: replacing one record with
-// one remainder frees nothing.
+// everywhere. A single-line surface is never cut, and no cut takes one line
+// alone: replacing one record with one remainder frees nothing. Since the
+// level never drops under one line, a budget smaller than the fixed lines plus
+// one line a surface yields output longer than maxLines.
 function recallDigest(surfaces, maxLines) {
     const present = (n) => surfaces[n] !== undefined;
     const order = ['archive', 'type', 'operator', 'fleet', 'project', 'pending']
         .filter(present);
     const isFenced = (l) => l.startsWith('  ');
+    const count = (name) => surfaces[name].lines.length;
     let total = order.length;
     let anyFenced = false;
     for (const name of order) {
-        total += surfaces[name].lines.length;
+        total += count(name);
         if (!anyFenced) anyFenced = surfaces[name].lines.some(isFenced);
     }
     if (anyFenced && surfaces.fence !== undefined) total += 1;
     const kept = new Map();
-    // The fleet surface is cut first. It is the one surface whose records this
-    // machine may not even hold, and every line of it is reachable by a `memq
-    // find` the coverage line above already points at, so it is the cheapest
-    // thing in the digest to lose to the budget.
-    for (const name of ['fleet', 'project', 'type', 'operator', 'archive', 'pending']
-        .filter(present)) {
-        if (total <= maxLines) break;
-        const count = surfaces[name].lines.length;
-        if (count < 2) continue;
-        // Cutting k lines removes k and adds the one remainder line, so a
-        // partial cut nets k - 1 and the deepest useful cut nets count - 1.
-        const k = Math.min(count, total - maxLines + 1);
-        kept.set(name, count - k);
-        total -= k - 1;
+    if (total > maxLines) {
+        const shared = order.filter((name) => name !== 'pending');
+        // A surface over the level by two lines or more keeps the level and
+        // takes a remainder line. One over it by a single line stays whole,
+        // which costs the same, so either way a surface costs the smaller of
+        // its count and the level plus one.
+        const cost = (level) => shared.reduce((sum, name) => sum + Math.min(count(name), level + 1), 0);
+        const fixed = total - shared.reduce((sum, name) => sum + count(name), 0);
+        let level = 1;
+        while (fixed + cost(level + 1) <= maxLines) level += 1;
+        let spare = maxLines - fixed - cost(level);
+        for (const name of shared) {
+            if (count(name) <= level + 1) continue;
+            let keep = level;
+            if (spare > 0) {
+                keep += 1;
+                spare -= 1;
+            }
+            kept.set(name, count(name) - keep === 1 ? count(name) : keep);
+        }
+        // Negative spare is the other surfaces at one line each still over
+        // the budget, and pending gives up what is left: cutting k lines
+        // removes k and adds the one remainder line.
+        if (spare < 0 && present('pending') && count('pending') > 1) {
+            kept.set('pending', Math.max(0, count('pending') + spare - 1));
+        }
     }
     const out = [];
     for (const name of order) out.push(surfaces[name].coverage);
@@ -12304,6 +12362,176 @@ function archiveThroughHost(tier, store, names, where, tag, report, opts) {
     }
 }
 
+// The days a record tagged `distilled` may go with no applied stamp and no
+// keep before retire-unused selects it, counted as elapsed time from the
+// fresher of its created and update times, and the most records one call
+// archives.
+const UNUSED_DISTILLED_DAYS = 21;
+const RETIRE_UNUSED_MAX = 50;
+
+// The bound on one retire-unused call, held below the persona plugin's
+// RETIRE_UNUSED_TIMEOUT_MS (30 s, plugins/personas/hooks/stretch-distillation.ts),
+// which ends a call that runs past its own. The queue drain takes this
+// deadline, and no retirement starts once it has passed, so the call prints
+// its own closing line rather than being ended mid-send. The selection read
+// and the one retirement in flight at the deadline can run past it, each
+// held to the configured call timeout.
+const RETIRE_UNUSED_BUDGET_MS = 12_000;
+
+// The rows retire-unused selects from one index read, oldest first by the
+// fresher of the created and update times, the name breaking a tie. A row is
+// selected only where all of these hold: it is the project tier's, it carries
+// the tag `distilled`, it holds no applied stamp and no keep, it is not
+// pinned, and its created instant and its update time are both more than
+// UNUSED_DISTILLED_DAYS before `now`. The index lists live rows alone, so an
+// archived record is never among them. Each test fails closed: a row whose
+// stamp, applied-day count, pin or time is absent, or of a shape this does
+// not read, is left. A stamp reads as none only where the row carries it as
+// null, and the applied-day count only where it reads as the number 0.
+function unusedDistilledRows(rows, now) {
+    const windowMs = UNUSED_DISTILLED_DAYS * DAY_MS;
+    const selected = [];
+    for (const row of rows) {
+        if (row.tier !== 'project' || typeof row.name !== 'string' || row.name === '') continue;
+        if (!Array.isArray(row.tags) || !row.tags.includes('distilled')) continue;
+        if (row.lastApplied !== null) continue;
+        if (row.appliedDays !== 0) continue;
+        if (row.lastKept !== null) continue;
+        if (row.pinned !== false) continue;
+        const created = rowMs(row.createdAt);
+        const updated = rowMs(row.updated);
+        if (created === null || updated === null) continue;
+        if (!(now - created > windowMs && now - updated > windowMs)) continue;
+        selected.push({ name: row.name, freshest: Math.max(created, updated) });
+    }
+    return selected.sort((a, b) => a.freshest - b.freshest || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+// memq retire-unused: archives the project tier's records tagged `distilled`
+// that nothing used, the one path that archives with no judgment naming the
+// record. The tag is what the persona plugin's writers set, and memq reserves
+// no tag, so the selection reads the tag and not the writer. It takes no argument. The selection is
+// unusedDistilledRows over the host's mem.usp_ListIndex read, the read
+// decay-scan lists its candidates from, and never over the snapshot, which can
+// be hours old and holds a bounded part of a tier. A read stamp protects
+// nothing, since a read is not a use.
+//
+// At most RETIRE_UNUSED_MAX records leave in one call, each through
+// mem.usp_ArchiveRecord as decay-prune --archive sends it, with one
+// `archived` line per record, and a closing line counts the records archived
+// and the records still selected and left for a later call. Nothing selected
+// is one line and exit 0. A record the host no longer holds by the time its
+// retirement is sent is one stderr line, is neither archived nor left, and
+// leaves the exit code alone. An archived record keeps its row and is
+// reinstated by a put --replace of its name.
+//
+// The local queue is drained first, and a queue that does not empty archives
+// nothing: an applied stamp still on it is a use the host has not recorded,
+// so a selection read beside it would archive a record in use. A drain that
+// stands down on a config, such as no database on this machine, prints that
+// stand-down's own sentence and exits 1.
+//
+// A retirement never queues. The send passes `queue: false`, keep's posture,
+// so a host that did not answer the read archives nothing, and one that goes
+// away at a retirement stops the call with that record live; each is one
+// stderr line and exit 1, and the records archived before the stop stay
+// archived. A queued retirement would land at a later drain, after a session
+// may have applied the record.
+//
+// The call runs under RETIRE_UNUSED_BUDGET_MS: the drain takes its deadline,
+// and a retirement past it is not started. That stop is one stderr line, the
+// closing line counts the records left, and the exit code stays 0, since the
+// next call selects them again.
+//
+// The verb is refused whole under the engine store signals, where no session
+// is in the loop and the store root reaches no memory database, and it reads
+// and writes the project tier of the working directory alone: no type, no
+// operator and no pending record is listed for it or sent by it.
+function cmdRetireUnused(argv, options) {
+    const opts = options || {};
+    if (argv.length > 0) return usage('retire-unused takes no arguments');
+    if (storeSignalsPresent()) {
+        return usage('retire-unused archives records with no judgment naming them, which is'
+            + ' refused under the engine store signals (KIT_MEMORY_ROOT with'
+            + ' KIT_MEMORY_ROOT_ALLOW_DATA=1): a fleet worker archives nothing with nobody in the loop');
+    }
+    if (pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
+        process.stderr.write('memq: this call\'s working directory names a network share, so its '
+            + 'project key was not resolved (a synchronous walk under it risks hanging for the '
+            + 'SMB timeout on an unreachable host); nothing was archived\n');
+        process.exitCode = 1;
+        return;
+    }
+    const deadline = Date.now() + RETIRE_UNUSED_BUDGET_MS;
+    const drained = memoryDatabase.drainOnly({ config: opts.config, deps: opts.deps, deadline });
+    if (drained.drain === undefined) {
+        if (drained.standDown === 'unreachable') {
+            process.stderr.write('memq: retire-unused: the memory database did not answer, so nothing was archived or queued\n');
+        } else {
+            process.stderr.write('memq: retire-unused: ' + shownText(memoryDatabase.standDownText(drained), DB_SYNC_REASON_CAP)
+                + '; nothing was archived\n');
+        }
+        process.exitCode = 1;
+        return;
+    }
+    reportDrainRefusals(drained.drain);
+    if (!(drained.ok && drained.drain.ok && drained.drain.remaining === 0)) {
+        process.stderr.write('memq: retire-unused: the local write queue did not empty, and a use stamp still on it'
+            + ' would go unseen, so nothing was archived\n');
+        process.exitCode = 1;
+        return;
+    }
+    // The drain's probe answered on this run, so a down marker an earlier
+    // outage left does not stand the read down.
+    const key = projectKey(process.cwd());
+    const read = memoryDatabase.listIndex(key, { config: opts.config, deps: opts.deps, probed: true });
+    if (!read.ok) {
+        if (read.cause === 'standDown' || read.cause === 'refused' || read.cause === 'schema') {
+            reportHostUnread(read);
+        } else {
+            process.stderr.write('memq: retire-unused: the memory database did not answer, so nothing was archived or queued\n');
+        }
+        process.exitCode = 1;
+        return;
+    }
+    const selected = unusedDistilledRows(Array.isArray(read.rows) ? read.rows : [], Date.now());
+    if (selected.length === 0) {
+        process.stdout.write('retire-unused: nothing selected\n');
+        return;
+    }
+    let archived = 0;
+    let absent = 0;
+    for (const one of selected.slice(0, RETIRE_UNUSED_MAX)) {
+        if (Date.now() >= deadline) {
+            process.stderr.write('memq: retire-unused: the call reached its time bound, so it stopped;'
+                + ' the records left are selected again at the next call\n');
+            break;
+        }
+        const shown = sanitize(one.name, NAME_CAP);
+        const answered = memoryDatabase.writeThrough(
+            memoryDatabase.archiveEntry({ tier: 'project', projectKey: key, name: one.name, delete: false }),
+            { config: opts.config, deps: opts.deps, queue: false, probed: Number(read.schemaVersion) });
+        if (answered.state === 'unreachable') {
+            reportDrainRefusals(answered.drain);
+            process.stderr.write('memq: retire-unused: the memory database did not answer at the retirement of \''
+                + shown + '\', so it was not archived or queued and the call stopped\n');
+            process.exitCode = 1;
+            break;
+        }
+        if (reportUndelivered(answered, 'the retirement of \'' + shown + '\' in the project tier')) break;
+        if (answered.answer.status === 'absent') {
+            process.stderr.write('memq: the memory database holds no record named \'' + shown
+                + '\' in the project tier (nothing archived)\n');
+            absent += 1;
+            continue;
+        }
+        archived += 1;
+        process.stdout.write('archived  ' + shown + '\n');
+    }
+    process.stdout.write('retire-unused: archived ' + archived + ', ' + (selected.length - archived - absent)
+        + ' still selected and left for a later call\n');
+}
+
 // The neighbours block the two authoring verbs print before a shared-tier
 // record is written: the memory database's nearest scan, run over the record
 // about to be created, so an author writing a fact the store already holds
@@ -14880,6 +15108,7 @@ function main() {
     else if (cmd === 'two-facts') cmdTwoFacts(rest);
     else if (cmd === 'keep') cmdKeep(rest);
     else if (cmd === 'decay-prune') cmdDecayPrune(rest);
+    else if (cmd === 'retire-unused') cmdRetireUnused(rest);
     else if (cmd === 'decay-done') cmdDecayDone(rest);
     else if (cmd === 'declare-type') cmdDeclareType(rest);
     // db-refresh is async for the embed pass, find's reason and find's
@@ -15080,6 +15309,7 @@ module.exports = {
     projectSpace,
     projectSpaceRoot,
     spaceOrdered,
+    compareByUse,
     SPACE_LABEL_PATTERN,
     dbRefreshProjectArgs,
     recentLabel,

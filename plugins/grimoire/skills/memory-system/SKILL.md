@@ -44,6 +44,7 @@ One rule governs everything below:
 | `memq two-facts <a> <b> [--type\|--type=<type>\|--operator]` | Record that two records of one tier are two different facts, so `decay-scan` stops listing the pair. The verdict lapses when either record changes, and the pair lists again. No flag records it in the project tier. It changes no record. A name the tier holds no live record of, or holds archived, is refused with nothing written. |
 | `memq keep <name> [--type\|--type=<type>\|--operator]` | Record that a decay candidate still holds. The keep restarts its idle clock and counts as no applied day. No flag keeps a project record. A pinned, superseded or absent name, or a host below schema version 15, is refused with nothing sent. |
 | `memq decay-prune [--archive <name>]... [--archive-type <name>]... [--archive-operator <name>]... [--confirm-shared]` | The pass's one mutation path over the store's own records, and it archives only what its flags name. A shared-tier archival needs `--confirm-shared`: always for `--archive-operator`, and for `--archive-type` whenever the scan of declaring projects finds more than one or cannot run. Running the Decay Pass owns when to supply it. Refuses a pinned target. |
+| `memq retire-unused` | Archive the project tier's unused records tagged `distilled`, at most 50 a call and the oldest first. It takes no argument and names no record. Decay Lifecycle states what it selects and who runs it. A host that does not answer archives nothing and queues nothing. Refused under the engine store signals. |
 | `memq decay-done` | Touch the decay stamp that records a completed pass, `~/.claude/memory-snapshot/decay-stamp`. |
 | `memq declare-type <type>\|--none` | Record the type tier this project opts into, keyed by the working directory's project key, in this machine's `~/.claude/memory-snapshot/project-types.json`. `--none` clears it. Bare `--type`, the type surfaces of `find` and `recall`, and session start's type block read it. |
 | `memq db-refresh` | Queue drain, snapshot refresh, old-row purge. Runs detached at start; next start names failures. |
@@ -54,7 +55,7 @@ On a name collision `get` takes the most specific tier first: a run's pending ti
 
 ## Recall
 
-`memq recall` takes no search term. It emits the whole store as a bounded digest, one summary line per record, ordered by last sign of life, and it announces every truncation with a counted remainder. You do the ranking, reading the digest with the current task in context.
+`memq recall` takes no search term. It emits the whole store as a bounded digest, one summary line per record, ordered by last sign of life, and it announces every truncation with a counted remainder. When the budget cuts, the larger tiers keep about equal shares, a smaller tier stays whole, and pending is cut last. You do the ranking, reading the digest with the current task in context.
 
 So read `recall` before `find` at effort start. A seat takeover reads the digest as well, at the takeover ritual's fourth step in the role skill, which owns what that read covers. `memq judged` prints only the fleet block's judged lines for one project's segment, for a caller that spawns memq, so a session still starts from the digest.
 
@@ -206,9 +207,11 @@ Six types, each saying how its pattern is read: `cmd:<pattern>` against a Bash c
 
 ## Decay Lifecycle
 
-A memory's idle clock runs from the freshest of its update time, its created date and its newest `applied` stamp. Summarizing condenses the body and keeps the description. Archiving marks the record archived.
+A memory's idle clock runs from the freshest of its update time, created date, newest `applied` stamp and newest `kept` stamp. Summarizing condenses the body and keeps the description. Archiving marks the record archived.
 
-**Use extends the thresholds, and never confers permanence.** A memory is a summarize candidate after 30 idle days and an archive candidate after 60, each extended by 30 per distinct applied day, the extension capped at 365. Crossing a threshold nominates and never retires.
+**Use extends the thresholds, and never confers permanence.** A memory is a summarize candidate after 30 idle days and an archive candidate after 60, each extended by 30 per distinct applied day, the extension capped at 365. Crossing a threshold nominates and never retires, with the one exception the next paragraph states.
+
+**One verb archives with no session's judgment: `memq retire-unused`.** It selects a live project-tier record only where all six hold. The record carries the tag `distilled`, holds no applied stamp, holds no keep, is not pinned, is not archived, and was created and last updated more than 21 days ago. A read stamp protects nothing, since a read is not a use. A keep of any age takes a record out of the class. The verb touches no type, operator or pending record. The persona plugin runs it once at each compaction whose stretch fork answered, after that fork's applied stamps are written. It skips the verb where one of those stamps failed to write, and logs `stretch_retire_unused` with the counts, the reason the call failed, or the skip. A record so archived keeps its row, and writing it again with `memq put --replace` reinstates it.
 
 ### Pinning
 
@@ -224,7 +227,7 @@ Every `decay-scan` prints a usage-evidence line on stderr naming the memory data
 
 ### Running the Decay Pass
 
-The decay pass has two cadences: the hygiene step at every close-out, and the archive pass when it is due. The pass runs at close-out, called from `finishing-work` step 8, and never unprompted outside one. The hygiene step never waits on the decay stamp, which is one per machine and shared by every session on it. The scan writes no record and no stamp, so it leaves the archive pass's due date alone.
+The decay pass has two cadences: the hygiene step at every close-out, and the archive pass when it is due. The session's pass runs at close-out, called from `finishing-work` step 8, and never unprompted outside one. `memq retire-unused` is no part of that pass. The hygiene step never waits on the decay stamp, which is one per machine and shared by every session on it. The scan writes no record and no stamp, so it leaves the archive pass's due date alone.
 
 In the hygiene step `decay-scan` reports. Disposition each listed pair by the routing rule above. A later tool result's `[PAIR DRAFTS]` block carries the persona plugin's draft per pair, with any command, a reading of two cut bodies. Read both records of every listed pair before the first verdict, with `memq get <name> --operator|--type=<type> --no-stamp`, bare for a project record. Record a two-facts pair with `memq two-facts <a> <b> --operator|--type=<type>`, bare for a project pair. Read both again before any write, skipping a pair that changed. A pinned record is never archived and, judged redundant, goes to the operator. In a shared-tier pair, repair a member with the right fact and poor wording. Archive the member whose fact its partner already holds, with `decay-prune --archive-operator|--archive-type <name>` under the `--confirm-shared` rules below, needing no pointer. A never-true shared record goes to the operator, and a credential-bearing one at once for delete and rotation. A project-tier pair takes `forget`, `put --replace` or `decay-prune --archive`. Judge every listed candidate summarize, archive or `memq keep`. The listing is the close-out's whole share, and the stderr count is information. A backlog takes `--pairs all` or `--candidates all`, redirected to a `.kit/` file.
 
@@ -233,6 +236,26 @@ Re-read every record the drift block names against its file. Then re-anchor it f
 The archive pass is due when the decay stamp, `~/.claude/memory-snapshot/decay-stamp`, is older than 14 days, or absent (a machine where no pass has ever run is due, not exempt). The run: `decay-scan` reports, your judgment picks, `decay-prune` with the archive flags archives, `memq keep` marks one that still holds, `decay-done` stamps. An archive flag archives what it names and touches nothing else. A record's created date and its last keep are signs of life too. The clock takes the freshest evidence. A project-tier summary is a `memq put --replace`. A shared-tier candidate is summarized through the shared-tier repair path above.
 
 `--confirm-shared` is one flag for the whole invocation, never one per target. The operator tier's gate is unconditional, so give any operator-tier archive its own `decay-prune` call and run the type-tier archive in a separate call without the flag. Add `--confirm-shared` to that type-tier call only once the refusal has named the projects the retirement would reach. Where the refusal says the scan of declaring projects could not be established, the reach is unknown, so ask the operator rather than add the flag. Under the engine store signals the grant covers `decay-prune` and its archive flags, so a pass there archives what it names.
+
+## Write Bar
+
+A record is written only where a different session, on a different task, would act differently for having read it, and the default is to write nothing. A session that is unsure does not write.
+
+Five kinds of text are never a record, and the list is closed:
+
+1. An account of what the session did, or of what happened, is never a record.
+2. The present state of work in flight is never a record: a plan's step, a pull request's or a branch's state, a queue's order, or who waits on whom.
+3. A measurement or a count with no rule drawn from it is never a record.
+4. A rule that a skill, the doctrine, or a document or code comment of the working repository already states is never a record.
+5. What reading one file shows about that file is never a record.
+
+The first two go to the plan document's Chapter, the commit message or the seat's own state file. The third stays in the Chapter or in the log of the run that measured it. The fourth and the fifth go nowhere, since the document or the file is the record. A fault found in a stated rule goes to that document's own repair or to the kaizen inbox.
+
+The bar governs the creation of a record in every tier. The operator and type tiers keep their routing tests beside it. An act that creates no record is outside it: an applied stamp, a keep, a tag or trigger edit, a correction to a record that exists, which the four-remedies paragraph routes, and a `memq log` line, whose section has its own skip list.
+
+The bar does not reach three creations, and the list is closed. One is an operator decision recorded as the doctrine's "decided YYYY-MM-DD" bullet states. One is the brainstorming skill's worth-test record of a true finding no open plan can hold, whose description opens `Seen, not built:`. One is a record a kit skill names as the home of one stated kind of content, as the test-gates skill names memory for the deep evidence behind a pinned figure. A skill that sends a session to write what it learned, with no kind stated, names no such record.
+
+The persona plugin's writers carry the test and the five exclusions in their prompts, as a copy this section governs.
 
 ## Search Before Writing
 

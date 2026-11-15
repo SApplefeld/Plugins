@@ -197,11 +197,7 @@ const SNAPSHOT_AGE_LINE_MS = 60 * 60 * 1000;
 // Bounds on an emitted record list, shared by the project block and the type
 // block: the emission caps bound what a snapshot section contributes to the
 // session's trusted context however many rows it holds.
-const INDEX_MAX_LINES = 30;    // type-tier record lines emitted before the remainder is counted
-// Higher than the type cap because the project tier is the session's primary
-// one: its records are what the session reads from and writes to all day,
-// while the type tier is a shared secondary.
-const PROJECT_INDEX_MAX_LINES = 60;
+const INDEX_MAX_LINES = 30;    // record lines a block emits before the remainder is counted
 const INDEX_LINE_CAP = 200;    // characters per emitted record line
 
 // Bounds on the anchor-drift pass, whose work grows with the store: it reads
@@ -709,8 +705,14 @@ function redirectedRootLine(memq, pendingNamed) {
 // under a block's framing sentence, `- <name> - <description>` each, or null
 // when the section holds no row this can show. Both tiers' sections go out
 // through here, so the bounds one tier is held to are the bounds the other is
-// held to. Rows are listed by name, the order memq's own snapshot readers
-// take, so two sessions reading one snapshot see one list.
+// held to. Rows are listed by use, in memq.compareByUse's order: more applied
+// days first, then the fresher sign of life, then the name. So the lines the
+// count cap keeps are the records sessions have applied most, two sessions
+// reading one snapshot see one list, and a full section's snapshot holds the
+// rows that sort first by use, since its writer cuts by the same comparator
+// before the space grouping here and the type filter. A memq
+// without compareByUse, an installed cache older than this hook, leaves the
+// rows in the snapshot's order rather than throwing the block away.
 //
 // A row is host data crossing into the model's trusted context, so each line
 // passes through memq.sanitize (bounded printable ASCII), and a row's name or
@@ -753,18 +755,22 @@ function redirectedRootLine(memq, pendingNamed) {
 // `space` is the project block's declared space, through memq.spaceOrdered:
 // under one, the space's own rows come first, the unspaced rows next, and
 // other spaces' rows last with `[space: <label>]` after the name, each group
-// in name order, so the count cap takes another space's rows first. Null, or
-// absent for the type block, is the plain name order with nothing marked, and
-// so is a memq without spaceOrdered: an installed cache older than this hook
-// keeps the block, unordered, rather than throwing it away at the call.
-function rowLines(rows, maxLines, memq, compact, space) {
-    const byName = (Array.isArray(rows) ? rows : [])
-        .filter((r) => r !== null && typeof r === 'object' && typeof r.name === 'string' && r.name !== '')
-        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    if (byName.length === 0) return null;
+// in the order by use, so the count cap takes another space's rows first.
+// Null, or absent for the type block, is the plain order by use with nothing
+// marked, and so is a memq without spaceOrdered: an installed cache older
+// than this hook keeps the block, ungrouped, rather than throwing it away at
+// the call.
+//
+// `rest` is what a block's count line says after the count, the verbs that
+// reach the records the cap left out, or absent for a count alone.
+function rowLines(rows, maxLines, memq, compact, space, rest) {
+    const listed = (Array.isArray(rows) ? rows : [])
+        .filter((r) => r !== null && typeof r === 'object' && typeof r.name === 'string' && r.name !== '');
+    const ordered = typeof memq.compareByUse === 'function' ? listed.sort(memq.compareByUse) : listed;
+    if (ordered.length === 0) return null;
     const named = typeof memq.spaceOrdered === 'function'
-        ? memq.spaceOrdered(byName, space === undefined ? null : space, (r) => r.space)
-        : byName.map((row) => ({ row, mark: '' }));
+        ? memq.spaceOrdered(ordered, space === undefined ? null : space, (r) => r.space)
+        : ordered.map((row) => ({ row, mark: '' }));
     const shown = named.slice(0, maxLines).map(({ row: r, mark }) => {
         const description = typeof r.description === 'string' ? r.description.trim() : '';
         const l = '- ' + r.name + (mark === '' ? '' : ' ' + mark) + (description === '' ? '' : ' - ' + description);
@@ -775,7 +781,7 @@ function rowLines(rows, maxLines, memq, compact, space) {
         return '  ' + elided.slice(0, INDEX_LINE_CAP);
     });
     if (named.length > maxLines) {
-        shown.push('  ... and ' + (named.length - maxLines) + ' more records');
+        shown.push('  ... and ' + (named.length - maxLines) + ' more records' + (rest === undefined ? '' : rest));
     }
     return shown;
 }
@@ -981,8 +987,9 @@ function pinnedDestinationBlock(memq) {
 function projectMemoryBlock(cwd, memq, pinned, compact, snapshot) {
     const section = snapshot.index.projects[memq.projectKey(cwd)];
     const lines = section === undefined ? null
-        : rowLines(section.rows, PROJECT_INDEX_MAX_LINES, memq, compact,
-            typeof memq.projectSpace === 'function' ? memq.projectSpace(cwd) : null);
+        : rowLines(section.rows, INDEX_MAX_LINES, memq, compact,
+            typeof memq.projectSpace === 'function' ? memq.projectSpace(cwd) : null,
+            '; `memq recall` and `memq find` reach them');
     if (pinned) {
         if (lines === null) {
             return section === undefined
@@ -1012,8 +1019,8 @@ function projectMemoryBlock(cwd, memq, pinned, compact, snapshot) {
     } else {
         recorded = 'This project has no records yet, so nothing is recorded for it so far.';
     }
-    return 'Kit project memory: this project\'s memory tier is where a fact worth keeping past '
-        + 'this session is written, and `memq find`, `memq get`, and `memq recall` read it back. '
+    return 'Kit project memory: this project\'s memory tier is where a fact that passes the '
+        + 'memory-system skill\'s write bar is written, and `memq find`, `memq get`, and `memq recall` read it back. '
         + recorded + '\n'
         + 'A new memory is written with `memq put <name> "<description>" --body "<text>"`, one fact '
         + 'per record, which lands it in the shared memory database, or in the local queue until '

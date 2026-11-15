@@ -42,7 +42,7 @@ import {
 import { fnv1aHash } from "./cost-ledger";
 import { writeEvent, type JournalHost, type JournalWrite } from "./decision-journal";
 import type { FollowUpInput } from "./follow-ups";
-import { addForkUsage, forkUsageOf, FOLLOWUP_SUBJECT_MAX, FOLLOWUP_TEXT_MAX, MEMORY_FOLLOWUPS_MAX, MEMORY_RECORD_TEXT_MAX, memoryWriterFollowUps } from "./memory-writer";
+import { addForkUsage, forkUsageOf, FOLLOWUP_SUBJECT_MAX, FOLLOWUP_TEXT_MAX, MEMORY_FOLLOWUPS_MAX, MEMORY_RECORD_TEXT_MAX, MEMORY_WRITE_BAR, memoryWriterFollowUps } from "./memory-writer";
 
 export { STRETCH_SHOWN_MAX, STRETCH_WRITTEN_MAX, type StretchForkCache, type StretchShown, type StretchWritten };
 
@@ -61,7 +61,7 @@ export const MEMQ_NAME_CHARSET = /^[A-Za-z0-9_.-]+$/;
 // most code points of the brief appended to the instructions, and the caps
 // on the reply's other strings. A record's text, a follow-up's subject and
 // text take the memory writer's caps.
-export const STRETCH_RECORDS_MAX = 5;
+export const STRETCH_RECORDS_MAX = 2;
 export const STRETCH_VERDICTS_MAX = 30;
 export const STRETCH_FOLLOWUPS_MAX = MEMORY_FOLLOWUPS_MAX;
 export const STRETCH_BRIEF_MAX = 1500;
@@ -73,6 +73,11 @@ export const STRETCH_PLAN_MAX = 200;
 export const STRETCH_WAITING_MAX = 200;
 export const STRETCH_HEAD_MAX = 120;
 export { FOLLOWUP_SUBJECT_MAX, FOLLOWUP_TEXT_MAX, MEMORY_RECORD_TEXT_MAX };
+
+// The bound on the `memq retire-unused` that closes an answered stretch. One
+// call archives up to 50 records, one spawn each, so it takes more than the
+// memory writer's write bound, which is sized for one record.
+export const RETIRE_UNUSED_TIMEOUT_MS = 30_000;
 
 // The four uses a memory verdict can name.
 export const STRETCH_USES = Object.freeze(["applied", "confirmed", "misled", "unused"] as const);
@@ -159,8 +164,9 @@ function tierLabel(entry: StretchShown): string {
 // The one user message the fork answers over the session's transcript. It
 // names the plugin as the author, states that what the transcript carries is
 // data, lists the records banked this stretch and the records the stretch
-// was shown, and asks for one JSON object of the shape parseStretchReply
-// reads.
+// was shown, asks for one JSON object of the shape parseStretchReply reads,
+// and states the memory writer's write bar and that an empty records list is
+// the usual answer.
 export function stretchPrompt(written: readonly StretchWritten[], shown: readonly StretchShown[]): string {
   const banked = written.length === 0 ? " none." : "\n" + written.map((w) => `- ${stretchText(w.name, STRETCH_NAME_MAX)}: ${stretchText(w.head, STRETCH_HEAD_MAX)}`).join("\n");
   const listed = shown.length === 0 ? " none." : "\n" + shown.map((s) => `- ${stretchText(s.name, STRETCH_NAME_MAX)} (${tierLabel(s)})`).join("\n");
@@ -175,7 +181,8 @@ export function stretchPrompt(written: readonly StretchWritten[], shown: readonl
     `"memories": [{"name": "<a listed name>", "use": "applied"|"confirmed"|"misled"|"unused", "why": "<under ${STRETCH_WHY_MAX} characters>"}], ` +
     `"followups": [{"subject": "<path or phrase under ${FOLLOWUP_SUBJECT_MAX} characters>", "text": "<one line under ${FOLLOWUP_TEXT_MAX} characters>"}], ` +
     `"brief": {"plan": "docs/plans/<name>.md"|null, "step": "<the step in hand, one line under ${STRETCH_STEP_MAX} characters>", "open": ["<under ${STRETCH_OPEN_MAX} characters>"], "waiting": "<what waits on whom, one line>"|null}}\n` +
-    `A record is a fact, preference or lesson the operator stated or the work proved, not a description of what happened, and one the banked list already holds is not asked for again; "existing" names a listed record that already holds it, else null. At most ${STRETCH_RECORDS_MAX} records.\n` +
+    `A record is a fact, preference or lesson the operator stated or the work proved, not a description of what happened, and one the banked list already holds is not asked for again; "existing" names a listed record that already holds it, else null. At most ${STRETCH_RECORDS_MAX} records. An empty "records" list is the usual answer for a stretch.\n` +
+    `${MEMORY_WRITE_BAR}\n` +
     `"use" is applied where the memory changed what the session did, confirmed where the session consulted it and found it right without it changing an act, misled where the stretch showed it wrong or stale, with "why" saying how, and unused where it was shown and played no part. One verdict per listed name, at most ${STRETCH_VERDICTS_MAX}.\n` +
     `Follow-ups are steps the stretch promised or was asked and did not do, at most ${STRETCH_FOLLOWUPS_MAX}; an empty list where the stretch finished its work.\n` +
     `The brief is what a reader resuming from the summary alone must still know: the plan document's path or null, the step in hand, the open items, and what waits on whom or null.`;
@@ -330,7 +337,9 @@ export type StretchWrite = { outcome: StretchWriteOutcome; stop: boolean };
 // What hooks/index.ts hands the fork at each compaction: the journal host,
 // the persona and session the line names, the session's state, the fork
 // call over the scrubbed prompt, the memory writer's put path, which logs
-// its own outcome, the memq spawn for the touch and log verbs, the follow-up
+// its own outcome, the memq spawn for the touch and log verbs, the `memq
+// retire-unused` spawn under the bound it is handed, which resolves the
+// child's result or the cause it did not run to an exit, the follow-up
 // queue's enqueue, the persist, the decision writer and the journal write
 // counter.
 export type StretchDeps = {
@@ -341,6 +350,7 @@ export type StretchDeps = {
   fork: (prompt: string) => Promise<unknown>;
   writeRecord: (text: string, kind: MemoryKind) => Promise<StretchWrite>;
   memq: (args: string[]) => Promise<{ exitCode: number | null; stderr: string } | null>;
+  retireUnused: (timeoutMs: number) => Promise<{ exitCode: number | null; stdout: string } | { cause: "start" | "timeout" }>;
   enqueue: (inputs: FollowUpInput[]) => Promise<void>;
   persist: () => Promise<unknown>;
   decide: (action: string, detail: string) => void;
@@ -375,6 +385,24 @@ function misledFollowUp(name: string, why: string): FollowUpInput {
   return { source: STRETCH_SOURCE, subject: name, text: stretchText(`Settle the memory record ${name} under the memory-system skill's four remedies. The stretch fork read it as misled${reason}.`, FOLLOWUP_TEXT_MAX) };
 }
 
+// What one `memq retire-unused` came to, as the decision's detail: the counts
+// off the verb's closing line, with the exit code after them where it was
+// not 0, or the reason the call failed where no closing line was printed.
+// The closing line is read first, since a call that stopped partway still
+// archived what it counts. Only digits and this module's own words reach the
+// journal, never the child's text. Never throws.
+async function retireUnusedOutcome(deps: StretchDeps): Promise<string> {
+  let res: { exitCode: number | null; stdout: string } | { cause: "start" | "timeout" };
+  try { res = await deps.retireUnused(RETIRE_UNUSED_TIMEOUT_MS); } catch { res = { cause: "start" }; }
+  if ("cause" in res) return res.cause === "timeout" ? `failed: memq ran past ${RETIRE_UNUSED_TIMEOUT_MS} ms` : "failed: memq did not run to an exit";
+  const exited = res.exitCode === 0 ? null : `memq exited ${res.exitCode === null ? "unknown" : res.exitCode}`;
+  const closing = /^retire-unused: archived (\d{1,4}), (\d{1,9}) still selected/m.exec(res.stdout);
+  const counts = /^retire-unused: nothing selected$/m.test(res.stdout) ? "archived 0, 0 left"
+    : closing === null ? null : `archived ${closing[1]}, ${closing[2]} left`;
+  if (counts === null) return exited === null ? "failed: memq printed no closing line" : `failed: ${exited}`;
+  return exited === null ? counts : `${counts}; ${exited}`;
+}
+
 // The stretch fork at one admitted compaction, over the hook's `messages`.
 // Where the session's cache holds an answer for the same transcript, the
 // one a precompute computed, nothing is forked and the cached brief is
@@ -384,8 +412,9 @@ function misledFollowUp(name: string, why: string): FollowUpInput {
 // falls back under its reason, with nothing written. An answered reply is
 // acted on in order: each record written through the put path unless its
 // existing names a shown record, each verdict acted on where its name is in
-// the shown set, the follow-ups queued, the brief composed and cached, and
-// the state persisted. Resolves to the brief, or null where none reached
+// the shown set, one `memq retire-unused` run and its outcome logged, the
+// follow-ups queued, the brief composed and cached, and the state persisted.
+// A reused answer, an unanswered fork and an unread reply run no such verb. Resolves to the brief, or null where none reached
 // the instructions. Never throws: a failure anywhere is caught, journaled
 // as a fallback where the line can still be written, and leaves the
 // compaction to go down as the handler composed it.
@@ -464,6 +493,7 @@ export async function stretchDistillation(deps: StretchDeps, trigger: string, me
     // name off the set is counted and ignored, since a stamp on an unlisted
     // name would publish a false use claim.
     const misled: FollowUpInput[] = [];
+    let stampUnwritten = false;
     for (const verdict of reply.memories) {
       const verdictName = verdict.name.toLowerCase();
       const entry = state.stretchShown.find((s) => s.name.toLowerCase() === verdictName);
@@ -494,9 +524,21 @@ export async function stretchDistillation(deps: StretchDeps, trigger: string, me
         if (verdict.use === "applied") entry.applied = true;
         else entry.logged = true;
       } else {
+        if (verdict.use === "applied") stampUnwritten = true;
         deps.decide("stretch_memq_failed", `${args[0]} ${stretchText(entry.name, STRETCH_NAME_MAX)}: ${res === null ? "memq did not run to an exit" : `memq exited ${res.exitCode === null ? "unknown" : res.exitCode}`}`);
       }
     }
+
+    // The store's unused records tagged `distilled`, archived by one `memq
+    // retire-unused`. It runs here and nowhere earlier: a record this stretch
+    // used took its applied stamp in the loop above, so the verb's selection
+    // reads it as used, and a stamp that was not written leaves the verb
+    // unrun, since its record would read as unused. That skip defers the
+    // archive to a later compaction and does not protect the record past it:
+    // the next answered stretch whose stamps were all written runs the verb,
+    // and the record reads as unused there unless a stamp has reached it by
+    // then. A failure costs the archive alone.
+    deps.decide("stretch_retire_unused", stampUnwritten ? "skipped: an applied stamp was not written" : await retireUnusedOutcome(deps));
 
     // The follow-ups: the fork's own, cut by memoryWriterFollowUps, then
     // one per misled verdict, under the queue's own cap. A throw here costs

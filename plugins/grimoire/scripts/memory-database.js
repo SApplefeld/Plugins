@@ -508,8 +508,9 @@ function snapshotIndexPath() {
 
 // The most rows one section of index.json keeps, the recognition nudge's own
 // per-tier take (RECOGNITION_ROWS_MAX in plugins/personas/hooks/recognition.ts). The
-// writer keeps a section's rows in name order and cuts it here, so every file
-// it writes is one its own reader's ceiling below admits.
+// writer cuts a section here, to its rows that sort first by use (keptRows), and
+// stores them in name order, so every file it writes is one its own reader's
+// ceiling below admits.
 const SNAPSHOT_SECTION_ROWS_MAX = 512;
 
 // The characters a row carries in the fields the host's own columns bound and
@@ -571,17 +572,24 @@ function clampedRow(row) {
 }
 
 // A section's rows as the writer keeps them: each clamped, in the host's order,
-// and where there are more than SNAPSHOT_SECTION_ROWS_MAX of them, the first
-// that many in name order, so which rows a large section keeps is the same on
-// every refresh.
+// and where there are more than SNAPSHOT_SECTION_ROWS_MAX of them, that many
+// that sort first by memq.compareByUse, stored in name order. That order is
+// more applied days first, then the fresher sign of life, then the name, the
+// order the session-start blocks list rows in, so a full section keeps the
+// rows a block would list first and drops the records applied on fewest days,
+// the stalest of them first, rather than the ones whose names sort last. The
+// name breaks a tie, the earlier name staying, so which rows a large section
+// keeps is the same on every refresh.
 function keptRows(rows) {
+    const nameOf = (row) => (row !== null && typeof row === 'object' && typeof row.name === 'string' ? row.name : '');
     const byName = (a, b) => {
-        const x = a !== null && typeof a === 'object' && typeof a.name === 'string' ? a.name : '';
-        const y = b !== null && typeof b === 'object' && typeof b.name === 'string' ? b.name : '';
+        const x = nameOf(a);
+        const y = nameOf(b);
         return x < y ? -1 : x > y ? 1 : 0;
     };
     const clamped = rows.map(clampedRow);
-    return clamped.length > SNAPSHOT_SECTION_ROWS_MAX ? clamped.sort(byName).slice(0, SNAPSHOT_SECTION_ROWS_MAX) : clamped;
+    if (clamped.length <= SNAPSHOT_SECTION_ROWS_MAX) return clamped;
+    return clamped.sort(memqLib().compareByUse).slice(0, SNAPSHOT_SECTION_ROWS_MAX).sort(byName);
 }
 
 // The newest ISO time among the sections, or null for an index with none.
@@ -774,8 +782,8 @@ function removeDroppedKeyCopies(dropped, held) {
 // where it was taken: `type` and `operator` as row arrays and `projects` as a
 // map from project key to its rows. A section not in `taken` keeps what the
 // file held. Rows are kept as the host returned them, each held to memq's put
-// caps (clampedRow), in name order and at most SNAPSHOT_SECTION_ROWS_MAX to a
-// section, and an index that would not read is replaced rather than merged
+// caps (clampedRow), and a section past SNAPSHOT_SECTION_ROWS_MAX keeps that
+// many by use (keptRows), and an index that would not read is replaced rather than merged
 // into, since what it held cannot be trusted either way. It throws for
 // nothing: a snapshot that could not be written costs the next outage its
 // answer and nothing else, and the caller says so.
