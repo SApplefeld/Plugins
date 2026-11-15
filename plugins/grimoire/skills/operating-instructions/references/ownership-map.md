@@ -109,6 +109,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Dispatching this session's own subagents | doctrine (Dispatch is requested standing) |
 | Posting a plan document to the operator's thread when the plan is reported | doctrine (A plan travels one way) |
 | A visual sent to the operator over the channel, and when its page file goes too | doctrine (On craft and visual work) |
+| An explainer video or a diagram made for the operator: the machine check, the brief, the builder's dispatch, the review and what the delivery message names | `explainers` |
 
 ## Memory and Kit Prose
 

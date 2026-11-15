@@ -1,13 +1,13 @@
 // shared-state.ts: the before-tool guard that keeps a mutating or gate agent
 // off machine-shared state it does not own.
 //
-// The implementer tiers (the mutating class) and the QA verifier (the gate
-// class) hold Bash and change the tree, so the read-only guard leaves them
-// alone. What they may not do is end a process they did not start, reach past
-// their own files on a checkout another session may commit to, or delete a
-// scratch tree another party holds. Each of those is a coordinating seat's act,
-// so the refusal names the act and sends the agent to its orchestrator under
-// BLOCKED, where the ask runs up one hop.
+// The implementer tiers and the explainer builder (the mutating class) and
+// the QA verifier (the gate class) hold Bash and change the tree, so the
+// read-only guard leaves them alone. What they may not do is end a process
+// they did not start, reach past their own files on a checkout another session
+// may commit to, or delete a scratch tree another party holds. Each of those
+// is a coordinating seat's act, so the refusal names the act and sends the
+// agent to its orchestrator under BLOCKED, where the ask runs up one hop.
 //
 // A denylist, not an allowlist: it denies the closed set of command shapes
 // below, and a heredoc the shared walk `heredocWalk` refuses on either

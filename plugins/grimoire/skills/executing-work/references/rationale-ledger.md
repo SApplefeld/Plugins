@@ -8138,7 +8138,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries step 3 of the section loop. It owns the review round: the correctness and advisory lenses and their triggers, the reviewer tier rule, the round's tree-state bracket, the Document Review Brief, the dispatch table, the Reviewer Dispatch template that carries a row's effort on the Agent tool call, the compensation route, and the Scope Adjudicator Brief. Load class: `plan-run` - the main file's contents table and its skeleton line for step 3 tell a session to read it before any reviewer is dispatched.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C084's reason reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the blind-reviewer, security-reviewer, performance-reviewer and scope-adjudicator dispatches to Opus: c3.C064, R050, R052, R053, R062, U001, U008, U009 and T174 rewritten to their passages as they now read, Q001 through Q003 added for the two new table rows and the ungated Opus gate, R075 rewritten where compensation reaches a Fable-aimed gate alone, and c3.C063's key keyed on the lens's ceiling. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: U002, U003 and R050 rewritten to their passages as they now read, R054 rewritten to the sentence it keeps, c3.C064 rewritten for the narrowed row, A001 and A002 added under the plan's letter A, for the "Finishing adversarial, cleared" row and the fix writer's tier. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: U002, U003 and R056 rewritten to their passages as they now read, and E001 to E005 added under the plan's letter E for the later round's three brief lines, their sighted-only reach and the pre-judging exemption. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: c3.C076 rewritten to its passage as it now reads, naming the altitude interviewer. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` sections 2 and 3 on 2026-10-20: U001 and E002 rewritten to their passages as they now read, and AC001 to AC003 added under the plan's letter AC for the finding verifier's dispatch row, its Opus ceiling and the `refuted` disposition. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the `Failure by area:` line, and R073 and R074 rewritten to their passages as they now read. Amended by `docs/plans/claude-kit_opus-reviews-opus_spec_v1.md` section 1 on 2026-11-01: U001 and U008 rewritten to their passages as they now read, c3.C079 and c3.C081 retired with their sentences cut, and AM001 added under the plan's letter AM for the fable writer's round 1 pair row. Amended by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 on 2026-11-04: c3.C077 retired with the Reviewer Dispatch template's sentence on an omitted `agentType`, cut to pay for the added text, T173 rewritten to its passage as it now reads, U009's reason reworded, and AW007 and AW008 added under the plan's letter AW for the reviewer's absence-check clause and the later round's security summons. Its round 1 fix on the same day added AW009 for the summons's dispatch table row, amended AW008 in place to summon the lens at its ceiling, rewrote E004 to its passage as it now reads, carrying `Fix delta:` to the summons, and dropped c3.C077's `passage:` line, whose sentence the section cut. Its finishing pass on 2026-11-09 rewrote AW007 to its passage as it now reads, scoping the carried clause to a reviewer, moving no line. Section 2's edits and its round 1 fix's moved later lines of the source, and every other `source:` line keeps the line it was read at. Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 on 2026-11-10: I022, R040 and R042 rewritten to their passages as they now read, R045 retired, and BA001 to BA003 added under the plan's letter BA for the adjudicator's amendments heading, its trace target and the Scope Adjudicator Brief. Amended by `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md` section 3 on 2026-11-10, which set the adversarial-reviewer's effort to `medium` from its sweep: U008, U011 and AM001 rewritten to their rows as they now read, each keeping the lenses still at `low`, and BC002 added under the plan's letter BC for the adversarial-reviewer's row split out of them. Its rewritten and added entries' `source:` lines name the lines their rows sit on in that section's tree. Amended by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2 on 2026-11-11, which sends every dispatch-table row through the Agent tool, its effort passed on the call: U010, U012, c3.C063, c3.C065 and Q002 rewritten to their rows as they now read, c3.C064 and A001 re-quoted with their route cells, G001 and G002 re-quoted, c3.C073, c3.C076, c3.C084, c3.C085, c3.C089, c3.C092, c3.C093, R073, R074 and W018 rewritten to their passages as they now read, c3.C074 and c3.C090 retired, and the keys or reasons of c3.C075, c3.C078, R050 and R052 reworded. Amended by `docs/plans/claude-kit_judge-own-commits-signals-agree_spec_v1.md` section 1 on 2026-11-11: BA003 rewritten to its passage as it now reads, the whole-changeset line naming the plan's first own commit and the words `start unconfirmed`. Amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 on 2026-11-11: BH001 to BH008 added under the plan's letter BH for the reviewer reading contract, the reading rule and the files block. Amended by that plan's section 2 on 2026-11-11: R030 and R032 rewritten to their passages as they now read, each lens given the changed-file list beside the base ref, and BH009 to BH013 added under the plan's letter BH for the orchestrator's check of each code lens's return against the list it sent. Its new paragraph moved every later line of the source down by 2, and the entries whose `source:` line named their passage's line were re-pointed to it. Amended by `docs/plans/claude-kit_readonly-agents-scratch_spec_v1.md` finishing pass on 2026-11-14: BT001 for the blind boilerplate's `.kit/` bar.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C084's reason reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the blind-reviewer, security-reviewer, performance-reviewer and scope-adjudicator dispatches to Opus: c3.C064, R050, R052, R053, R062, U001, U008, U009 and T174 rewritten to their passages as they now read, Q001 through Q003 added for the two new table rows and the ungated Opus gate, R075 rewritten where compensation reaches a Fable-aimed gate alone, and c3.C063's key keyed on the lens's ceiling. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: U002, U003 and R050 rewritten to their passages as they now read, R054 rewritten to the sentence it keeps, c3.C064 rewritten for the narrowed row, A001 and A002 added under the plan's letter A, for the "Finishing adversarial, cleared" row and the fix writer's tier. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: U002, U003 and R056 rewritten to their passages as they now read, and E001 to E005 added under the plan's letter E for the later round's three brief lines, their sighted-only reach and the pre-judging exemption. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: c3.C076 rewritten to its passage as it now reads, naming the altitude interviewer. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` sections 2 and 3 on 2026-10-20: U001 and E002 rewritten to their passages as they now read, and AC001 to AC003 added under the plan's letter AC for the finding verifier's dispatch row, its Opus ceiling and the `refuted` disposition. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the `Failure by area:` line, and R073 and R074 rewritten to their passages as they now read. Amended by `docs/plans/claude-kit_opus-reviews-opus_spec_v1.md` section 1 on 2026-11-01: U001 and U008 rewritten to their passages as they now read, c3.C079 and c3.C081 retired with their sentences cut, and AM001 added under the plan's letter AM for the fable writer's round 1 pair row. Amended by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 on 2026-11-04: c3.C077 retired with the Reviewer Dispatch template's sentence on an omitted `agentType`, cut to pay for the added text, T173 rewritten to its passage as it now reads, U009's reason reworded, and AW007 and AW008 added under the plan's letter AW for the reviewer's absence-check clause and the later round's security summons. Its round 1 fix on the same day added AW009 for the summons's dispatch table row, amended AW008 in place to summon the lens at its ceiling, rewrote E004 to its passage as it now reads, carrying `Fix delta:` to the summons, and dropped c3.C077's `passage:` line, whose sentence the section cut. Its finishing pass on 2026-11-09 rewrote AW007 to its passage as it now reads, scoping the carried clause to a reviewer, moving no line. Section 2's edits and its round 1 fix's moved later lines of the source, and every other `source:` line keeps the line it was read at. Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 on 2026-11-10: I022, R040 and R042 rewritten to their passages as they now read, R045 retired, and BA001 to BA003 added under the plan's letter BA for the adjudicator's amendments heading, its trace target and the Scope Adjudicator Brief. Amended by `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md` section 3 on 2026-11-10, which set the adversarial-reviewer's effort to `medium` from its sweep: U008, U011 and AM001 rewritten to their rows as they now read, each keeping the lenses still at `low`, and BC002 added under the plan's letter BC for the adversarial-reviewer's row split out of them. Its rewritten and added entries' `source:` lines name the lines their rows sit on in that section's tree. Amended by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2 on 2026-11-11, which sends every dispatch-table row through the Agent tool, its effort passed on the call: U010, U012, c3.C063, c3.C065 and Q002 rewritten to their rows as they now read, c3.C064 and A001 re-quoted with their route cells, G001 and G002 re-quoted, c3.C073, c3.C076, c3.C084, c3.C085, c3.C089, c3.C092, c3.C093, R073, R074 and W018 rewritten to their passages as they now read, c3.C074 and c3.C090 retired, and the keys or reasons of c3.C075, c3.C078, R050 and R052 reworded. Amended by `docs/plans/claude-kit_judge-own-commits-signals-agree_spec_v1.md` section 1 on 2026-11-11: BA003 rewritten to its passage as it now reads, the whole-changeset line naming the plan's first own commit and the words `start unconfirmed`. Amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 on 2026-11-11: BH001 to BH008 added under the plan's letter BH for the reviewer reading contract, the reading rule and the files block. Amended by that plan's section 2 on 2026-11-11: R030 and R032 rewritten to their passages as they now read, each lens given the changed-file list beside the base ref, and BH009 to BH013 added under the plan's letter BH for the orchestrator's check of each code lens's return against the list it sent. Its new paragraph moved every later line of the source down by 2, and the entries whose `source:` line named their passage's line were re-pointed to it. Amended by `docs/plans/claude-kit_readonly-agents-scratch_spec_v1.md` finishing pass on 2026-11-14: BT001 for the blind boilerplate's `.kit/` bar. Amended by `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 on 2026-11-14: BR001 and BR002 added under the plan's letter BR for the two `explainer-builder` rows of the dispatch table. The two rows moved every later line of the source down by 2, and the `source:` lines of the entries after them were not re-pointed.
 
 ### I021
 - key: Title the reference file carrying step 3 of the section loop, with the dispatch table and the review templates `Reviewing a Section`.
@@ -9318,6 +9318,24 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: `docs/plans/claude-kit_readonly-agents-scratch_spec_v1.md` finishing pass
 - reason: Each blind prompt is built from this boilerplate, so a whole-folder bar here outranks the charter's narrower one and a project tracking suites under `.kit/` still reaches the lens short. The bar follows the charter's: the untracked category is the orchestrator's scratch, and a tracked path is the project's own.
 - passage: The blind boilerplate bars reading untracked paths under `.kit/`, the orchestrator's scratch, save the files the lens wrote there itself.
+
+### BR001
+- key: Dispatch the explainer builder, `explainer-builder`, at model opus with its frontmatter default, via the Agent tool.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/review.md:95
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, whose Goal pins the builder to Opus and whose Approach puts the tier in the dispatch table, on the Opus-for-every-build recommendation its Intent records as agreed.
+- verdict: keep
+- reason: The explainers skill points at this row in the fixed pointer form and names no level, and `test/dispatch-table.test.js` holds the row's frontmatter claim to the charter, so the tier is stated once.
+- passage: | **Explainer builder**, `explainer-builder` | opus | `medium` (frontmatter default) | Agent tool |
+
+### BR002
+- key: Dispatch an explainer draft, `explainer-builder` under a model override, at model sonnet with its frontmatter default, via the Agent tool.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/review.md:96
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, whose Approach passes the draft row's one model as the kit dispatches `implementer-fable` under an override, on the draft label its Intent records as agreed.
+- verdict: keep
+- reason: A draft is the one build a smaller model makes, only on the operator's own words asking for one, and the charter's frontmatter keeps its other setting, so the row names the model alone.
+- passage: | **Explainer draft**, `explainer-builder` under a model override | sonnet | `medium` (frontmatter default) | Agent tool |
 
 ## plugins/grimoire/skills/executing-work/references/findings.md
 
@@ -27515,3 +27533,271 @@ Written by `docs/plans/claude-kit_readonly-agents-scratch_spec_v1.md` section 2 
 - landed: `docs/plans/claude-kit_readonly-agents-scratch_spec_v1.md` section 2
 - reason: A checkout, switch, reset or stash moves the tree every agent is reading, and `git show` reads the same bytes in place. The strict class leaves the temp directory writable, as fixture `readonly-agent-0223` records, so the charter alone keeps scratch out of it. The pair is one text in all fourteen strict charters, since each is loaded alone.
 - passage: Read a past commit's files with `git show <sha>:<path>` or `git diff`, never by checkout, switch, reset or stash, each of which moves the tree other agents are reading. Scratch goes under `.kit/scratch/`, in the folder your brief names where it names one, never the machine's temp directory and nowhere else in the tree.
+
+## plugins/grimoire/agents/explainer-builder.md
+
+This document is the charter for a dispatched agent named explainer-builder, which builds one explainer video or diagram from a session's brief with the kit's explainer scripts. It owns the build's order of work, the page contract the capture script calls, the picture rules, the capture method, the builder's limits on the machine, its check and its report, and the diagram route. The load class is `plan-run`: the agent loads the charter itself when the explainers skill dispatches it at the dispatch table's "Explainer builder" or "Explainer draft" row.
+
+Written by `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 on 2026-11-14: whole document (the `C` entries below, whose passages are read at that section's tree). Its `effort:` frontmatter line carries no entry here, since `test/dispatch-table.test.js`'s effort map pins it against the two rows.
+
+### C001
+- key: Dispatch this agent under the name `explainer-builder` when the explainers skill dispatches a build.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:3
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: The skill dispatches it by this name at its two table rows, and the description is what the harness shows a dispatching session.
+- passage: Builds an explainer video or a diagram from a session's brief. Use when the explainers skill dispatches a build.
+
+### C002
+- key: Grant the builder Read, Grep, Glob, Edit, Write and Bash on one `tools:` line.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:4
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: A build writes a narration file and a page and runs the scripts, and `test-personas/recognition-test.mjs` reads every charter's tools on one line.
+- passage: tools: Read, Grep, Glob, Edit, Write, Bash
+
+### C003
+- key: Pin the builder's model to opus in the frontmatter.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:5
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, whose Approach pins the model in the charter so a session passes none on an ordinary build.
+- verdict: keep
+- reason: A model passed by each session would be a question each session could get wrong, and the draft row overrides it for the one exception.
+- passage: model: opus
+
+### C004
+- key: Run every script from the root the brief's Kit Root field names, and stop and report where the brief names none.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:9
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: A bare script name fails from the build folder, and a script of the same name elsewhere is not the code reviewed for the key, so the builder runs only the copy under the root the session wrote into the brief.
+- passage: `<kit root>` below is the brief's Kit Root field. Where the brief names none, stop and report, and run no script of these names from anywhere else, since only the kit's are reviewed.
+
+### C005
+- key: Make the narration first, through `explainer-voice.js` alone.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:13
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, whose Intent refuses builders writing their own voice scripts.
+- verdict: keep
+- reason: The narration's timeline is what the motion is timed to, and the one script reviewed for the key is the only code that touches it.
+- passage: Make the narration first, through `explainer-voice.js` alone:
+
+### C006
+- key: Run the narration script with its two arguments and three flags.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:15
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, quoting the usage line of `plugins/grimoire/scripts/explainer-voice.js`.
+- verdict: keep
+- reason: The usage line is quoted from the script's header, so the flags match the code.
+- passage: node <kit root>/scripts/explainer-voice.js <narration.json> <output folder> [--settings <path>] [--pause <seconds>] [--remake]
+
+### C007
+- key: Write `narration.json` as a JSON list of scenes, each with an id, a text and a spoken, and time the motion and captions from the `timeline.json` the script writes into the build folder.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:17
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, from the narration file and the timeline the Approach names.
+- verdict: keep
+- reason: The timeline carries each scene's start and length from the real audio, so motion timed from it lands with the words and never with a guess, and its fields are read from the file the script wrote rather than restated here.
+- passage: Write `narration.json` from the brief, a JSON list of scenes, each `{ "id", "text", "spoken" }`. The script writes the audio, `timeline.json` and `timeline.js` into its output folder, the build folder. Time the motion and captions from `timeline.json`, so each picture lands with its words.
+
+### C008
+- key: Never read the settings file or the key file.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:41
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, whose Intent records the frame and the alternatives it refused.
+- verdict: keep
+- reason: A key that reaches a model's context is exposed, which is one of the constraints the Intent names, and the script reads it inside its own process.
+- passage: Never read the settings file or the key file, since a key in your context is exposed.
+
+### C009
+- key: Read the script's printed line for each scene, and run again with another spelling in `spoken` where a name the brief marks new was misheard.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:19
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: The script prints one line for each scene with its `missed:` and `added:` words and keeps an unchanged scene's audio, so a second spelling costs one scene's call.
+- passage: Its printed line for each scene lists the words the recognizer `missed:` and `added:`. Where a name the brief marks new was misheard, try another spelling in that scene's `spoken` and run again.
+
+### C010
+- key: Have the page load `timeline.js`, read `window.EXPLAINER_TIMELINE` and define `window.renderAt(seconds)`, drawing that moment from its argument alone.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:23
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, whose Approach names the page's side of the contract as these two names.
+- verdict: keep
+- reason: The capture script calls `renderAt` for each frame and screenshots what it drew, while the page's own timers and animations run on the wall clock, which the capture outpaces or trails, so only a picture drawn from the argument lands on its frame.
+- passage: The page sits in the output folder, loads `timeline.js` by a relative path, reads `window.EXPLAINER_TIMELINE`, and defines `window.renderAt(seconds)`, which the capture script calls for each frame. `renderAt` draws that moment from its argument alone, never from the page's own timers or animations, which run on the wall clock, and may return a promise.
+
+### C011
+- key: Never let the picture hold still for 5 seconds.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:27
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, whose Goal makes the rule against a still screen a command that passes or fails.
+- verdict: keep
+- reason: A still picture under a voice loses the watcher, and the check fails a still stretch of 5 seconds.
+- passage: The picture never holds still for 5 seconds, since a still picture loses the watcher.
+
+### C012
+- key: Show the spoken words as captions in a band a phone can read.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:28
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: The video is watched on a phone.
+- passage: The spoken words show as captions in a band a phone can read, since the video plays on one.
+
+### C013
+- key: Show nothing untrue.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:29
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: A picture is a claim, and the doctrine ships nothing untrue.
+- passage: Nothing untrue is shown, since a picture is a claim.
+
+### C014
+- key: Draw everything in the page itself, fetch nothing and work with no network.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:30
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: The capture runs the page from a file, and a fetch can fail or change between frames.
+- passage: The page draws everything itself, fetches nothing and works with no network, since a fetch can fail between frames.
+
+### C015
+- key: Ask of each arrow and line what a watcher would take it to mean.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:31
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: A line drawn for layout reads as a connection.
+- passage: Ask of each arrow and line what a watcher would take it to mean. A line drawn for layout reads as a connection.
+
+### C016
+- key: Capture with the kit's capture script by default, and give the reason in the report for any other method.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:35
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, whose Intent leaves the capture method unlocked.
+- verdict: keep
+- reason: The script lays each scene's audio at its start from the timeline, and another method is allowed because the plan does not lock the method; the script refuses an output that exists, so a capture after a fix takes a new name rather than failing twice.
+- passage: The kit's capture script is the suggested method, since it lays each scene's audio at its start. Another needs its reason in the report.
+
+### C017
+- key: Run the capture script with its three arguments and five flags.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:37
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, quoting the usage line of `plugins/grimoire/scripts/explainer-capture.js`.
+- verdict: keep
+- reason: The usage line is quoted from the script's header, so the flags match the code.
+- passage: node <kit root>/scripts/explainer-capture.js <page.html> <timeline.json> <output.mp4> [--width <n>] [--height <n>] [--fps <n>] [--browser <path>] [--ffmpeg <path>]
+
+### C018
+- key: Write only in the build's folder and the temp directory, install nothing, change no setting, message no one, and stop where the same step fails twice.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:41
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: The machine is shared with other sessions, and a step failing twice means the brief or the machine needs the session's call.
+- passage: Write only in the build's folder and the temp directory.
+- passage: Never read the settings file or the key file, since a key in your context is exposed. Install nothing, change no setting and message no one. Stop and report where the same step fails twice, since a repeated failure is the session's call.
+
+### C019
+- key: Run the check with `--sheets`, read every sheet and confirm each scene starts where its narration starts before reporting.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:45
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: The builder fixes what it finds before the session's review, which still runs, so faults reach the session already fewer.
+- passage: Before you report, run the check with `--sheets` and read every sheet:
+
+### C020
+- key: Run the check script with its argument and four flags.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:47
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, quoting the usage line of `plugins/grimoire/scripts/explainer-check.js`.
+- verdict: keep
+- reason: The usage line is quoted from the script's header, so the flags match the code.
+- passage: node <kit root>/scripts/explainer-check.js <video> [--max-mb <n>] [--still <seconds>] [--sheets <folder>] [--ffmpeg <path>]
+
+### C021
+- key: Confirm from the page's code that each scene starts at its timeline start, and make the final message the report of the brief's Report items, with `not checked` for each check not run.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:49
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: A contact sheet shows one frame every 3 seconds, too coarse to place a scene's start, while the code that picks the scene shows it exactly; the session acts on the final message, and an unstated check reads as one done.
+- passage: Confirm from the page's code that each scene starts at its timeline `start`, since a sheet shows one frame every 3 seconds. Your final message is the report: the brief's Report items, with `not checked` for each check not run, since an unstated check reads as done.
+
+### C022
+- key: For a diagram, draw one self-contained page, render it, read the image and fix what is clipped or overlaps.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:53
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: The image is what the operator sees.
+- passage: Draw one self-contained page, render it, read the image, and fix what is clipped or overlaps, since the operator sees the image:
+
+### C023
+- key: Render a diagram with `render-html.js` and its three flags.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:55
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14, quoting the usage line of `plugins/grimoire/scripts/render-html.js`.
+- verdict: keep
+- reason: The usage line is quoted from the script's header, so the flags match the code.
+- passage: node <kit root>/scripts/render-html.js <html path> <png path> [--width <n>] [--height <n>] [--browser <path>]
+
+### C024
+- key: Hold a diagram to the rules on truth, on arrows and lines, on the builder's limits and on its report, and to no other rule above.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:57
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 3 2026-11-14.
+- verdict: keep
+- reason: A diagram is one still image with no voice, rendered by `render-html.js` and read by no video check, so the narration, caption, still-picture, page contract and capture rules have nothing to act on, and the four that remain apply to it as to a video.
+- passage: The rules on truth, arrows and lines, limits and the report hold as for a video, and no other rule above does.
+
+### C025
+- key: You are working class: end no process you did not start, never one by image name, perform no git operation past your own files, delete or overwrite no other party's files, and report such a need as `BLOCKED`.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:41
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 5 2026-11-14, on the architect seat's ruling of 2026-11-14 after review round 1 found the shared-state guard refuses the builder a recursive delete in both places.
+- verdict: keep
+- reason: The builder is in the shared-state guard's mutating class, and every other member of that class carries this sentence, which states the class's rule and points at its owner, the role skill. It is copied byte for byte from implementer-opus.md's, so one grep finds it in each charter. It also bars overwriting another party's file in the temp directory, which the write-place rule alone allows.
+- passage: You are working class per the role skill: end no process you did not start, never one by image name, perform no git operation past your own files, and delete or overwrite no other party's files. Report such a need as `BLOCKED`.
+
+### C026
+- key: End a process you started only by its id, delete only file by file, write and change your own files with the Write or Edit tool, run scripts by path, and use no heredoc.
+- class: rule
+- source: plugins/grimoire/agents/explainer-builder.md:41
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` section 5 2026-11-14, on the architect seat's ruling of 2026-11-14 after a test build's `python -` heredoc was refused as a kill.
+- verdict: keep
+- reason: These are the routes the shared-state guard lets the builder take for acts the class sentence allows: the guard refuses a kill by image name, by name, by filter or through a process query, and a recursive delete in either place the builder writes, and reads every heredoc but a quoted body a lone cat or tee writes as commands. A refused route costs a dispatch, since the brief and the build folder stay and the session dispatches again, and these routes spare it. The sentence names no command, so nothing in it can fail to run in the builder's shell. It says your own files because the kit's scripts write the audio and the video.
+- passage: End a process you started only by its id, delete only file by file, write and change your own files with the Write or Edit tool, run scripts by path and use no heredoc, since a guard refuses or misreads some other forms.
+
+### C027
+- key: Pass each path the brief's Paths field names with its flag, to each script whose usage line takes it.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:9
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` finishing pass 2026-11-15, on the final prose review.
+- verdict: keep
+- reason: The Paths field holds the absolute paths the session passed to the preflight, and a builder with no context is otherwise not told which flag each one takes.
+- passage: Pass each path the brief's Paths field names with its flag, `--browser`, `--ffmpeg` or `--settings`, to each script whose usage line takes that flag.
+
+### C028
+- key: Read the timeline's fields at the head of `explainer-voice.js`.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:17
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` finishing pass 2026-11-15, on the final prose review.
+- verdict: keep
+- reason: The builder times each picture from those fields, and a heard word's times count from its scene's own audio, which the field names alone do not say; the header beside the code that writes them is the one copy.
+- passage: The head of `explainer-voice.js` lists the timeline's fields.
+
+### C029
+- key: Give a capture's call the tool's longest timeout.
+- class: mechanic
+- source: plugins/grimoire/agents/explainer-builder.md:35
+- provenance: `docs/plans/claude-kit_explainer-videos-and-diagrams_spec_v1.md` finishing pass 2026-11-15, on the architect seat's ruling of 2026-11-15 after the final adversarial and prose reviews.
+- verdict: keep
+- reason: The capture takes a screenshot for every frame, so it runs longer than the video it makes, and a call left at the tool's default limit loses the capture on an ordinary length. The sentence names no figure, since the time per frame changes with the size and the machine; the video length a plain request implies stays an open decision of the operator's in `docs/backlog.md`.
+- passage: A capture runs longer than its video, so give its call the tool's longest timeout.

@@ -92,6 +92,8 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
    | **Plan review**, `plan-reviewer` | fable | `medium` | Agent tool |
    | **Spec blind read**, `blind-reader` | the session's | `low` (frontmatter default) | Agent tool |
    | **Altitude interview**, `altitude-interviewer` | fable | `low` (frontmatter default) | Agent tool |
+   | **Explainer builder**, `explainer-builder` | opus | `medium` (frontmatter default) | Agent tool |
+   | **Explainer draft**, `explainer-builder` under a model override | sonnet | `medium` (frontmatter default) | Agent tool |
    | **Other below-fable dispatch** without a frontmatter effort | opus or sonnet | `medium` | Agent tool |
    | **Other fable dispatch**, the same at fable | fable | `medium` | Agent tool |
 

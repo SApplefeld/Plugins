@@ -3,8 +3,9 @@
 // read-only guard, the read-only judgment seats and the harness's own Explore
 // scout are `strict`, the QA verifier is `gate`, and every other type, the
 // main session's absent type included, is governed by nothing. For the
-// shared-state guard, the implementer tiers are `mutating`, the QA verifier is
-// again `gate`, and every other type is governed by nothing.
+// shared-state guard, the implementer tiers and the explainer builder are
+// `mutating`, the QA verifier is again `gate`, and every other type is
+// governed by nothing.
 //
 // Nothing here reads `$` (runner.ts says why).
 
@@ -26,6 +27,12 @@ export const SCOUT_TYPE = /^explore$/i;
 // as the seats are.
 export const MUTATING_SEAT = /(^|[:/])implementer-(?:haiku|sonnet|opus|fable)$/i;
 
+// The explainer builder, which holds Bash and mutates the tree, matched as the
+// seats are. It is a pattern of its own and no member of MUTATING_SEAT, since
+// the dispatch-docs guard reads a MUTATING_SEAT match as an implementer brief
+// and refuses one that lists a file under docs/.
+export const BUILDER_SEAT = /(^|[:/])explainer-builder$/i;
+
 export type AgentClass = "strict" | "gate";
 
 export type SharedStateAgentClass = "mutating" | "gate";
@@ -34,11 +41,11 @@ export type SharedStateAgentClass = "mutating" | "gate";
  * The read-only guard's class of an agent type: `strict` for the read-only
  * judgment seats and for the Explore scout, whose shell is its only write
  * route, `gate` for the QA verifier, and null for every type nothing governs
- * (implementers, docs-curator, general-purpose, the bare "claude" a
- * background job's main session presents, any unknown type, and no type). An
- * implementer tier stays null here: the read-only guard returns early on
- * null, and a class would run its gate-mode deny over every implementer
- * shell call.
+ * (implementers, explainer-builder, docs-curator, general-purpose, the bare
+ * "claude" a background job's main session presents, any unknown type, and no
+ * type). An implementer tier stays null here: the read-only guard returns
+ * early on null, and a class would run its gate-mode deny over every
+ * implementer shell call.
  */
 export function reviewAgentClass(type: unknown): AgentClass | null {
   if (typeof type !== "string" || type === "") return null;
@@ -50,13 +57,13 @@ export function reviewAgentClass(type: unknown): AgentClass | null {
 
 /**
  * The shared-state guard's class of an agent type: `mutating` for the
- * implementer tiers, `gate` for the QA verifier, and null for every other
- * type, the read-only judgment seats included, since the read-only guard
- * already refuses them every state change.
+ * implementer tiers and the explainer builder, `gate` for the QA verifier,
+ * and null for every other type, the read-only judgment seats included, since
+ * the read-only guard already refuses them every state change.
  */
 export function sharedStateAgentClass(type: unknown): SharedStateAgentClass | null {
   if (typeof type !== "string" || type === "") return null;
   if (GATE_SEAT.test(type)) return "gate";
-  if (MUTATING_SEAT.test(type)) return "mutating";
+  if (MUTATING_SEAT.test(type) || BUILDER_SEAT.test(type)) return "mutating";
   return null;
 }
