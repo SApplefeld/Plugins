@@ -588,12 +588,9 @@ type Run = { text: string; base: number; first: number; last: number }
 // scan in which no known value was hidden again
 // comes back as its passes left it. At a spot the pass reads the text with
 // the value put back and swaps the placeholder and the text beside it that
-// makes one key with the value for one placeholder. No pass rewrites text
-// it does not hide, except in two shapes: a length-bounded pattern can cut
-// an earlier placeholder, and a password assignment can drop a trailing
-// space. This pass only swaps a spot's
-// placeholder and unhidden text beside it for one placeholder, so it hides
-// every character the passes before it hid, in those two shapes too.
+// makes one key with the value for one placeholder. This pass only swaps a
+// spot's placeholder and unhidden text beside it for one placeholder, so it
+// hides every character the passes before it hid.
 //
 // The fixed-format step comes first, and readFixed asks it. It reads the
 // spots that stand with no other placeholder between them as one text with
@@ -1218,21 +1215,27 @@ function strongQuotedPairs(text: string): StrongPair[] {
   STRONG_QUOTED.lastIndex = 0
   return pairs
 }
-// A YAML list item (`- password: x`, compose `- DB_PASS=x`) counts too.
+// A YAML list item (`- password: x`, compose `- DB_PASS=x`) counts too. The line
+// ends after the value and any spaces and tabs. Those are read and not
+// taken into the match, so they stay in the text.
 const STRONG_LINE = new RegExp(
-  String.raw`^([ \t]*(?:-[ \t]+)?(?:export[ \t]+)?([A-Za-z0-9._-]*${PW_WORD}|(?:[A-Za-z0-9._-]*[_.-])?${SHORT_PW})[ \t]*[:=][ \t]*)([^\s"'#;][^\s"';]{2,199})[ \t]*$`,
+  String.raw`^([ \t]*(?:-[ \t]+)?(?:export[ \t]+)?([A-Za-z0-9._-]*${PW_WORD}|(?:[A-Za-z0-9._-]*[_.-])?${SHORT_PW})[ \t]*[:=][ \t]*)([^\s"'#;][^\s"';]{2,199})(?=[ \t]*$)`,
   'gim',
 )
 // `DB_PASS=`: upper case with a separator only, so prose `Pass:` is left.
-const ENV_PASS = /^([ \t]*(?:-[ \t]+)?(?:export[ \t]+)?()[A-Z0-9_]*_PASS[ \t]*[:=][ \t]*)([^\s"'#;][^\s"';]{2,199})[ \t]*$/gm
-// A Gmail app password written unquoted: four groups of four letters.
+// The spaces and tabs before the line's end are read and not taken.
+const ENV_PASS = /^([ \t]*(?:-[ \t]+)?(?:export[ \t]+)?()[A-Z0-9_]*_PASS[ \t]*[:=][ \t]*)([^\s"'#;][^\s"';]{2,199})(?=[ \t]*$)/gm
+// A Gmail app password written unquoted: four groups of four letters. The
+// spaces and tabs before the line's end are read and not taken.
 const APP_PASSWORD = new RegExp(
-  String.raw`^([ \t]*(?:-[ \t]+)?(?:export[ \t]+)?[A-Za-z0-9._-]*${PW_WORD}[ \t]*[:=][ \t]*)([a-z]{4}(?: [a-z]{4}){3})[ \t]*$`,
+  String.raw`^([ \t]*(?:-[ \t]+)?(?:export[ \t]+)?[A-Za-z0-9._-]*${PW_WORD}[ \t]*[:=][ \t]*)([a-z]{4}(?: [a-z]{4}){3})(?=[ \t]*$)`,
   'gim',
 )
-// The line after a YAML block indicator: `password: |` then the value.
+// The line after a YAML block indicator: `password: |` then the value. The
+// spaces and tabs between the value and the line's end are read and not
+// taken.
 const BLOCK_PASSWORD = new RegExp(
-  String.raw`^([ \t]*(?:-[ \t]+)?["']?[A-Za-z0-9._-]*${PW_WORD}["']?[ \t]*:[ \t]*[|>][-+]?[0-9]?[ \t]*\r?\n[ \t]+)(\S[^\n]{2,199}?)[ \t]*(?=\r?$)`,
+  String.raw`^([ \t]*(?:-[ \t]+)?["']?[A-Za-z0-9._-]*${PW_WORD}["']?[ \t]*:[ \t]*[|>][-+]?[0-9]?[ \t]*\r?\n[ \t]+)(\S[^\n]{2,199}?)(?=[ \t]*\r?$)`,
   'gim',
 )
 // SQL: `CREATE USER x WITH PASSWORD '...'`, MySQL `IDENTIFIED BY '...'`.
@@ -1251,8 +1254,11 @@ const TF_OUTPUT = new RegExp(
 // Kubernetes env entry. The name decides; the value sits apart from it.
 const JSON_NAME_VALUE = /("name"\s*:\s*"([^"\n]{1,100})"\s*,\s*"value"\s*:\s*")((?:[^"\\\n]|\\.){3,400})"/g
 const JSON_VALUE_NAME = /("value"\s*:\s*")((?:[^"\\\n]|\\.){3,400})("\s*,\s*"name"\s*:\s*"([^"\n]{1,100})")/g
+// The YAML form of the same pair: a list entry's `name:` line, then its
+// `value:` line. The spaces and tabs after the value and its closing quote
+// are read and not taken.
 const YAML_NAME_VALUE =
-  /^([ \t]*)(-[ \t]+name:[ \t]*["']?([\w.-]{1,100})["']?[ \t]*\r?\n\1[ \t]+value:[ \t]*(["']?))([^\n"']{3,200}?)\4[ \t]*(?=\r?$)/gm
+  /^([ \t]*)(-[ \t]+name:[ \t]*["']?([\w.-]{1,100})["']?[ \t]*\r?\n\1[ \t]+value:[ \t]*(["']?))([^\n"']{3,200}?)\4(?=[ \t]*\r?$)/gm
 const PW_NAME = new RegExp(String.raw`^[\w.-]*${PW_WORD}$|^(?:[\w.-]*[_.-])?${SHORT_PW}$`, 'i')
 // SQL: an INSERT whose column list names a key or a password.
 const SQL_INSERT = /\bINSERT[ \t]+INTO[ \t]+[\w."`[\]]{1,100}[ \t]*\(([^()\n]{1,1000})\)\s*VALUES\s*/gi
@@ -1970,6 +1976,49 @@ function isFedName(token: string): boolean {
   )
 }
 
+// A GitHub node id is the id the host's GraphQL interface prints for a
+// record such as a pull request, an issue, a comment or a branch. Its shape,
+// whole: one to six uppercase letters, an underscore, an opening, and a body
+// of 4 to 100 characters, each a letter, a digit, `_` or `-`. The text after
+// the underscore is base64 with no padding, and it encodes a short list. The
+// list's first byte is 0x92, 0x93 or 0x94, for a list of two, three or four
+// items. A zero and a 32-bit number follow, which gives the three openings
+// `kgDO`, `kwDO` and `lADO`. Up to two more items follow, each under one of
+// four marks: 0xce, a 32-bit number; 0xcf, a 64-bit number; 0xa0 to 0xbf, a
+// string under 32 bytes; 0xda, a string with a 16-bit length. The list ends
+// where the text ends. A token is a node id only where its text decodes as
+// that list, whole: a decode that runs short, any other mark, or a list that
+// ends before or after the text leaves the token judged as any other. So a
+// key joined onto an id by a hyphen or an underscore is judged as any other
+// token, and so is a random body behind a real opening unless it happens to
+// decode as such a list. One letter, digit, `_` or `-` joined after an id
+// whose text length divides by 4 adds no byte, so that token still reads as a
+// node id. Capital letters joined before an id read as part of its prefix
+// while the prefix stays six letters or fewer, so that token reads as a node
+// id too. A token with a lowercase prefix, a prefix of seven letters, no
+// underscore, any other opening or a character outside the body's set is
+// judged as any other token. So is a node id right after a key's name.
+const NODE_ID = /^[A-Z]{1,6}_((?:kg|kw|lA)DO[A-Za-z0-9_-]{4,100})$/
+
+function isNodeId(token: string): boolean {
+  const m = NODE_ID.exec(token)
+  if (m === null) return false
+  const bytes = decodeBase64Head(m[1]!)
+  // The opening is the list's first byte, the zero and the mark of the
+  // 32-bit number, so the read starts at that mark.
+  let at = 2
+  for (let left = bytes.charCodeAt(0) - 0x91; left > 0; left--) {
+    if (at >= bytes.length) return false
+    const mark = bytes.charCodeAt(at)
+    if (mark === 0xce) at += 5
+    else if (mark === 0xcf) at += 9
+    else if (mark >= 0xa0 && mark <= 0xbf) at += mark - 0x9f
+    else if (mark === 0xda && at + 2 < bytes.length) at += 3 + bytes.charCodeAt(at + 1) * 256 + bytes.charCodeAt(at + 2)
+    else return false
+  }
+  return at === bytes.length
+}
+
 function looksSecret(token: string, before: string, cfg: Config): boolean {
   if (token.startsWith('REDACTED-')) return false
   if (cfg.allow.has(token) || DIGITS_ONLY.test(token)) return false
@@ -1981,6 +2030,7 @@ function looksSecret(token: string, before: string, cfg: Config): boolean {
   if (named && SESSION_UUID.test(token) && SESSION_ID_NAME.test(before)) return false
   if (!named && isRecordId(token)) return false
   if (!named && isFedName(token)) return false
+  if (!named && isNodeId(token)) return false
   if (looksLikeName(token, named)) return false
 
   const h = entropy(token)
@@ -2019,10 +2069,47 @@ function slashedSecret(run: string, named: boolean, cfg: Config): boolean {
 
 // -------------------------------------------------------------- the passes
 
+// The longest text TAG matches, a LITERAL placeholder, and TAG read at one
+// position.
+const TAG_MAX = 27
+const TAG_AT = new RegExp(TAG.source, 'y')
+
+// Mints `value`, and hides no part of a placeholder that is already in the
+// text. A rule whose pattern can end a value at its length bound, with
+// nothing after the value that has to match, can end the value inside a run
+// TAG matches, whether the vault holds that placeholder or not. `end` is
+// where `value` ends in `whole`, the text the rule's pattern reads. Where
+// `end` stands inside such a run, the minted value ends at the character
+// before the run's opening bracket, and the part of the run the value took is
+// written back after the new placeholder, so every character of the run
+// stands in the output as it stood in the text. A run holds one opening
+// bracket, its first character, so the nearest one before `end` is the only
+// place a run that holds `end` can start. The search goes back no further
+// than a run's length or the value's first character. Where the run opens
+// at the value's first character, the whole value is the front of a
+// placeholder already in the text, and it is returned as it stands,
+// unminted. Any other value is minted as it is.
+function mintBeforeTag(whole: string, end: number, value: string): string {
+  const floor = Math.max(0, end - Math.min(TAG_MAX, value.length))
+  let open = end - 1
+  while (open >= floor && whole.charCodeAt(open) !== 91) open--
+  if (open < floor) return mint('SECRET', value)
+  TAG_AT.lastIndex = open
+  const run = TAG_AT.exec(whole)
+  if (run === null || open + run[0].length <= end) return mint('SECRET', value)
+  const taken = end - open
+  if (taken === value.length) return value
+  return mint('SECRET', value.slice(0, -taken)) + value.slice(-taken)
+}
+
 // Mints `value` unless it is already a placeholder, allowed, or a stand-in.
-function pairOut(cfg: Config, head: string, value: string, tail = ''): string {
+// The value is judged as the rule read it. A rule whose value can end at its
+// length bound with nothing after it that has to match hands in `whole`, the
+// text its pattern reads, and `end`, where the value ends in that text, and
+// the value is then minted by mintBeforeTag.
+function pairOut(cfg: Config, head: string, value: string, tail = '', whole?: string, end = 0): string {
   if (WHOLE_TAG.test(value) || cfg.allow.has(value) || isStandIn(value)) return head + value + tail
-  return head + mint('SECRET', value) + tail
+  return head + (whole === undefined ? mint('SECRET', value) : mintBeforeTag(whole, end, value)) + tail
 }
 
 function parkOpaque(text: string): string {
@@ -2107,26 +2194,26 @@ function urlParamSecret(raw: string, cfg: Config): boolean {
 function scrubCommandLines(text: string, cfg: Config): string {
   let out = text
   if (/-(?:pass|api|token|client|auth|access)/.test(out)) {
-    out = clocked(out).replace(CLI_FLAG, (m, head: string, quote: string, v: string) => {
+    out = clocked(out).replace(CLI_FLAG, (m, head: string, quote: string, v: string, at: number, whole: string) => {
       if (/^[A-Z][A-Z0-9_]*$/.test(v) || /^[A-Za-z_]+=/.test(v) || /^[A-Za-z]+(?:[-_][A-Za-z]+)+$/.test(v)) return m
-      return pairOut(cfg, head, v, quote)
+      return pairOut(cfg, head, v, quote, whole, at + m.length - quote.length)
     })
   }
   if (/\s-(?:u|U|-user|-proxy-user)\b/.test(out)) {
-    out = clocked(out).replace(CLI_USERPASS, (m, head: string, v: string) => (DIGITS_ONLY.test(v) ? m : pairOut(cfg, head, v)))
+    out = clocked(out).replace(CLI_USERPASS, (m, head: string, v: string, at: number, whole: string) => (DIGITS_ONLY.test(v) ? m : pairOut(cfg, head, v, '', whole, at + m.length)))
   }
-  if (/mysql|mariadb/.test(out)) out = clocked(out).replace(MYSQL_P, (_m, head: string, v: string) => pairOut(cfg, head, v))
+  if (/mysql|mariadb/.test(out)) out = clocked(out).replace(MYSQL_P, (m, head: string, v: string, at: number, whole: string) => pairOut(cfg, head, v, '', whole, at + m.length))
   if (out.includes(':')) out = clocked(out).replace(PGPASS, (_m, head: string, v: string) => pairOut(cfg, head, v))
   if (out.includes('password')) out = clocked(out).replace(NETRC, (_m, head: string, v: string) => pairOut(cfg, head, v))
-  if (out.includes('gh')) out = clocked(out).replace(GH_SECRET, (_m, head: string, _q: string, v: string) => pairOut(cfg, head, v))
+  if (out.includes('gh')) out = clocked(out).replace(GH_SECRET, (m, head: string, _q: string, v: string, at: number, whole: string) => pairOut(cfg, head, v, '', whole, at + m.length))
   if (CMD_PW_GATE.test(out)) {
-    for (const re of CMD_PW) out = clocked(out).replace(re, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
+    for (const re of CMD_PW) out = clocked(out).replace(re, (m, head: string, q: string, v: string, at: number, whole: string) => pairOut(cfg, head, v, q, whole, at + m.length - q.length))
   }
-  if (out.includes('pass:')) out = clocked(out).replace(OPENSSL_PASS, (_m, head: string, v: string) => pairOut(cfg, head, v))
-  if (out.includes('smbclient')) out = clocked(out).replace(SMB_USER, (_m, head: string, v: string) => pairOut(cfg, head, v))
-  if (out.includes('htpasswd')) out = clocked(out).replace(HTPASSWD, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
-  if (/net[ \t]+user/i.test(out)) out = clocked(out).replace(NET_USER, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
-  if (out.includes('rabbitmqctl')) out = clocked(out).replace(RABBIT_USER, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
+  if (out.includes('pass:')) out = clocked(out).replace(OPENSSL_PASS, (m, head: string, v: string, at: number, whole: string) => pairOut(cfg, head, v, '', whole, at + m.length))
+  if (out.includes('smbclient')) out = clocked(out).replace(SMB_USER, (m, head: string, v: string, at: number, whole: string) => pairOut(cfg, head, v, '', whole, at + m.length))
+  if (out.includes('htpasswd')) out = clocked(out).replace(HTPASSWD, (m, head: string, q: string, v: string, at: number, whole: string) => pairOut(cfg, head, v, q, whole, at + m.length - q.length))
+  if (/net[ \t]+user/i.test(out)) out = clocked(out).replace(NET_USER, (m, head: string, q: string, v: string, at: number, whole: string) => pairOut(cfg, head, v, q, whole, at + m.length - q.length))
+  if (out.includes('rabbitmqctl')) out = clocked(out).replace(RABBIT_USER, (m, head: string, q: string, v: string, at: number, whole: string) => pairOut(cfg, head, v, q, whole, at + m.length - q.length))
   return out
 }
 
@@ -2161,7 +2248,7 @@ function scrubAssignments(text: string, cfg: Config): string {
     out = clocked(out).replace(STRONG_LINE, (_m, head: string, key: string, v: string) => value(head, key, v))
     out = clocked(out).replace(ENV_PASS, (_m, head: string, _k: string, v: string) => value(head, '', v))
     out = clocked(out).replace(BLOCK_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head, v))
-    out = clocked(out).replace(KV_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head, v))
+    out = clocked(out).replace(KV_PASSWORD, (m, head: string, v: string, at: number, whole: string) => pairOut(cfg, head, v, '', whole, at + m.length))
   }
   if (PW_SYMBOL.test(out)) {
     out = clocked(out).replace(QUOTED_VALUE, (m, q: string, v: string, offset: number, whole: string) => {
@@ -2190,7 +2277,9 @@ function scrubAssignments(text: string, cfg: Config): string {
 
 // The VALUES rows after an INSERT whose columns name a key or a password:
 // the value in that column is hidden. Bounded to 100 rows and 20,000
-// characters per INSERT. Quoted values only; a number is never a key.
+// characters per INSERT. Quoted values only; a number is never a key. A
+// quoted value still open at the 20,000-character limit ends there, so each
+// value is minted by mintBeforeTag.
 function scrubSqlInserts(text: string, cfg: Config): string {
   const ranges: [number, number][] = []
   for (const m of clocked(text).matchAll(SQL_INSERT)) {
@@ -2233,7 +2322,7 @@ function scrubSqlInserts(text: string, cfg: Config): string {
   let last = 0
   for (const [from, to] of ranges) {
     if (from < last) continue
-    parts.push(text.slice(last, from), mint('SECRET', text.slice(from, to)))
+    parts.push(text.slice(last, from), mintBeforeTag(text, to, text.slice(from, to)))
     last = to
   }
   parts.push(text.slice(last))
