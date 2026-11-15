@@ -130,7 +130,11 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
      - Build + test commands, each verbatim as the repository's runner takes
        it, flags before paths, since `node --test` reads a flag after a path
        as a file. Source that carries backslash escapes is written with the
-       Write tool, never a Bash heredoc, which collapses them
+       Write tool, never a Bash heredoc, which collapses them. A `\u` escape
+       the section needs kept as an escape is read back from the file with a
+       fixed-string grep for the escape's own text, since Edit, Write or a
+       perl replacement can land it as the character. One that did is written
+       again from a script that builds the backslash
      - [any section whose work may spawn a suite, build, or embedding pass]
        The standing box-budget clause, an act at the spawn step rather than a
        preamble constraint, because a brief is minutes stale by its first
@@ -158,7 +162,7 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
    - **`Locus: inline` (or no tier recorded):** implement in the main thread at the session's own model. Inline is for sections the plan marked unbriefable or too small to brief. Dispatch a clearly briefable untiered section at the tier it would have earned. Read an older decorated `Model:` value (`fable (inline)`) as `Locus: inline` at that tier, correcting the line while in the file. Follow the csharp-style and sql-style skills and each one's precedence rule. Surgical changes only.
    - **Handle the implementer's status.** A NEEDS_CONTEXT whose add-decision line names a mechanism no Goal sentence, Intent clause or acceptance bullet names goes to step 4's design stop and its judge. A question the spec or the conversation answers is answered, and the section re-dispatched at the same tier. A genuinely hard one, the spec silent because nobody foresaw it, convenes a consult. The adopted ruling goes to the plan doc's `Standing Brief Amendments` block under step 4's adoption trigger, then into the re-dispatch brief. A preference fork that survives the ruling comes to me, ruling attached.
      - BLOCKED: fix the environment and re-dispatch.
-     - **A request past the section's `Tests:` allocation** is answered from the plan's `Test Reserve:` under brainstorming step 12, which owns the reserve. A granted test joins the section's fix round.
+     - **A request past the section's `Tests:` allocation** is answered from the plan's `Test Reserve:` under brainstorming step 12, which owns the reserve. A granted test joins the section's fix round. The grant takes the adoption trigger's entry in `references/findings.md`.
      - DONE_WITH_CONCERNS: a material concern re-routes to NEEDS_CONTEXT handling. A "spec ambiguity you resolved" is a route (b) assumption for the Chapter's `Assumptions:` line, with the section number. Resolve a correctness or scope concern yourself, or put it to the adversarial-reviewer as a question, never as a pre-rated finding and never to the blind-reviewer, whose input contract excludes intent. Record a bare observation in the Chapter.
      - **A surface outside the section's Files in scope is never a bare observation.** One named in a report of any status takes step 4's out-of-scope route.
    - **Tier escalation.** Every dispatched section escalates after two failed review rounds or two NEEDS_CONTEXT returns on the same question. A round fails when a correctness lens in `references/review.md`'s step 3 roster returns a Critical that survives adjudication, save on a below-tier fix writer's delta. A refusal stop is a returned final message declining the work with no DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT or BLOCKED status, so it is a failed round and never a stall. The failed attempt's report and the review findings ride in the escalated brief.

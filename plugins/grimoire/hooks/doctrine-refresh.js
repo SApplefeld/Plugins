@@ -37,6 +37,22 @@
 //      compact it declines silently. The order is time alone: two hashes have no
 //      order, so the hash rides for the decline line only. A missing or malformed
 //      stamp reads as no stamp, and the writer writes and stamps.
+//      A plugin Claude Code loads for one session only, as --plugin-dir loads
+//      it, is not ranked by the stamp where the machine also holds an installed
+//      copy, since a development checkout's skill file is always the newer one
+//      and its text is unreviewed. Such a load is known by CLAUDE_PLUGIN_DATA,
+//      whose last path part is then the manifest's name followed by -inline,
+//      and the installed copy by a key of plugins/installed_plugins.json under
+//      ~/.claude whose text before its last @ is the plugin's name and whose
+//      list is not empty. Where both hold and the doctrine file exists, the
+//      hook writes neither the file nor the stamp, and at a session start it
+//      says so in one additionalContext line where the file's text differs
+//      from its own; at clear and compact, and where the text is the same, it
+//      says nothing. Where both hold and the file is absent it writes the file
+//      and no stamp, and a stamp that is there stays as it is, so the stamp
+//      ranks installed writers alone. An unset data path, one under any other
+//      name, and a missing, unreadable or malformed install record each leave
+//      the stamp's time ordering the writers.
 //   2. If ~/.claude/CLAUDE.md is absent or its text does not contain the
 //      `@grimoire-doctrine.md` import token, OFFER (never silently perform) to
 //      add that one-line import. The doctrine file is kit-owned and safe to
@@ -70,6 +86,11 @@ const HEADER =
     'edit the skill, not this file. -->';
 const SESSION_START_SOURCES = ['startup', 'resume'];
 const SIGNPOST_FILE = 'grimoire.local.json';       // the kaizen signpost, which the doctor writes
+const PLUGIN_NAME = 'grimoire';                    // the plugin half of an install record key
+const ONE_SESSION_DATA_DIR = 'grimoire-inline';    // the last part of CLAUDE_PLUGIN_DATA for a one-session load
+// Ceiling on the install record read. The harness writes a few hundred bytes
+// per installed plugin, so this binds only on a file something arranged.
+const INSTALL_RECORD_MAX_BYTES = 1024 * 1024;
 
 // These spell the plugin's former name because they read the files earlier
 // installs wrote, which the migration step below moves to the names above.
@@ -132,6 +153,37 @@ function readStamp(stampPath) {
         }
     } catch { /* absent or malformed */ }
     return null;
+}
+
+// True where Claude Code loaded this plugin for one session only: the last
+// part of CLAUDE_PLUGIN_DATA, on either separator and with any trailing one
+// dropped, is exactly the one-session folder name. An unset or empty variable
+// is false, as a run by hand or by the doctor has it.
+function loadedForOneSession() {
+    const data = process.env.CLAUDE_PLUGIN_DATA;
+    if (typeof data !== 'string' || !data) return false;
+    return data.replace(/[\\/]+$/, '').split(/[\\/]/).pop() === ONE_SESSION_DATA_DIR;
+}
+
+// True where the install record under claudeDir holds an installed copy of
+// this plugin: a key of its plugins object whose text before its last @ is
+// the plugin's name, holding a list that is not empty, at any scope. A
+// missing, unreadable, over-large or malformed record is false. The record is
+// the harness's file, so the read takes the shared reader's kind check,
+// ceiling and fill.
+function installedCopyOnRecord(claudeDir) {
+    try {
+        const { readFileBounded } = require('./kit-read-lib.js');
+        const read = readFileBounded(path.join(claudeDir, 'plugins', 'installed_plugins.json'), INSTALL_RECORD_MAX_BYTES);
+        if (read === null || read.bounded) return false;
+        const record = JSON.parse(read.text.replace(/^\uFEFF/, ''));
+        const plugins = record && typeof record === 'object' ? record.plugins : null;
+        if (!plugins || typeof plugins !== 'object' || Array.isArray(plugins)) return false;
+        return Object.keys(plugins).some((key) => {
+            const at = key.lastIndexOf('@');
+            return at >= 0 && key.slice(0, at) === PLUGIN_NAME && Array.isArray(plugins[key]) && plugins[key].length > 0;
+        });
+    } catch { return false; }                         // absent or malformed: no installed copy
 }
 
 // Rename from to to inside dir where from exists and to does not, so a file
@@ -271,13 +323,36 @@ function main() {
     if (migrated.line) lines.push(migrated.line);
 
     // 1. Refresh the kit-owned doctrine file silently when it drifts, unless a
-    //    newer payload wrote it last.
+    //    newer payload wrote it last, or this plugin is loaded for one session
+    //    beside an installed copy, which owns the file.
     try {
         const pluginRoot = path.dirname(path.dirname(path.dirname(sp)));
         const hash = buildHash(pluginRoot);
         const root = path.basename(pluginRoot);
+        const eol = body.includes('\r\n') ? '\r\n' : '\n';
+        const content = HEADER + eol + body;
         const stamp = readStamp(stampPath);
-        if (stamp && payloadMtimeMs < stamp.payloadMtimeMs && fs.existsSync(doctrinePath)) {
+        if (loadedForOneSession() && installedCopyOnRecord(claudeDir)) {
+            // The stamp is neither compared nor written here, so it ranks
+            // installed writers alone.
+            if (!fs.existsSync(doctrinePath)) {
+                fs.mkdirSync(claudeDir, { recursive: true });
+                fs.writeFileSync(doctrinePath, content, 'utf8');
+            } else if (atSessionStart) {
+                let current = null;
+                try { current = fs.readFileSync(doctrinePath, 'utf8'); } catch { /* unreadable: reads as differing */ }
+                if (current !== content) {
+                    // The root's name and hash are read from disk and enter a
+                    // channel a model reads, so they take that channel's renderer.
+                    const { sanitizeForOutput: sanitize } = require('./kit-compact-lib.js');
+                    lines.push(
+                        `Kit doctrine not refreshed: this session's grimoire plugin (${sanitize(root)}, ` +
+                        `build ${sanitize(hash)}) is loaded for this session only and this machine holds an installed ` +
+                        `copy, so ~/.claude/${DOCTRINE_FILE} was left as it is. This session reads that file's ` +
+                        `doctrine, not this plugin's.`);
+                }
+            }
+        } else if (stamp && payloadMtimeMs < stamp.payloadMtimeMs && fs.existsSync(doctrinePath)) {
             if (atSessionStart) {
                 // Both roots' names and hashes are read from disk and enter a
                 // channel a model reads, so they take that channel's renderer.
@@ -289,8 +364,6 @@ function main() {
                     `~/.claude/${STAMP_FILE} lets the next session write it.`);
             }
         } else {
-            const eol = body.includes('\r\n') ? '\r\n' : '\n';
-            const content = HEADER + eol + body;
             let current = null;
             try { current = fs.readFileSync(doctrinePath, 'utf8'); } catch { /* absent */ }
             if (current !== content) {
