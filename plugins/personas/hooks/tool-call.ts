@@ -26,7 +26,7 @@
 // harness evaluates it once per process while it loads a fresh
 // hooks/index.ts per case.
 
-import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, ROUTINES_MAX, ROUTINE_HOURS_MAX, ROUTINE_TEXT_MAX_POINTS, activateNext, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isActivationEligible, isAutonomyLevel, isPlanningDue, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, releaserOf, resumeGoalNode, rootBudgetBlocked, stallPartsText, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
+import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, ROUTINES_MAX, ROUTINE_HOURS_MAX, ROUTINE_TEXT_MAX_POINTS, activateNext, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isActivationEligible, isAutonomyLevel, isPlanningDue, isRootFinished, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, releaserOf, resumeGoalNode, rootBudgetBlocked, stallPartsText, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
 import type { openWorkerAsk as openWorkerAskFromModule } from "./ask-layer";
 import { ASKED_BY_MAX_CHARS, TASK_ID_MAX_CHARS, TASK_TEXT_MAX_CHARS, targetPersonaOf, type ExpectedTurn } from "./channel-text";
 import { claimResource, commonsWinner, readAllClaims, readAllEntries, readHolderMeta, releaseResource, type CommonsStore } from "./commons";
@@ -1674,10 +1674,11 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     if (byNameId) {
       clearChildBlockedAncestors(completedId);
     }
-    // Every open ask on an entry this call completed closes as stood,
-    // blocking or not, whichever branch completed it. Those entries are
-    // the target and any plan completeLeaf's walk took to complete. An ask
-    // on any other entry stays open and keeps its hold.
+    // Each open ask on an entry this call completed is settled by its
+    // opener, whichever branch completed it: a worker's stays open with its
+    // hold lifted, and one the controller opened closes as stood. Those
+    // entries are the target and any plan completeLeaf's walk took to
+    // complete. An ask on any other entry stays open and keeps its hold.
     {
       const completedNow = sess.state.goals
         .filter((g) => g.status === "complete" && statusBefore.get(g.id) !== "complete")
@@ -1767,15 +1768,21 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       }
       if (leftOpenText !== "") return { result: `Complete: "${completedTitle}".${leftOpenText}${healthText}${writeFailed}` };
       // Nothing started, so the result says why by the tree's shape. With
-      // no pending entry and no paused or blocked one, the no-pending
-      // sentence stands alone. With no pending entry and one or more paused
-      // or blocked, the root among them, the result counts each status and
-      // points at goal_status, which prints each with its reason. Where
-      // isPlanningDue, the controller's own planning gate, still reads true,
-      // the count follows the no-pending sentence: the gate takes a blocked
-      // entry under an open planner's root as no work, so the planner runs.
-      // Where it reads false, a paused entry, a blocked root or a seat's root
-      // holds the planner, and the count stands in the sentence's place.
+      // no pending entry, the result follows isPlanningDue, the controller's
+      // own planning gate. Where the gate reads true the root is the
+      // planner's, and the no-pending sentence says planning runs at the
+      // next tick, with a count of the blocked entries after it where any
+      // remain: the gate takes a blocked entry under an open planner's root
+      // as no work, so the planner runs. Where it reads false and no entry
+      // is paused or blocked, the no-pending sentence says the goal completes
+      // at the next tick or waits for goal_done on its done statements only
+      // where isRootFinished reads true; elsewhere, a task added under a
+      // complete plan of a complete root among them, the result says only
+      // that nothing is pending. Where it reads false and
+      // one or more entries are paused or blocked, the root among them, a
+      // paused entry, a blocked root or a seat's root holds the planner, and
+      // the result counts each status in the sentence's place and points at
+      // goal_status, which prints each with its reason.
       // With one or more pending, the walk could
       // not reach them: under a budget-blocked root activateNext returns null
       // whatever the tree holds, so the budget is named as the cause; else a
@@ -1792,8 +1799,12 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         const heldText = heldCounts.length === 0
           ? ""
           : `${heldCounts.map((held) => `${held.count} ${held.status}`).join(" and ")} ${heldTotal === 1 ? "entry remains" : "entries remain"}; goal_status lists each with its reason.`;
-        if (heldText === "" || isPlanningDue(sess.state)) {
+        if (isPlanningDue(sess.state)) {
           return { result: `Complete: "${completedTitle}". No pending goals; planning runs at the next tick.${heldText === "" ? "" : ` ${heldText}`}${healthText}${writeFailed}` };
+        }
+        if (heldText === "") {
+          if (!isRootFinished(sess.state)) return { result: `Complete: "${completedTitle}". No pending goals.${healthText}${writeFailed}` };
+          return { result: `Complete: "${completedTitle}". No pending goals; this goal completes at the next tick, or waits for goal_done where it carries done statements.${healthText}${writeFailed}` };
         }
         return { result: `Complete: "${completedTitle}". Nothing started by itself: ${heldText}${healthText}${writeFailed}` };
       }

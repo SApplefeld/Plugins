@@ -3768,17 +3768,31 @@ const holdRootForGoalDone = (rootId: string, path: string): boolean => {
   return true;
 };
 
-// Closes every open ledger entry, blocking or not, on each node `nodeIds`
-// names, as stood: the node is complete, so the choice each question stood
-// on held and the question no longer matters. Each entry's commons record
-// takes stood where it is still open, and a record that is missing or
-// already closed is left as it is. One ask_answered decision per close names
-// the id and `closedBy`, the completion that ran it. An entry on any other
-// node stays open and keeps whatever hold it has.
+// Settles the open ledger entries on each node `nodeIds` names, the nodes one
+// completion completed, by who opened each. A worker's ask stays open on the
+// ledger and on its commons record, since the question is still the
+// operator's to answer and the worker closes it by id with ask_close. Where
+// it was blocking, liftAsk clears the hold, so no hold outlives its node, and
+// one ask_hold_lifted decision for the whole call names `closedBy`, the
+// completion that ran it, and each lifted id. A lift is not a status, so no
+// commons record changes. An ask the controller opened for itself is about
+// the node's own run, so it closes as stood, blocking or not: its commons
+// record takes stood where it is still open, a record that is missing or
+// already closed is left as it is, and one ask_answered decision per close
+// names the id and `closedBy`. An entry on any other node stays open and
+// keeps whatever hold it has.
 const closeAsksOnCompletedNodes = async (dp: any, nodeIds: readonly string[], closedBy: string, now: number): Promise<void> => {
   const store = commonsStoreOf(dp);
+  const liftedIds: string[] = [];
   for (const entry of openAskEntries(sess.state)) {
     if (!nodeIds.includes(entry.nodeId)) continue;
+    if (entry.opener === "worker") {
+      if (entry.blocking) {
+        liftAsk(sess.state, entry.id);
+        liftedIds.push(entry.id);
+      }
+      continue;
+    }
     const askRecord = await readAskRecord(store, sess.persona, entry.id);
     if (askRecord && askRecord.status === "open") {
       askRecord.status = "stood";
@@ -3790,6 +3804,14 @@ const closeAsksOnCompletedNodes = async (dp: any, nodeIds: readonly string[], cl
       loop: "monitor",
       action: "ask_answered",
       detail: `ask ${entry.id} closed by ${closedBy} (status: stood)`,
+    });
+  }
+  if (liftedIds.length > 0) {
+    sess.state.decisions.push({
+      timestamp: now,
+      loop: "monitor",
+      action: "ask_hold_lifted",
+      detail: `asks ${liftedIds.join(", ")} lifted by ${closedBy}, left open`,
     });
   }
 };
@@ -3812,7 +3834,7 @@ function clearChildBlockedAncestors(...args: AfterDeps<typeof clearChildBlockedA
 // The text of the [BLOCKED WITH NO QUESTION] turn. It is fixed and carries
 // no store data: it names no entry, since the turn's answer sets a lead on
 // the entry active when it runs, as any turn's closing line does.
-const BLOCKED_TURN_BACK_TEXT = "[BLOCKED WITH NO QUESTION] Your last turn closed with BLOCKED: while this persona holds no open question for the operator. The operator has nothing to answer, and the controller sends this entry no nudge while the lead stands. If the work cannot go on without the operator, file the question now with ask_open, with blocking set to true, and open your closing text with BLOCKED: again. If it waits on anything else, such as a peer's answer, a build, a slot or a timer, open your closing text with WAITING: and what will wake you. This turn is sent once.";
+const BLOCKED_TURN_BACK_TEXT = "[BLOCKED WITH NO QUESTION] Your last turn closed with BLOCKED: while no open question for the operator stands on an entry that is still open. The operator has nothing to answer for this entry, and the controller sends this entry no nudge while the lead stands. If the work cannot go on without the operator, file the question now with ask_open, with blocking set to true, and open your closing text with BLOCKED: again. If it waits on anything else, such as a peer's answer, a build, a slot or a timer, open your closing text with WAITING: and what will wake you. This turn is sent once.";
 
 // Turns a blocked close back to the worker: one [BLOCKED WITH NO QUESTION]
 // turn for entry `entryId`, whose lead the turn end in
@@ -3923,6 +3945,35 @@ async function readPlanCheckout(dp: any, dir: string): Promise<{ upstream: boole
     ahead,
     dirty: lines.length - 1,
   };
+}
+
+// Whether the host reads a plan's pull request as an open draft, by one
+// `gh pr view --json state,isDraft` with `dir` as its working directory, which
+// names `pullRequest` after `view` where the entry holds one and otherwise
+// reads the pull request of the branch checked out in `dir`. True only where
+// the run exits 0 and prints a JSON object whose `state` is `OPEN` and whose
+// `isDraft` is true. False for every other outcome: a run that rejects (a
+// timeout or a failed start), an exit code other than 0, output that is no
+// JSON object, any other `state`, or an `isDraft` that is not true. The argv
+// is fixed but for the number, a positive integer the store validated, and no
+// shell runs, so `dir` reaches gh only as a working directory. Never throws.
+async function readPlanPullRequestDraft(dp: any, dir: string, pullRequest: number | undefined): Promise<boolean> {
+  let res: any;
+  try {
+    res = await runChild(dp, ["gh", "pr", "view", ...(pullRequest === undefined ? [] : [String(pullRequest)]), "--json", "state,isDraft"], { cwd: dir, timeoutMs: PLAN_CHECKOUT_TIMEOUT_MS });
+  } catch {
+    return false;
+  }
+  if (!res || res.exitCode !== 0 || typeof res.stdout !== "string") return false;
+  let answer: unknown;
+  try {
+    answer = JSON.parse(res.stdout);
+  } catch {
+    return false;
+  }
+  if (answer === null || typeof answer !== "object" || Array.isArray(answer)) return false;
+  const { state, isDraft } = answer as { state?: unknown; isDraft?: unknown };
+  return state === "OPEN" && isDraft === true;
 }
 
 // The open closing leaf under `plan`, or undefined where it has none, as
@@ -4761,10 +4812,11 @@ export const register: Register = async (on, options) => {
   // itself re-arms the entry, so a later move below the checkout logs again.
   const planRecordDirResolvedLogged = new Set<string>();
   // The plan holders whose document completion a checkout that is not clean
-  // and pushed has held, each mapped to the reason text of the one
-  // plan_complete_held decision it last logged. A different reason logs again,
-  // and a completion re-arms the entry, so a close spanning several turns
-  // logs one line per checkout state rather than one per turn.
+  // and pushed, or a pull request that is an open draft, has held, each mapped
+  // to the reason text of the one plan_complete_held decision it last logged.
+  // A different reason logs again, and a completion re-arms the entry, so a
+  // close spanning several turns logs one line per held state rather than one
+  // per turn.
   const planCompleteHeldLogged = new Map<string, string>();
 
   // M8: planning reentrancy guard.
@@ -8460,6 +8512,7 @@ export const register: Register = async (on, options) => {
         queueBlockedTurnBack: (expectedTurns, entryId) => queueBlockedTurnBack($, expectedTurns, entryId),
         readPlanDocument: (planPath) => readPlanDocument($, planPath),
         readPlanCheckout: (dir) => readPlanCheckout($, dir),
+        readPlanPullRequestDraft: (dir, pullRequest) => readPlanPullRequestDraft($, dir, pullRequest),
         closeAsksOnCompletedNodes: (nodeIds, closedBy, now) => closeAsksOnCompletedNodes($, nodeIds, closedBy, now),
         foldSettledPlans: () => foldSettledPlans($),
         liveTopLevelAgentRunning: () => liveTopLevelAgentRunning($),

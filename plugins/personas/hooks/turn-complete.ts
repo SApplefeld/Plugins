@@ -6,7 +6,7 @@
 // engine calls, the two model calls with their scrub, the reply backstop's
 // submit and the register-scope values behind closures, so this module
 // never receives the engine object and holds no state of its own.
-import { ASKS_OPEN_MAX, activateNext, applyTurnToErrors, headPoints, openAskEntries, openBlockingAsks, planHolderOf, reapTurnRecords, stampAskBriefTurnEnd, type GoalNode, type TurnRecordStamp } from "./agent-state";
+import { ASKS_OPEN_MAX, activateNext, applyTurnToErrors, headPoints, openAsksOnLiveEntries, openBlockingAsks, planHolderOf, reapTurnRecords, stampAskBriefTurnEnd, type GoalNode, type TurnRecordStamp } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, openWorkerAsk as openWorkerAskFromModule, shadowAsk as shadowAskFromModule, shadowAskPlanHealth as shadowAskPlanHealthFromModule, shadowOutcome as shadowOutcomeFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { meterSessionKnown } from "./beat";
 import type { ChannelSender, ExpectedTurn, SubmitOutcome } from "./channel-text";
@@ -82,6 +82,9 @@ export interface TurnCompleteContext extends SharedHandlerState {
   queueBlockedTurnBack: (expectedTurns: ExpectedTurn[], entryId: string) => void;
   readPlanDocument: (planPath: string) => Promise<{ reading: PlanRecordReading; liveDir: string | null; planDir: string | null }>;
   readPlanCheckout: (dir: string) => Promise<{ upstream: boolean; ahead: number; dirty: number } | null>;
+  // Whether the host reads the pull request of the plan whose document sits
+  // in `dir` as an open draft; false wherever the read cannot answer.
+  readPlanPullRequestDraft: (dir: string, pullRequest: number | undefined) => Promise<boolean>;
   closeAsksOnCompletedNodes: (nodeIds: readonly string[], closedBy: string, now: number) => Promise<void>;
   foldSettledPlans: () => Promise<void>;
   liveTopLevelAgentRunning: () => Promise<boolean>;
@@ -180,7 +183,7 @@ export interface TurnCompleteContext extends SharedHandlerState {
 // before its `next(e)`, from the delete of the turn's open entry to the
 // completion drain it fires after itself.
 export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnCompleteInput): Promise<void> {
-  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, queueBlockedTurnBack, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyAnsweredThisTurn, replyLineThisTurn, replyCallsThisTurn, lastReplyCallAt, hourLineInFlight, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns } = ctx;
+  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, queueBlockedTurnBack, readPlanDocument, readPlanCheckout, readPlanPullRequestDraft, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyAnsweredThisTurn, replyLineThisTurn, replyCallsThisTurn, lastReplyCallAt, hourLineInFlight, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns } = ctx;
   // The answer with its secrets hidden, scanned once here and read by
   // these copies this handler sends or stores: the reply backstop's
   // direct reply and its fallback re-prompt, the memory queue's answer head
@@ -787,13 +790,16 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // as it accepts a failed append.
   //
   // The turn-back: a blocked lead set while the persona's ledger holds no
-  // open ask, on whatever entry, is a stop the operator has no question to
-  // answer. The step marks that lead turnedBack, logs blocked_turn_back and
-  // holds the entry's id, and the store write at the end of this body sends
-  // one [BLOCKED WITH NO QUESTION] turn where it returns true, as it sends
-  // the events. The ledger is read here, below the ASK: lines' opens, so a
-  // question filed by this turn's ask_open or by a line of this closing text
-  // counts, and so does a lifted ask, which stays open. A blocked lead
+  // open ask on a live entry, one that stands in the tree neither complete
+  // nor abandoned, is a stop the operator has no question to answer. An ask
+  // a completion kept open, or one on an entry a fold removed, does not
+  // count, since it asks nothing about the work in hand. The step marks that
+  // lead turnedBack, logs blocked_turn_back and holds the entry's id, and
+  // the store write at the end of this body sends one [BLOCKED WITH NO
+  // QUESTION] turn where it returns true, as it sends the events. The ledger
+  // is read here, below the ASK: lines' opens, so a question filed by this
+  // turn's ask_open or by a line of this closing text counts, and so does a
+  // lifted ask on a live entry, which stays open. A blocked lead
   // written over a marked one keeps the mark and is not turned back, so one
   // stretch of blocked closes draws one turn. A waiting lead and a cleared
   // one carry no mark, so the blocked close after either is turned back
@@ -815,7 +821,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
       if (leadLine.state === "blocked") {
         if (previous?.state === "blocked" && previous.turnedBack === true) {
           turnLeaf.lead.turnedBack = true;
-        } else if (openAskEntries(sess.state).length === 0) {
+        } else if (openAsksOnLiveEntries(sess.state).length === 0) {
           turnLeaf.lead.turnedBack = true;
           turnedBackEntryId = turnLeaf.id;
           turnedBackStatus = turnLeaf.status;
@@ -1249,18 +1255,41 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // run lines below, or null where no read ran or the read threw.
   let planReading: PlanRecordReading | null = null;
   // Whether the checkout holding `holder`'s document, read in `planDir`,
-  // holds its completion: true where git answers a branch line with no
-  // upstream, a commit ahead, or any line after it. A held entry logs one
-  // plan_complete_held decision naming the holder, the document, the
-  // directory, the dirty count, the ahead count and whether an upstream is
-  // set, again only when that reason text changes. A read that cannot be
-  // used, or no planDir, holds nothing, so the completion runs as it does
-  // for a tree git cannot see. Not holding re-arms the log.
+  // or the plan's pull request holds its completion. The checkout holds
+  // where git answers a branch line with no upstream, a commit ahead, or any
+  // line after it. A held entry logs one plan_complete_held decision naming
+  // the holder, the document, the directory, the dirty count, the ahead
+  // count and whether an upstream is set. A checkout read that cannot be
+  // used, or no planDir, holds nothing and starts no further read, so the
+  // completion runs as it does for a tree git cannot see. Behind a checkout
+  // that read clean and pushed, the pull request holds where the host reads
+  // it as an open draft, under one plan_complete_held decision naming the
+  // holder, the document, the directory and the draft, and any other answer
+  // of that read, or none, holds nothing. Either decision is logged again
+  // only when its reason text changes, and the log is re-armed only where
+  // neither read holds.
   const heldByCheckout = async (holder: GoalNode, docPath: string, planDir: string | null): Promise<boolean> => {
     const checkout = planDir === null ? null : await readPlanCheckout(planDir);
-    if (planDir === null || checkout === null || (checkout.upstream && checkout.ahead === 0 && checkout.dirty === 0)) {
+    if (planDir === null || checkout === null) {
       planCompleteHeldLogged.delete(holder.id);
       return false;
+    }
+    if (checkout.upstream && checkout.ahead === 0 && checkout.dirty === 0) {
+      if (!(await readPlanPullRequestDraft(planDir, holder.pullRequest))) {
+        planCompleteHeldLogged.delete(holder.id);
+        return false;
+      }
+      const draft = holder.pullRequest === undefined ? "the branch's pull request is a draft" : `pull request ${holder.pullRequest} is a draft`;
+      if (planCompleteHeldLogged.get(holder.id) !== draft) {
+        planCompleteHeldLogged.set(holder.id, draft);
+        sess.state.decisions.push({
+          timestamp: Date.now(),
+          loop: "goal",
+          action: "plan_complete_held",
+          detail: `${holder.id}: ${headPoints(docPath, 150)}: checkout at ${headPoints(planDir, 200)}: held while ${draft}`,
+        });
+      }
+      return true;
     }
     const reason = `dirty ${checkout.dirty}, ahead ${checkout.ahead}, upstream ${checkout.upstream ? "set" : "none"}`;
     if (planCompleteHeldLogged.get(holder.id) !== reason) {
@@ -1282,9 +1311,10 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // shape the scorer's complete branch writes for the one node it
   // completes. A descendant already complete or abandoned is left as it
   // is, nothing outside the holder's subtree is touched, and no walk goes
-  // upward past the holder. An open operator ask on an entry this close
-  // completed closes as goal_done closes one. The next entry is then
-  // activated only where no operator ask is still open, the hold
+  // upward past the holder. An open ask on an entry this close completed
+  // is settled as goal_done settles one: a worker's stays open with its
+  // hold lifted, and one the controller opened closes as stood. The next
+  // entry is then activated only where no open ask still blocks, the hold
   // goal_done's none-active branch honours, and with `onlyWhenIdle` only
   // where no entry is active as well, since a plan read beside the turn's
   // own holder can complete while another entry is being worked. Where
@@ -1337,8 +1367,9 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
       detail: `${completedId}: ${cause}`,
     });
     queueMemoryCheck(expectedTurns, completedId, holder.title, closedHere);
-    // Every open ask on an entry this completion closed stands as
-    // goal_done's do.
+    // Each open ask on an entry this completion closed is settled as
+    // goal_done settles one: a worker's stays open with its hold lifted,
+    // and one the controller opened closes as stood.
     await closeAsksOnCompletedNodes(closedHere, "goal_done (plan document)", Date.now());
     if (openBlockingAsks(sess.state).length === 0 && (!onlyWhenIdle || !sess.state.goals.some((g) => g.status === "active"))) {
       const nextId = activateNext(sess.state, completedId);
@@ -1349,6 +1380,11 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
     try { log(`Agentic: ${completedId} plan complete (${cause})`); } catch { /* non-fatal */ }
     try { status(""); } catch { /* non-fatal */ }
   };
+  // Whether `g` is complete or abandoned as it stands at the call. A plan
+  // entry's status is read through it after the checkout and draft reads,
+  // since the controller's tick or a goal tool can settle the entry while
+  // those reads are awaited, and a settled entry is not completed again.
+  const settledNow = (g: GoalNode): boolean => g.status === "complete" || g.status === "abandoned";
   if (sess.isOwner && planHolder && planPath) {
     const holder = planHolder;
     const holderClosed = holder.status === "complete" || holder.status === "abandoned";
@@ -1414,9 +1450,10 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
             holder.nextSection = reading.next;
           }
         }
+        // The holder's status is read again after the awaited reads.
         const documentComplete = reading.kind === "archived" || reading.complete;
         if (documentComplete && holder.status !== "complete" && holder.status !== "abandoned"
-          && !(await heldByCheckout(holder, planPath, planDir))) {
+          && !(await heldByCheckout(holder, planPath, planDir)) && !settledNow(holder)) {
           await completeByDocument(holder, planPath, reading, false);
           planCompletedByDocument = true;
         }
@@ -1443,8 +1480,9 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // holder was read above and is not read twice. A reading short of
   // Complete, or unreadable, changes nothing and logs nothing, since such
   // a plan is read at every turn end until it closes. A Complete reading
-  // waits for the checkout holding the document as the holder's does, with
-  // the same once-per-state plan_complete_held log. One read per such
+  // waits for the checkout holding the document, and then for the plan's
+  // pull request to leave draft, as the holder's does, with the same
+  // once-per-state plan_complete_held log. One read per such
   // plan; the owner alone reads, as for the holder, and a subagent's
   // completion, which is not the persona's own turn end, reads none.
   if (sess.isOwner && !completesSubagentLoop) {
@@ -1461,6 +1499,8 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         if (reading.kind === "unreadable" || (reading.kind === "read" && !reading.complete)) continue;
         if (plan.status === "complete" || plan.status === "abandoned") continue;
         if (await heldByCheckout(plan, plan.planPath!, planDir)) continue;
+        // The plan's status is read again after the awaited reads.
+        if (settledNow(plan)) continue;
         await completeByDocument(plan, plan.planPath!, reading, true);
       } catch (err) {
         sess.state.decisions.push({
@@ -2175,14 +2215,15 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // budget's blocking ask. So the entry is found again here, and the turn
   // goes out only where it still stands with the status it had at the lead
   // step, its lead is still the marked blocked lead, and the ledger still
-  // holds no open ask. The decision and the mark stay as written.
+  // holds no open ask on a live entry, as the lead step reads it. The
+  // decision and the mark stay as written.
   try {
     if (sess.isOwner && !completesSubagentLoop && !turnIsOpen() && turnStartSeq() === turnStartSeqAtDelete) await foldSettledPlans();
     if (await persist()) {
       for (const [kind, plan, detail] of heldKitEvents) await emitKitEvent(kind, plan, detail);
       const turnedBack = turnedBackEntryId === null ? undefined : sess.state.goals.find((g) => g.id === turnedBackEntryId);
       const turnedBackStands = turnedBack !== undefined && turnedBack.status === turnedBackStatus;
-      if (turnedBackStands && turnedBack.lead?.state === "blocked" && turnedBack.lead.turnedBack === true && openAskEntries(sess.state).length === 0) {
+      if (turnedBackStands && turnedBack.lead?.state === "blocked" && turnedBack.lead.turnedBack === true && openAsksOnLiveEntries(sess.state).length === 0) {
         queueBlockedTurnBack(expectedTurns, turnedBack.id);
       }
     }

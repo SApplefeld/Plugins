@@ -1115,6 +1115,18 @@ export function openAskEntries(state: AgentState): AskEntry[] {
   return state.asks.filter((entry) => entry.status === "open");
 }
 
+// The open entries on a goal entry that still stands in the tree, neither
+// complete nor abandoned. An open ask a completion kept, or one whose entry a
+// fold took out of the tree, is the operator's still and stays on the ledger,
+// but it is no question about the work in hand. A lifted ask on a live entry
+// counts.
+export function openAsksOnLiveEntries(state: AgentState): AskEntry[] {
+  return openAskEntries(state).filter((entry) => {
+    const node = state.goals.find((g) => g.id === entry.nodeId);
+    return node !== undefined && node.status !== "complete" && node.status !== "abandoned";
+  });
+}
+
 // The open entries the work is stopped on. This is the predicate the hold and
 // every reader that decides a hold take: an open entry that is not blocking is
 // a question the operator still owns, and no reason to stop.

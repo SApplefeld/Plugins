@@ -314,12 +314,13 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
       // prompt on, before the planner's first entries exist. The objective is
       // folded and bracket-safe like every other field a goal block splices.
       // The closing line says what moves next: the controller's next tick on
-      // a pending root, goal_done on one the controller held for its done
+      // a pending root, in one text that holds for a planner's root and a
+      // seat's alike, goal_done on one the controller held for its done
       // statements, goal_resume on one the turn budget blocks, and on one
       // held for any other reason, such as a failing planner or the planning
       // cap, the two calls that still end it, since no tool lifts that hold.
       const rootClose = root.status === "pending"
-        ? `No entry is open under this goal. On its next tick the controller plans entries for a goal its planner owns, and completes a finished goal or holds it for goal_done where it carries done statements. A goal whose entries were all dropped stays idle until goal_add adds work under it.`
+        ? `No entry is open under this goal. On its next tick the controller plans entries for a goal its planner owns, and completes a finished goal or holds it for goal_done where it carries done statements. The planner owns a goal that holds no entry directly under it but the planner's own, and it plans such a goal again after those entries are dropped. One goal_add directly under the goal makes the goal its session's, and that goal stays idle once its entries were all dropped, until goal_add adds work under it.`
         : root.blockedReason === DONE_HOLD_REASON
           ? `This goal waits on its done statements, which the controller does not judge. Once every done statement holds, complete it with goal_done naming ${root.id}, in a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started. goal_done needs one complete entry under the goal, so where none is, add and finish the work with goal_add first.`
           : root.blockedReason === TURN_BUDGET_REASON
