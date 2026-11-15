@@ -27,7 +27,7 @@
 // evaluates it once per process while it loads a fresh hooks/index.ts per
 // case.
 
-import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, headPoints, holdOf, isPlanningDue, isRootFinished, oneLine, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, switchToPlan, QUIET_HELD_MAX, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type QuietHeld, type SentFinding, type SentPlanRecord } from "./agent-state";
+import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, headPoints, holdOf, isPlanningDue, isRootFinished, oneLine, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, switchToPlan, QUIET_HELD_MAX, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type QuietHeld, type RunLines, type SentFinding, type SentPlanRecord } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, shadowAsk as shadowAskFromModule, shadowOutcome as shadowOutcomeFromModule, tickOpenAsk as tickOpenAskFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { stampBeat, stampSupervisorFile, type BeatHost, type HeartbeatEntry } from "./beat";
 import { cacheTick, type CacheClockState } from "./cache-clock";
@@ -46,7 +46,7 @@ import { PLAN_ARCHIVE_DIRS } from "./plan-record";
 import { isPlanEntry, reactivateAskedEntry, roundSummaryText } from "./plan-route";
 import { CONTROLLER_DECISION, PLAN_SWITCH, PLAN_SWITCH_NO_MATCH, controllerLabelsOf, controllerLastAnswerText, controllerStateText, kaizenLine, resolverOf, type ControllerStateFact } from "./question-catalog";
 import { routineDue, scheduleWords } from "./routines";
-import { activeLeafHolderOf, hourLineHeld, hourLineOwed, hourLineSince, hourLineText, hourLineTurnShowsWork, isWorkerSession, releaseHourLineMark, runLineTitleOf, sendHourLine, takeHourLineMark } from "./run-lines";
+import { activeLeafHolderOf, hourLineHeld, hourLineOwed, hourLineSince, hourLineText, hourLineTurnShowsWork, hourPositionOf, isWorkerSession, releaseHourLineMark, runLineTitleOf, sendHourLine, sendStallLine, stallLineOwed, stallLineText, stallSince, stallSpanPassed, takeHourLineMark, threadLineAt, type HourLineMark } from "./run-lines";
 import { FINDING_COOLOFF_MS, FINDING_UNROUTABLE_AFTER_MS, buildSelfReviewInput, dedupeSelfReview, evictSelfReview, isClosureTimingLesson, isSelfScoringLesson, reviewOwnRecord, shouldSelfReview } from "./self-review";
 import type { SessionState } from "./session-state";
 import { readPersonaStore } from "./store-files";
@@ -140,10 +140,10 @@ export interface TickContext extends SharedHandlerState {
   // in this session, null where it has made none.
   toolCall: (args: { tool: string; message: string }) => Promise<unknown>;
   lastReplyCallAt: () => number | null;
-  // The ids of the holders whose hour line a site is sending now, each with
-  // the time its mark was set, shared with the turn-end site, so the two
-  // never send the same hour's line.
-  hourLineInFlight: () => Map<string, number>;
+  // The ids of the holders whose hour line or stall line a site is sending
+  // now, each with the time its mark was set and the kind of that send,
+  // shared with the turn-end site, so no two sends for one holder overlap.
+  hourLineInFlight: () => Map<string, HourLineMark>;
   meterDrainStep: (now: number) => void;
   appendToChannelLog: (lines: string[]) => Promise<string>;
   drainSupervisorMailbox: (...args: AfterDeps<typeof drainSupervisorMailboxFromModule>) => ReturnType<typeof drainSupervisorMailboxFromModule>;
@@ -3790,10 +3790,66 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   });
 }
 
+// The start of the turn open now, as the stall line's rule reads it, or null
+// where none is open.
+function openTurnStartOf(ctx: TickContext): number | null {
+  return ctx.turnIsOpen() ? ctx.sess.turnStartedAt : null;
+}
+
+// The stall line's one site (hooks/run-lines.ts), run from hourLineTick for
+// the active leaf's plan holder where stallLineOwed read true at `now`: a
+// turn is open and RUN_LINE_HOUR_MS has passed since the later of its start
+// and the session's last tool call. It follows the hour line's discipline at
+// the tick. The in-flight mark the hour sites share is taken with the kind
+// stall before any await, so no hour send overlaps this one, a mark standing
+// from another send ends the try with stallAt unmoved, and a stale mark this
+// send leaves is settled as a stall line. The try's mark, stallAt, is set
+// and stored before the send, so one stall is tried once, and a mark the
+// store did not take is taken back with nothing sent, so a later tick tries.
+// That write is an await a tool call or a turn's end or start can land
+// under, so the owed rule is read again on a fresh clock against the stallAt
+// that stood before this try, and a line no longer owed is not sent, the
+// stored mark standing. The text counts its minutes on that fresh clock.
+// A send that returns after another taker settled its stale mark and
+// replaced it moves threadAt alone, as sendStallLine states. What the send
+// left rides a second store write, and one the store refuses leaves that
+// state in memory for the next write. Runs under hourLineTick's catch.
+async function stallLineTick(ctx: TickContext, holder: GoalNode, run: RunLines, planPath: string, now: number): Promise<void> {
+  const { sess } = ctx;
+  const inFlight = ctx.hourLineInFlight();
+  const markAt = takeHourLineMark(inFlight, run, holder.id, "stall", holder.chapterCount ?? 0, holder.sectionCount ?? 0, Date.now(), sess.state.decisions);
+  if (markAt === null) return;
+  try {
+    const previousStallAt = run.stallAt;
+    run.stallAt = now;
+    let marked = false;
+    try {
+      marked = await ctx.persistOrRollBack(() => {
+        if (run.stallAt === now) run.stallAt = previousStallAt;
+      });
+    } catch { /* the store refused; the mark is taken back and a later tick tries */ }
+    if (!marked) return;
+    const sendAt = Date.now();
+    const turnStartedAt = openTurnStartOf(ctx);
+    if (turnStartedAt === null
+      || !stallLineOwed(holder === activeLeafHolderOf(sess.state), run.closedAt === undefined, previousStallAt, turnStartedAt, sess.lastToolCallAt, sendAt)) return;
+    const chapters = holder.chapterCount ?? 0;
+    const sections = holder.sectionCount ?? 0;
+    const text = stallLineText(runLineTitleOf(run.title, planPath), chapters, sections, stallSince(turnStartedAt, sess.lastToolCallAt), sendAt);
+    sess.state.decisions.push(await sendStallLine(ctx.toolCall, run, holder.id, text, chapters, sections, () => Date.now(), () => inFlight.get(holder.id)?.at === markAt));
+  } finally {
+    releaseHourLineMark(inFlight, holder.id, markAt);
+  }
+  // Reached only once the send settled, since every exit above it returns
+  // before this write or throws to the caller's catch.
+  try { await ctx.persist(); } catch { /* the store refused; the state above waits in memory */ }
+}
+
 // The hour line's tick site (hooks/run-lines.ts), run on every tick of the
 // owner session in a worker session, turn open or not. A holder owes the
 // line where it is the plan holder of the tree's active leaf, its run is
-// open and RUN_LINE_HOUR_MS has passed with no line recorded. It is sent
+// open, its place differs from the place its last taken hour line told, and
+// RUN_LINE_HOUR_MS has passed with no line recorded. It is sent
 // only where the session shows work, a turn open for RUN_LINE_TURN_GRACE_MS
 // or a top-level agent running, so a waiting session, or one whose turn the
 // operator's message has just opened, is never said to be running, and
@@ -3815,7 +3871,20 @@ export async function idleTick(ctx: TickContext): Promise<void> {
 // RUN_LINE_MARK_STALE_MS counts as absent, settled as one unsent, and each
 // site clears only the mark it set. What the send left rides
 // a second store write, and one the store refuses leaves that state in
-// memory for the next write. The whole body
+// memory for the next write.
+//
+// The place decides whether the line is owed at all: a holder whose last
+// taken hour line told the place it is in owes none, and the minutes count
+// from the last line recorded on the thread in any run of the tree. With a
+// turn open the line is also not sent once the stall span has passed, so a
+// turn with no tool call for RUN_LINE_HOUR_MS is never said to be running.
+// That test is read again with the owed rule after the mark's write, so a
+// write that crosses the span sends nothing.
+//
+// The stall line is checked first, for the active leaf's plan holder with a
+// turn open, and a holder whose stall line is owed gets no hour line at that
+// tick, whether the stall line was sent or not. Only that holder can owe an
+// hour line, so the tick ends there. The whole body
 // sits under one catch that logs, so nothing here throws into the tick.
 async function hourLineTick(ctx: TickContext): Promise<void> {
   const { sess } = ctx;
@@ -3823,23 +3892,33 @@ async function hourLineTick(ctx: TickContext): Promise<void> {
     if (!sess.isOwner) return;
     if (!isWorkerSession(sess.persona, ctx.coordinatorPersona, ctx.architectPersona, sess.state.goals.find((g) => g.parentId === null)?.source)) return;
     const now = Date.now();
-    const lastReplyAt = ctx.lastReplyCallAt();
     const leafHolder = activeLeafHolderOf(sess.state);
+    if (leafHolder?.runLines !== undefined && leafHolder.planPath
+      && stallLineOwed(true, leafHolder.runLines.closedAt === undefined, leafHolder.runLines.stallAt, openTurnStartOf(ctx), sess.lastToolCallAt, now)) {
+      await stallLineTick(ctx, leafHolder, leafHolder.runLines, leafHolder.planPath, now);
+      return;
+    }
+    // The hour line's owed rule for `holder` at `at`, on the tree as it
+    // stands at the call.
+    const hourOwed = (holder: GoalNode, run: RunLines, at: number): boolean =>
+      hourLineOwed(holder === activeLeafHolderOf(sess.state), run, hourPositionOf(holder.chapterCount ?? 0, holder.sectionCount ?? 0), threadLineAt(sess.state.goals), ctx.lastReplyCallAt(), at);
     const owed = sess.state.goals.filter((g) => g.runLines !== undefined && g.planPath
-      && hourLineOwed(g === leafHolder, g.runLines, lastReplyAt, now) && !hourLineHeld(g.runLines.tickAt, now));
+      && hourOwed(g, g.runLines, now) && !hourLineHeld(g.runLines.tickAt, now));
     if (owed.length === 0) return;
-    if (ctx.turnIsOpen() ? !hourLineTurnShowsWork(sess.turnStartedAt, now) : !(await ctx.liveTopLevelAgentRunning())) return;
+    if (ctx.turnIsOpen()
+      ? !hourLineTurnShowsWork(sess.turnStartedAt, now) || stallSpanPassed(sess.turnStartedAt, sess.lastToolCallAt, now)
+      : !(await ctx.liveTopLevelAgentRunning())) return;
     for (const holder of owed) {
       const run = holder.runLines;
       // Read again, since the agent read and an earlier holder's send are
       // awaits another tick or a turn end can settle the line under.
-      if (run === undefined || !holder.planPath || !hourLineOwed(holder === activeLeafHolderOf(sess.state), run, ctx.lastReplyCallAt(), now) || hourLineHeld(run.tickAt, now)) continue;
-      // The turn end's send of this line is in flight: the tick stands down
-      // before it sets tickAt, so it spends none of its hour. A mark older
-      // than RUN_LINE_MARK_STALE_MS is settled as unsent and replaced by
-      // this site's own.
+      if (run === undefined || !holder.planPath || !hourOwed(holder, run, now) || hourLineHeld(run.tickAt, now)) continue;
+      // Another send for this holder is in flight, the turn end's of this
+      // line among them: the tick stands down before it sets tickAt, so it
+      // spends none of its hour. A mark older than RUN_LINE_MARK_STALE_MS is
+      // settled as unsent and replaced by this site's own.
       const inFlight = ctx.hourLineInFlight();
-      const markAt = takeHourLineMark(inFlight, run, holder.id, holder.chapterCount ?? 0, holder.sectionCount ?? 0, Date.now(), sess.state.decisions);
+      const markAt = takeHourLineMark(inFlight, run, holder.id, "hour", holder.chapterCount ?? 0, holder.sectionCount ?? 0, Date.now(), sess.state.decisions);
       if (markAt === null) continue;
       try {
         const previousTickAt = run.tickAt;
@@ -3852,11 +3931,15 @@ async function hourLineTick(ctx: TickContext): Promise<void> {
         } catch { /* the store refused; the mark is taken back and a later tick tries */ }
         if (!marked) continue;
         const sendAt = Date.now();
-        if (!hourLineOwed(holder === activeLeafHolderOf(sess.state), run, ctx.lastReplyCallAt(), sendAt)) continue;
+        if (!hourOwed(holder, run, sendAt)
+          || (ctx.turnIsOpen() && stallSpanPassed(sess.turnStartedAt, sess.lastToolCallAt, sendAt))) continue;
         const chapters = holder.chapterCount ?? 0;
         const sections = holder.sectionCount ?? 0;
-        const text = hourLineText(runLineTitleOf(run.title, holder.planPath), chapters, sections, hourLineSince(run, ctx.lastReplyCallAt()), sendAt);
-        sess.state.decisions.push(await sendHourLine(ctx.toolCall, run, holder.id, text, chapters, sections, () => Date.now(), () => { /* the stored tickAt is this site's hold */ }));
+        const text = hourLineText(runLineTitleOf(run.title, holder.planPath), chapters, sections, hourLineSince(run, threadLineAt(sess.state.goals), ctx.lastReplyCallAt()), sendAt);
+        // A send that returns after another taker settled its stale mark and
+        // replaced it raises hours and moves threadAt but writes no place, as
+        // sendHourLine states, so it never undoes the newer send's place.
+        sess.state.decisions.push(await sendHourLine(ctx.toolCall, run, holder.id, text, chapters, sections, () => Date.now(), () => inFlight.get(holder.id)?.at === markAt, () => { /* the stored tickAt is this site's hold */ }));
       } finally {
         releaseHourLineMark(inFlight, holder.id, markAt);
       }

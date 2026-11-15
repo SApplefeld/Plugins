@@ -340,6 +340,16 @@ export interface RunLines {
                      // thread in this run, the worker's own or the plugin's
   tickAt?: number; // the clock of the controller tick's last hour-line try
   turnTriedAt?: number; // the clock of a turn end's last hour line not taken
+  hourPosition?: number; // the place the last taken hour line told, as
+                         // hourPositionOf reads one, but for an hour send that
+                         // returned after its in-flight mark was replaced;
+                         // absent where the run has told no place, or a stall
+                         // line was taken since, but for a stall send that
+                         // returned after its in-flight mark was replaced
+  stallAt?: number; // the clock of the controller tick's last stall-line try
+  stalls?: number; // stall lines the thread took, but for a stall send that
+                   // returned after its in-flight mark was replaced; reads as
+                   // 0 where absent
   byTurn: number; // moments at which the turn made a reply of its own
   byPlugin: number; // start, section and close lines the thread took
   hours: number; // hour lines the thread took

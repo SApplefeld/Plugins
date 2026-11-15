@@ -424,9 +424,14 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // sends while a turn is open among them, re-enters this hook under the
   // plugin's own origin. It is no call of the turn's, so it joins none of
   // the turn's counts, its tool activity or its recognition windows below.
+  // Every other call, the main loop's or a dispatched agent's, stamps the
+  // clock the stall line (hooks/run-lines.ts) counts its span from.
   const isReplyTool = typeof e.tool === "string" && (e.tool.includes("__reply") || e.tool.endsWith("_reply"));
   const pluginReply = isReplyTool && !originIsEngine();
-  if (!pluginReply) sess.state.monitor.totalToolCalls += 1;
+  if (!pluginReply) {
+    sess.state.monitor.totalToolCalls += 1;
+    sess.lastToolCallAt = Date.now();
+  }
   if (!pluginReply && isWorkTool(e.tool)) setToolCallsThisTurn(toolCallsThisTurn() + 1);
   // Whether this call comes from a loop other than the main one: e.agentId,
   // the loop's id, is non-empty on a dispatched subagent's, a teammate's, a

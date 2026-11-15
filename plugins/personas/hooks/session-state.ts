@@ -32,6 +32,12 @@ export interface SessionState {
   controllerTickCount: number; // D4: in-session tick counter for backoff and cost_summary
   staleAfterMs: number; // F9a: single-source the staleness threshold
   turnStartedAt: number | null; // plan item 8.3: this session's clock at turn.start, null between turns
+  // The clock of the latest tool call any of the session's loops made, the
+  // main loop's or a dispatched agent's, null until one arrives. A reply the
+  // plugin itself sends moves it nowhere. The stall line
+  // (hooks/run-lines.ts) counts its span from it. In memory only, never
+  // persisted.
+  lastToolCallAt: number | null;
   // The instant the heartbeat tick's reading first found a top-level agent
   // running, kept while each later reading still finds one, and null once a
   // reading finds none or fails. hooks/controller-tick.ts's heartbeatTick is

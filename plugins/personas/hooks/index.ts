@@ -1695,6 +1695,7 @@ const sess: SessionState = {
   controllerTickCount: 0,
   staleAfterMs: 90_000,
   turnStartedAt: null,
+  lastToolCallAt: null,
   agentRunningSince: null,
   workdir: "",
   repromptCoveredUntil: null,
@@ -2762,14 +2763,19 @@ const appendLines = async (dp: any, path: string, lines: string[], known?: strin
 
 // The channel log's append: the highest segment takes the batch while it fits
 // under CHANNEL_SEGMENT_MAX_BYTES, else the next segment opens with the batch
-// alone. The size read is the listing's, and one separator byte is allowed
-// for, so the file written is never larger than the bound plus the batch.
-// Returns the path the batch landed in. A listing or write that throws
+// alone. The log is kept in the launch directory, beside the store: the
+// segments are listed in the anchor directory and written there through
+// workdirPathOf, whatever directory the session's commands have moved it to.
+// Where no anchor directory is known, both fall to the session's current
+// directory. The size read is the listing's, and one separator byte is
+// allowed for, so the file written is never larger than the bound plus the
+// batch. Returns the path the batch landed in. A listing or write that throws
 // propagates, as appendLines's write does, so a caller that deletes on
 // success still sees the failure.
 const appendToChannelLog = async (dp: any, lines: string[]): Promise<string> => {
   if (lines.length === 0) return "";
-  const entries: { name: string; kind: string; size: number }[] = await dp.fs.list();
+  const logDir = anchorDirOf();
+  const entries: { name: string; kind: string; size: number }[] = logDir ? await dp.fs.list(logDir) : await dp.fs.list();
   let highest = 0;
   let highestSize = 0;
   for (const entry of entries) {
@@ -2782,11 +2788,11 @@ const appendToChannelLog = async (dp: any, lines: string[]): Promise<string> => 
   const body = lines.map((line) => (line.endsWith("\n") ? line : line + "\n")).join("");
   const bodyBytes = new TextEncoder().encode(body).length;
   if (highest === 0 || highestSize + 1 + bodyBytes > CHANNEL_SEGMENT_MAX_BYTES) {
-    const next = channelSegmentPath(highest + 1);
+    const next = workdirPathOf(channelSegmentPath(highest + 1));
     await dp.fs.write(next, body);
     return next;
   }
-  const current = channelSegmentPath(highest);
+  const current = workdirPathOf(channelSegmentPath(highest));
   await appendLines(dp, current, lines);
   return current;
 };
@@ -4257,8 +4263,9 @@ export const register: Register = async (on, options) => {
   // turn) just saw e.origin.kind === "channel" - a message that arrived
   // through the Discord relay, as opposed to the keyboard, an SDK caller,
   // or one of this plugin's own internal $.prompt.submit calls (which
-  // bypass this hook and so never touch this flag). Consumed by the very
-  // next turn.start, the same one-flag handoff isPrimingTurn already uses.
+  // bypass this hook and so never touch this flag). Cleared by the very
+  // next turn.start of the persona's own, which takes its value as the mark
+  // below only for a turn it cannot place.
   let lastPromptWasChannelOrigin = false;
   // Whether the real prompt.submit hook fired at all since the last
   // turn.start: true for every genuine external turn (keyboard, SDK caller,
@@ -4269,8 +4276,11 @@ export const register: Register = async (on, options) => {
   // flag would see.
   let lastPromptWasExternal = false;
   // Whether THIS turn (the one now running) started from a channel
-  // message, captured at turn.start from the flag above so turn.complete
-  // can act on it after the flag has already reset for the next prompt.
+  // message, set at turn.start by three limbs so turn.complete can act on
+  // it. A turn that matched any entry the plugin queued is not marked. A
+  // turn that matched no entry and took an origin reading is marked where
+  // that reading's kind is channel. A turn that matched no entry and took
+  // no reading takes the value of lastPromptWasChannelOrigin above.
   let currentTurnIsChannelOrigin = false;
   // Whether the turn now running matched a `reprompt` entry. Only the reply
   // backstop reads it, so the re-prompt turn's answer reaches the thread
@@ -4575,16 +4585,18 @@ export const register: Register = async (on, options) => {
       else if (replyLineAt === null || at > replyLineAt) replyLineAt = at;
     };
   };
-  // The plan holders whose hour line (hooks/run-lines.ts) one of its two
-  // sites, the controller's tick and the persona's own turn end, is sending
-  // now. A site sets a holder's mark before the await that stores tickAt
+  // The plan holders whose hour line or stall line (hooks/run-lines.ts) a
+  // site is sending now. The hour line has two sites, the controller's tick
+  // and the persona's own turn end, and the stall line the tick alone. A
+  // site sets a holder's mark before the await that stores tickAt or stallAt
   // or sends, with no await between its owed check and the set, and clears it
   // once its send settles, and a site that finds the mark standing sends
-  // nothing, so the two never send the same hour's line. Each mark holds the
-  // time it was set: one older than RUN_LINE_MARK_STALE_MS counts as absent,
-  // and a site clears only the mark it set. Held in memory alone, so a
+  // nothing, so no two sends for one holder overlap. Each mark holds the
+  // time it was set and the kind of the send that set it: one older than
+  // RUN_LINE_MARK_STALE_MS counts as absent and is settled under its own
+  // kind, and a site clears only the mark it set. Held in memory alone, so a
   // restart drops it.
-  const hourLineInFlight = new Map<string, number>();
+  const hourLineInFlight = new Map<string, { at: number; kind: "hour" | "stall" }>();
   // Section 5 (goal-every-turn): the text the current turn opened with, cut
   // to what the turn-disposition question's state carries as
   // this_turn_was_asked. Set at turn.start from the event's own text and read
@@ -7501,10 +7513,10 @@ export const register: Register = async (on, options) => {
     toolCallsThisTurn = 0;
     nudgeCountWorkThisTurn = 0;
     goalDoneClosedThisTurn = new Map();
-    // Steer 68/69: capture whether this turn opened from a channel message,
-    // then clear the handoff flag so an unrelated later turn never inherits
-    // it. Reset the reply facts and the reply count for the turn now starting.
-    currentTurnIsChannelOrigin = lastPromptWasChannelOrigin;
+    // The thread-prompt flag is read once, for the mark set below, then
+    // cleared so an unrelated later turn never inherits it. Reset the reply
+    // facts and the reply count for the turn now starting.
+    const threadPromptFlagAtStart = lastPromptWasChannelOrigin;
     currentTurnIsReprompt = false;
     lastPromptWasChannelOrigin = false;
     const currentTurnIsExternal = lastPromptWasExternal;
@@ -7571,10 +7583,13 @@ export const register: Register = async (on, options) => {
     // Whether the origin reading this turn took is a prompt that closed the
     // open ask, read by the next_trigger outcome below.
     let turnAnswersAsk = false;
+    // The kind of the origin reading this turn took, null where it took none.
+    let takenReadingKind: string | null = null;
     if (!matched) {
       const reading = originReadings.find((r) => turnTextEquals(e.text, r));
       if (reading) {
         originReadings.splice(originReadings.indexOf(reading), 1);
+        takenReadingKind = reading.kind;
         turnAnswersAsk = reading.answersAsk === true;
         currentTurnOriginKind = reading.kind;
         currentTurnIsPriming = reading.priming;
@@ -7598,6 +7613,18 @@ export const register: Register = async (on, options) => {
         }
       }
     }
+    // Steer 68/69: whether this turn opened from a channel message, which
+    // the reply backstop reads at the turn's end. The mark follows the turn's
+    // own prompt, in three limbs. A turn that matched any entry the plugin
+    // queued is not marked, since the plugin submitted its prompt itself. A
+    // turn that matched no entry and took an origin reading is marked where
+    // that reading's kind is channel. A turn that matched no entry and took
+    // no reading takes the flag the last outside prompt left, as read at
+    // this start. Nothing above this line returns or awaits after the flag is
+    // read, so no path leaves the handler with the last turn's mark standing.
+    currentTurnIsChannelOrigin = matched
+      ? false
+      : takenReadingKind !== null ? takenReadingKind === "channel" : threadPromptFlagAtStart;
     // The next_trigger outcome of the turn-score call of the turn scored
     // last: what opened this turn, written once against that call's stamp,
     // which is then cleared. A nudge entry is `nudge`; the delivery the

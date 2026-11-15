@@ -31,7 +31,7 @@ import { MEMORY_KIND, MEMORY_KIND_LABELS, RECORD_OUTCOME_TURNS, SCORER_LABELS, S
 import { PROMPT_HEAD_MAX, memqKindOf } from "./recall-text";
 import type { closeTurnRecordAtTurnEnd as closeTurnRecordAtTurnEndFromModule, promotePlanTouchingRecord as promotePlanTouchingRecordFromModule } from "./records";
 import { scrubText } from "./redactor";
-import { RUN_LINE_BY_PLUGIN, RUN_LINE_BY_TURN, RUN_LINE_ERROR_MAX_CHARS, RUN_LINE_TOOL, activeLeafHolderOf, hourLineHeld, hourLineOwed, hourLineSince, hourLineText, isWorkerSession, newRunLines, releaseHourLineMark, runLineDetailOf, runLineMomentOf, runLineRefusalOf, runLineText, runLineTitleOf, runLineUnsentOf, runOpens, sendHourLine, takeHourLineMark } from "./run-lines";
+import { RUN_LINE_BY_PLUGIN, RUN_LINE_BY_TURN, RUN_LINE_ERROR_MAX_CHARS, RUN_LINE_TOOL, activeLeafHolderOf, hourLineHeld, hourLineOwed, hourLineSince, hourLineText, hourPositionOf, isWorkerSession, newRunLines, releaseHourLineMark, runLineDetailOf, runLineMomentOf, runLineRefusalOf, runLineText, runLineTitleOf, runLineUnsentOf, runOpens, sendHourLine, takeHourLineMark, threadLineAt, type HourLineMark } from "./run-lines";
 import { KAIZEN_LONG_TURN_MS } from "./self-review";
 import { skillPickSettle } from "./skill-pick";
 import { safeErrorText } from "./text";
@@ -134,10 +134,11 @@ export interface TurnCompleteContext extends SharedHandlerState {
   // does.
   replyCallsThisTurn: () => number;
   lastReplyCallAt: () => number | null;
-  // The ids of the holders whose hour line a site is sending now, each with
-  // the time its mark was set, shared with the controller's tick, so the two
-  // never send the same hour's line.
-  hourLineInFlight: () => Map<string, number>;
+  // The ids of the holders whose hour line or stall line a site is sending
+  // now, each with the time its mark was set and the kind of that send,
+  // shared with the controller's tick, so no two sends for one holder
+  // overlap.
+  hourLineInFlight: () => Map<string, HourLineMark>;
   turnPlanEditedPaths: () => readonly string[];
   turnFollowUps: () => { turnId: string | null; hits: readonly string[] };
   countResetSinceNudgeOpened: () => boolean;
@@ -1481,9 +1482,12 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // not taken still settles its moment and never becomes a prompt.
   //
   // The hour line's turn-end site follows, for each open run that owed
-  // none of those moments at this turn end. It is sent where the run has
-  // gone RUN_LINE_HOUR_MS with no line recorded and the turn shows work: it
-  // called a work tool and its closing text does not open BLOCKED:. A send
+  // none of those moments at this turn end. It is sent where the holder is
+  // in a place its last taken hour line did not tell, the thread has gone
+  // RUN_LINE_HOUR_MS with no line recorded in any run of the tree, and the
+  // turn shows work: it
+  // called a work tool and its closing text does not open BLOCKED:. No stall
+  // line is sent here, since a turn that ends is not stalled. A send
   // not taken sets turnTriedAt, which holds this site for the same span.
   // A holder whose hour line the controller's tick is sending now gets
   // nothing here, and the mark this site sets around its own send keeps the
@@ -1565,19 +1569,25 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
     for (const holder of owedNoMoment) {
       const run = holder.runLines;
       const now = Date.now();
-      if (run === undefined || !holder.planPath || !hourLineOwed(holder === activeLeafHolderOf(sess.state), run, lastReplyCallAt(), now)) continue;
-      if (!showsWork || hourLineHeld(run.turnTriedAt, now)) continue;
       const chapters = holder.chapterCount ?? 0;
       const sections = holder.sectionCount ?? 0;
-      // The tick's send of this line is in flight: nothing is sent, pushed
-      // or moved, and this turn end does not retry if that send fails. A
-      // mark older than RUN_LINE_MARK_STALE_MS is settled as unsent and
+      const threadAt = threadLineAt(sess.state.goals);
+      if (run === undefined || !holder.planPath
+        || !hourLineOwed(holder === activeLeafHolderOf(sess.state), run, hourPositionOf(chapters, sections), threadAt, lastReplyCallAt(), now)) continue;
+      if (!showsWork || hourLineHeld(run.turnTriedAt, now)) continue;
+      // The tick's send for this holder, of this line or of a stall line,
+      // is in flight: nothing is sent, pushed or moved, and this turn end
+      // does not retry if that send fails. A mark older than
+      // RUN_LINE_MARK_STALE_MS is settled as unsent under its own kind and
       // replaced by this site's own.
-      const markAt = takeHourLineMark(hourLineInFlight(), run, holder.id, chapters, sections, now, sess.state.decisions);
+      const markAt = takeHourLineMark(hourLineInFlight(), run, holder.id, "hour", chapters, sections, now, sess.state.decisions);
       if (markAt === null) continue;
-      const text = hourLineText(runLineTitleOf(run.title, holder.planPath), chapters, sections, hourLineSince(run, lastReplyCallAt()), now);
+      const text = hourLineText(runLineTitleOf(run.title, holder.planPath), chapters, sections, hourLineSince(run, threadAt, lastReplyCallAt()), now);
+      // A send that returns after another taker settled its stale mark and
+      // replaced it raises hours and moves threadAt but writes no place, as
+      // sendHourLine states, so it never undoes the newer send's place.
       try {
-        sess.state.decisions.push(await sendHourLine(toolCall, run, holder.id, text, chapters, sections, () => Date.now(), () => { run.turnTriedAt = now; }));
+        sess.state.decisions.push(await sendHourLine(toolCall, run, holder.id, text, chapters, sections, () => Date.now(), () => hourLineInFlight().get(holder.id)?.at === markAt, () => { run.turnTriedAt = now; }));
       } finally {
         releaseHourLineMark(hourLineInFlight(), holder.id, markAt);
       }
