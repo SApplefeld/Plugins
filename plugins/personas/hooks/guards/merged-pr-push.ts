@@ -1,16 +1,24 @@
 // merged-pr-push.ts: the before-tool guard that refuses a push to a branch
-// whose pull request has already merged.
+// whose pull request has already merged, or whose tip landed on its base by
+// a push.
 //
 // Once a pull request merges, its feature branch is frozen: a further push
-// strands off the integration branch with no signal. This blocks a `git push`
-// to a branch the host CLI reports MERGED and tells the agent to open a doc
-// PR against the integration branch instead.
+// strands off the integration branch with no signal. The same holds for a
+// branch that landed by a fast-forward push and left its pull request closed
+// and not merged. This blocks a `git push` to a branch the host CLI reports
+// MERGED and tells the agent to open a doc PR against the integration branch
+// instead. It also blocks one whose pull request the host reports closed on
+// GitHub, or abandoned on Azure DevOps, where `git merge-base --is-ancestor`
+// finds the pull request's head commit on its base in the checkout's
+// remote-tracking refs.
 //
-// It blocks only on a positive MERGED. Anything else allows: not a push, a
-// branch deletion, an integration branch, a branch name outside the
-// allowlist, no CLI, no PR, a query that fails, exits non-zero or runs past
-// its bound (3 seconds for git, 8 for the host query). No switch lifts those
-// bounds.
+// It blocks only on a positive MERGED or a positive ancestry answer. Anything
+// else allows: not a push, a branch deletion, an integration branch, a
+// branch or base name outside the allowlist, no CLI, no PR, a head commit
+// that is not 40 hexadecimal characters, a query that fails, exits non-zero
+// or runs past its bound (3 seconds for git, 8 for a host query). No switch
+// lifts those bounds. The guard fetches nothing, so a remote-tracking ref
+// behind the host allows too.
 //
 // A GIT_DIR or GIT_CONFIG_GLOBAL the session carries would redirect the git
 // reads the decision rests on. A child spawned here inherits the host's
@@ -21,21 +29,21 @@
 //
 // Nothing here reads `$` (runner.ts says why). The queries go through the
 // context host, which resolves a bare `git` or `gh` to an absolute path; the
-// Azure query's executables are resolved by azureCompletedPrs itself, as its
-// comment says.
+// Azure queries' executables are resolved by azurePrs itself, as its comment
+// says.
 
 import type { BeforeGuard, GuardCall, GuardContext, GuardHost } from "./runner";
 
-// How long one git query and the host query may run, the hook's own bounds.
+// How long one git query and one host query may run, the hook's own bounds.
 export const PUSH_GIT_TIMEOUT_MS = 3000;
 export const PUSH_HOST_TIMEOUT_MS = 8000;
 
 // The variables that redirect git at another repository or configuration,
 // read before any query. GIT_CONFIG_PARAMETERS is the older spelling of the
 // GIT_CONFIG_COUNT channel, which git still honours. GIT_EXEC_PATH is left
-// out: the guard's three git reads (rev-parse, symbolic-ref, remote get-url)
-// are builtins, which git resolves inside its own binary, so that variable
-// cannot redirect them.
+// out: the guard's four git reads (rev-parse, symbolic-ref, remote get-url,
+// merge-base) are builtins, which git resolves inside its own binary, so
+// that variable cannot redirect them.
 export const GIT_ENV_REDIRECTS: readonly string[] = [
   "GIT_DIR",
   "GIT_WORK_TREE",
@@ -57,9 +65,10 @@ export const GIT_ENV_REDIRECTS: readonly string[] = [
 // spawning ssh) does not look in its working directory first.
 export const QUERY_ENV: Readonly<Record<string, string>> = { GIT_TERMINAL_PROMPT: "0", NoDefaultCurrentDirectoryInExePath: "1" };
 
-// The branch names a host query may carry: letters, digits, dot, underscore,
-// slash and hyphen, never a leading hyphen. A branch outside it cannot be
-// told from an injection attempt, so it reads UNKNOWN and allows.
+// The branch names a host query or a git read may carry: letters, digits,
+// dot, underscore, slash and hyphen, never a leading hyphen. A branch outside
+// it cannot be told from an injection attempt, so it reads UNKNOWN and
+// allows.
 export const BRANCH_ALLOWLIST = /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/;
 
 // The integration branches, never guarded.
@@ -147,23 +156,23 @@ function cmdRunnablePath(p: string): boolean {
 }
 
 /**
- * The tab-separated completed pull requests Azure DevOps lists for
- * `branch`, or null where the query does not run or fails. `branch` has
+ * What Azure DevOps lists of `branch`'s pull requests in one status, in one
+ * output form, or null where the query does not run or fails. `branch` has
  * passed BRANCH_ALLOWLIST.
  *
  * `az` on Windows is a `.cmd` shim, which an argument-vector spawn cannot
  * start, so on Windows this is the module's one shell spawn: cmd.exe, from
  * SystemRoot's System32 and from PATH only where SystemRoot is unset, runs
  * `/d /c <az> repos pr list --source-branch refs/heads/<branch> --status
- * completed -o tsv`, each word its own argv element, which the engine joins
- * into the command line cmdRunnablePath describes. `<az>` is resolved from
- * PATH here, with `.cmd` admitted after `.com` and `.exe` for this call
+ * <status> -o <output>`, each word its own argv element, which the engine
+ * joins into the command line cmdRunnablePath describes. `<az>` is resolved
+ * from PATH here, with `.cmd` admitted after `.com` and `.exe` for this call
  * alone, and it must pass cmdRunnablePath or no query runs. Every other
  * word is a constant. Off Windows `az` is resolved by the module's resolver
  * and run with no shell.
  */
-export async function azureCompletedPrs(host: GuardHost, deps: MergedPrPushDeps, branch: string, cwd: string): Promise<string | null> {
-  const args = ["repos", "pr", "list", "--source-branch", `refs/heads/${branch}`, "--status", "completed", "-o", "tsv"];
+async function azurePrs(host: GuardHost, deps: MergedPrPushDeps, branch: string, status: "completed" | "abandoned", output: "tsv" | "json", cwd: string): Promise<string | null> {
+  const args = ["repos", "pr", "list", "--source-branch", `refs/heads/${branch}`, "--status", status, "-o", output];
   if (!(await deps.windows())) {
     const az = await deps.resolve("az");
     return az === null ? null : query(host, [az, ...args], cwd, PUSH_HOST_TIMEOUT_MS);
@@ -194,26 +203,107 @@ export async function azureCompletedPrs(host: GuardHost, deps: MergedPrPushDeps,
   return query(host, [cmd, "/d", "/c", az, ...args], cwd, PUSH_HOST_TIMEOUT_MS);
 }
 
-// MERGED, OPEN or UNKNOWN for `branch`, by asking the host its origin names.
-// UNKNOWN on every failure.
-async function prState(host: GuardHost, deps: MergedPrPushDeps, branch: string, cwd: string): Promise<"MERGED" | "OPEN" | "UNKNOWN"> {
-  if (!BRANCH_ALLOWLIST.test(branch)) return "UNKNOWN";
+/**
+ * The tab-separated completed pull requests Azure DevOps lists for
+ * `branch`, or null where the query does not run or fails. `branch` has
+ * passed BRANCH_ALLOWLIST.
+ */
+export async function azureCompletedPrs(host: GuardHost, deps: MergedPrPushDeps, branch: string, cwd: string): Promise<string | null> {
+  return azurePrs(host, deps, branch, "completed", "tsv", cwd);
+}
+
+// The head commit and base of one pull request as its host names them,
+// neither yet checked.
+type PrEnds = { head: unknown; base: unknown };
+
+// The ends of the abandoned pull request Azure DevOps lists for `branch`
+// with the latest creationDate, or null where the query does not run or
+// fails, its answer is not a JSON list, the list is empty or a row carries
+// no date to order it by. The base is targetRefName less its leading
+// `refs/heads/`. `branch` has passed BRANCH_ALLOWLIST.
+async function azureAbandonedPr(host: GuardHost, deps: MergedPrPushDeps, branch: string, cwd: string): Promise<PrEnds | null> {
+  const out = await azurePrs(host, deps, branch, "abandoned", "json", cwd);
+  if (out === null) return null;
+  let rows: unknown;
+  try {
+    rows = JSON.parse(out);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(rows)) return null;
+  let latest: Record<string, unknown> | null = null;
+  let latestAt = -Infinity;
+  for (const row of rows as unknown[]) {
+    if (typeof row !== "object" || row === null) return null;
+    const fields = row as Record<string, unknown>;
+    const at = typeof fields.creationDate === "string" ? Date.parse(fields.creationDate) : NaN;
+    if (Number.isNaN(at)) return null;
+    if (at > latestAt) {
+      latestAt = at;
+      latest = fields;
+    }
+  }
+  if (latest === null) return null;
+  const source = latest.lastMergeSourceCommit;
+  const head = typeof source === "object" && source !== null ? (source as Record<string, unknown>).commitId : undefined;
+  const target = latest.targetRefName;
+  const base = typeof target === "string" && target.startsWith("refs/heads/") ? target.slice("refs/heads/".length) : undefined;
+  return { head, base };
+}
+
+// The base a closed pull request's head commit already sits on, or null.
+// The head must be 40 hexadecimal characters and the base must pass
+// BRANCH_ALLOWLIST before either reaches git. The test is the exit code of
+// `git merge-base --is-ancestor` over refs/remotes/origin/<base> as the
+// checkout holds it, 0 where the head is an ancestor. Nothing is fetched, so
+// a ref behind the host reads null, as does every failure.
+async function landedBase(host: GuardHost, ends: PrEnds, cwd: string): Promise<string | null> {
+  const { head, base } = ends;
+  if (typeof head !== "string" || !/^[0-9a-fA-F]{40}$/.test(head)) return null;
+  if (typeof base !== "string" || !BRANCH_ALLOWLIST.test(base)) return null;
+  const ran = await query(host, ["git", "merge-base", "--is-ancestor", head, `refs/remotes/origin/${base}`], cwd, PUSH_GIT_TIMEOUT_MS);
+  return ran === null ? null : base;
+}
+
+// What the host its origin names says of `branch`'s pull request. LANDED is
+// a pull request closed on GitHub, or the latest abandoned on Azure DevOps,
+// whose head commit landedBase finds on `base`. UNKNOWN on every failure.
+type PrRead = { state: "MERGED" | "OPEN" | "UNKNOWN" } | { state: "LANDED"; base: string };
+
+// GitHub answers the state, the head commit and the base in one query. Azure
+// DevOps is asked for abandoned pull requests only where it lists none
+// completed.
+async function prState(host: GuardHost, deps: MergedPrPushDeps, branch: string, cwd: string): Promise<PrRead> {
+  if (!BRANCH_ALLOWLIST.test(branch)) return { state: "UNKNOWN" };
   const origin = await query(host, ["git", "remote", "get-url", "origin"], cwd, PUSH_GIT_TIMEOUT_MS);
-  if (origin === null) return "UNKNOWN";
+  if (origin === null) return { state: "UNKNOWN" };
   const url = origin.trim();
   if (/github\.com/i.test(url)) {
-    const out = await query(host, ["gh", "pr", "view", branch, "--json", "state", "-q", ".state"], cwd, PUSH_HOST_TIMEOUT_MS);
-    if (out === null) return "UNKNOWN";
-    const s = out.trim().toUpperCase();
-    if (s === "MERGED") return "MERGED";
-    return s ? "OPEN" : "UNKNOWN";
+    const out = await query(host, ["gh", "pr", "view", branch, "--json", "state,headRefOid,baseRefName"], cwd, PUSH_HOST_TIMEOUT_MS);
+    if (out === null) return { state: "UNKNOWN" };
+    let pr: unknown;
+    try {
+      pr = JSON.parse(out);
+    } catch {
+      return { state: "UNKNOWN" };
+    }
+    if (typeof pr !== "object" || pr === null) return { state: "UNKNOWN" };
+    const fields = pr as Record<string, unknown>;
+    const s = typeof fields.state === "string" ? fields.state.trim().toUpperCase() : "";
+    if (s === "MERGED") return { state: "MERGED" };
+    if (s !== "CLOSED") return { state: s ? "OPEN" : "UNKNOWN" };
+    const base = await landedBase(host, { head: fields.headRefOid, base: fields.baseRefName }, cwd);
+    return base === null ? { state: "OPEN" } : { state: "LANDED", base };
   }
   if (/dev\.azure\.com|visualstudio\.com/i.test(url)) {
     const out = await azureCompletedPrs(host, deps, branch, cwd);
-    if (out === null) return "UNKNOWN";
-    return out.trim() ? "MERGED" : "OPEN";
+    if (out === null) return { state: "UNKNOWN" };
+    if (out.trim()) return { state: "MERGED" };
+    const ends = await azureAbandonedPr(host, deps, branch, cwd);
+    const base = ends === null ? null : await landedBase(host, ends, cwd);
+    return base === null ? { state: "OPEN" } : { state: "LANDED", base };
   }
-  return "UNKNOWN";
+  return { state: "UNKNOWN" };
 }
 
 // The reason a push the guard did not check is allowed with, naming the
@@ -229,7 +319,8 @@ export const MERGED_PR_PUSH_COMMAND_PHRASE = "has already merged, so this push w
 
 /**
  * Denies a Bash or PowerShell `git push` to a branch whose pull request the
- * host reports merged, with the hook's refusal as the reason. A command
+ * host reports merged, with the hook's refusal as the reason, or whose tip
+ * landed on its base by a push, with a refusal naming that base. A command
  * holding no push at a command position matches nothing.
  */
 export function mergedPrPushGuard(deps: MergedPrPushDeps): BeforeGuard {
@@ -262,13 +353,24 @@ export function mergedPrPushGuard(deps: MergedPrPushDeps): BeforeGuard {
       const originHead = await query(ctx.host, ["git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], ctx.cwd, PUSH_GIT_TIMEOUT_MS);
       const def = originHead === null ? null : originHead.trim().replace(/^refs\/remotes\/origin\//, "") || null;
       if (def && branch.toLowerCase() === def.toLowerCase()) return {};
-      if ((await prState(ctx.host, deps, branch, ctx.cwd)) !== "MERGED") return {};
-      return {
-        deny:
-          `Blocked: the PR for branch "${branch}" has already merged, so this push would strand off the ` +
-          `integration branch. The branch is frozen (pushed is not merged). Put any post-merge record in a ` +
-          `new doc PR against the integration branch instead of pushing here.\n`,
-      };
+      const pr = await prState(ctx.host, deps, branch, ctx.cwd);
+      if (pr.state === "MERGED") {
+        return {
+          deny:
+            `Blocked: the PR for branch "${branch}" has already merged, so this push would strand off the ` +
+            `integration branch. The branch is frozen (pushed is not merged). Put any post-merge record in a ` +
+            `new doc PR against the integration branch instead of pushing here.\n`,
+        };
+      }
+      if (pr.state === "LANDED") {
+        return {
+          deny:
+            `Blocked: the tip of branch "${branch}" already landed on its base "${pr.base}" by a push, so this push would strand off the ` +
+            `integration branch. The branch is frozen. Put any later record on a new branch off the integration branch ` +
+            `instead of pushing here.\n`,
+        };
+      }
+      return {};
     },
   };
 }

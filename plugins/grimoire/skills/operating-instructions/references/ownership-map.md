@@ -64,8 +64,8 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Moment | Owner |
 |---|---|
 | The finishing pass: QA, reviews, goal read, docs curation, memory close, drift routing, close-out | `finishing-work` |
-| The pull request at finishing: opened if none is open, marked ready, auto-merge armed, integrated per commit model | `finishing-work` |
-| A record only on a merged PR branch: the strand-check, and the reap of the plan's merged branch | `finishing-work` (at the close, and invoking the reap), `branch-hygiene` (at session start, and the reap's mechanics) and `coordinator` (the owed merged-plan reap at its pass where a coordinator is live by finishing-work's reading, a tree or branch that pass does not reap falling to the SessionStart branch-reaper nudge) |
+| The pull request at finishing: opened if none is open, then either marked ready, with auto-merge armed where its base is the trunk, or landed by a push, as step 7 decides, integrated per commit model | `finishing-work` |
+| A record only on a merged PR branch or one landed by a push: the strand-check, and the reap of the plan's merged or landed branch | `finishing-work` (at the close, and invoking the reap), `branch-hygiene` (at session start, and the reap's mechanics) and `coordinator` (the owed merged-plan reap at its pass where a coordinator is live by finishing-work's reading, a tree or branch that pass does not reap falling to the SessionStart branch-reaper nudge) |
 | Reaping merged branches, recovering stranded commits, what may be deleted without asking, save the clearing and the sweep in the two rows below | `branch-hygiene` |
 | Clearing a finished plan's worktree, scratch folder and build output | `finishing-work` (step 10), with the script's mechanics in `plugins/grimoire/scripts/plan-cleanup.js` |
 | Sweeping idle worktrees, scratch entries and build output no finishing pass cleared | `coordinator` (the idle sweep passage) for the moment, `role` (Standing Grants, the idle sweep grant) for the grant, with the script's mechanics in `plugins/grimoire/scripts/plan-cleanup.js` |

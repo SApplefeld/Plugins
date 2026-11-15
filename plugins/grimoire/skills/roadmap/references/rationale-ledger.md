@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the conduct of the roadmap seat, the persona that settles with the operator what the product line builds, why and in what order, and has each epic held by its own goal persona. It owns the seat's conduct in ten passages: the line between what and how, the seat's own repository, the roadmap document, the epic brief, the direction line, how a done statement is written, the turn budget, starting an epic, changing a running epic, and the acts the seat refuses. Its load class is `named-trigger`: the persona plugin's roadmap priming names it at launch, and its description also pulls it in on a conversation with the operator about direction or priority, an epic to shape, reorder, brief or start, done statements to write, and a change to a running epic.
 
-Written by `docs/plans/claude-kit_roadmap-seat-charter_spec_v1.md` section 1 on 2026-11-12: whole document (the `C` entries below, whose passages are read at that section's tree). The plan's Approach states the five changes the operator approved to the source brief and their reasons, and its Intent records his approval of 2026-11-11 and the alternatives it refused.
+Written by `docs/plans/claude-kit_roadmap-seat-charter_spec_v1.md` section 1 on 2026-11-12: whole document (the `C` entries below, whose passages are read at that section's tree). The plan's Approach states the five changes the operator approved to the source brief and their reasons, and its Intent records his approval of 2026-11-11 and the alternatives it refused. C029 was rewritten by `docs/plans/claude-kit_plan-ending-by-branch-protection_spec_v1.md` section 5 on 2026-11-15, which names a pull request that landed by a push as evidence, and its passage is read at that section's tree.
 
 ### C001
 - key: Load this skill on the roadmap seat, a conversation with the operator about direction or priority, an epic to shape, reorder, brief or start, done statements to write, or a change to a running epic.
@@ -267,13 +267,14 @@ Written by `docs/plans/claude-kit_roadmap-seat-charter_spec_v1.md` section 1 on 
 - passage: **It holds one state.** A statement joined by "and" is two statements, and one half can hold while the other never does.
 
 ### C029
-- key: Make a done statement name the evidence that shows it, in a form the goal persona can gather, and write a state only the operator can see as his own confirmation.
+- key: Make a done statement name the evidence that shows it, in a form the goal persona can gather, a pull request that landed by a push among them, which it gathers from the coordinator persona's report, and write a state only the operator can see as his own confirmation.
 - class: rule
 - source: plugins/grimoire/skills/roadmap/SKILL.md:66
-- provenance: docs/plans/claude-kit_roadmap-seat-charter_spec_v1.md section 1 2026-11-12; the goal-holder skill's Completing the Goal section, which names each statement's evidence to the operator.
-- verdict: keep
-- reason: The goal persona executes nothing in a repository, so it can gather only a merged pull request, a reported command with its exit code, or a file at a path, and a statement needing other evidence can never be shown to hold.
-- passage: **It names the evidence that shows it.** The goal persona can gather a merged pull request, a command a worker or the coordinator reported with its exit code, and a file at a path. A state only the operator can see is written as the operator's own confirmation, and says so.
+- provenance: docs/plans/claude-kit_roadmap-seat-charter_spec_v1.md section 1 2026-11-12; the goal-holder skill's Completing the Goal section, which names each statement's evidence to the operator. The landing by a push is `docs/plans/claude-kit_plan-ending-by-branch-protection_spec_v1.md` section 5, 2026-11-15, and the goal persona gathers it from the coordinator persona's report by the architect persona's ruling of the same day, record DEV-GRIMOIRE-c049e7e0-0b70-47ae-92f6-b21abc0a4f40-5.
+- verdict: rewrite
+- landed: 6bd924320 section 5
+- reason: The goal persona executes nothing in a repository, so it can gather only a pull request that merged or landed by a push, a reported command with its exit code, or a file at a path, and a statement needing other evidence can never be shown to hold. A pull request that landed by a push is a finished plan as a merged one is, by the open ending of step 7 of the finishing-work skill, which owns the test, so the sentence points there rather than stating it. That test runs in a checkout the goal persona does not hold, so the sentence names the coordinator persona's report as where the seat takes the reading, the route the goal-holder skill's watch states (BU001 in its ledger).
+- passage: **It names the evidence that shows it.** The goal persona can gather a pull request that merged or landed by a push, a command a worker or the coordinator reported with its exit code, and a file at a path. Step 7 of the finishing-work skill tests a landing by a push, and the goal persona takes that reading from the coordinator persona's report. A state only the operator can see is written as the operator's own confirmation, and says so.
 
 ### C030
 - key: Make a done statement state the outcome, never the mechanism, naming a table, a class or a file only where it is itself the product.

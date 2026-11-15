@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the conduct of a goal persona, the worker-kind persona that holds one goal the operator gave it as its goal tree's root and sees it done through plans the architect persona writes and workers run. It owns the seat's conduct while it holds the goal, in seven passages: reading the root and its done statements, the design asks to the architect, the plan reports to the coordinator and the watch on their outcomes, what it writes to memory, the turn budget, completing the root, and the acts it refuses. Its load class is `named-trigger`: the persona plugin's goal-holder priming names it at launch, and its description also pulls it in on a seeded root with done statements, a design ask, a returned plan, an outcome, a spent turn budget and a root whose statements all hold.
 
-Written by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 3 on 2026-10-26: whole document (the `C` entries below, whose passages are read at that section's tree). The plan's Approach, its second paragraph, states the conduct the skill owns, and its third and fourth paragraphs state the turn budget and the retire record the skill's Turn Budget and Completing the Goal passages read. C024 was written by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 3 on 2026-11-11, and its passage is read at that section's tree. C010 was amended by `docs/archive/claude-kit_stalled-entries-visible-and-recoverable_spec_v1.md` section 6 on 2026-11-11, which has a pause name its releaser, and its passage is read at that section's tree. Its fix round 1 on the same day set C010's verdict to rewrite. C013 was rewritten by `docs/archive/claude-kit_quiet-records-open-no-turn_spec_v1.md` section 4 on 2026-11-13, which has a quiet record spend no turn, and its passage is read at that section's tree.
+Written by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 3 on 2026-10-26: whole document (the `C` entries below, whose passages are read at that section's tree). The plan's Approach, its second paragraph, states the conduct the skill owns, and its third and fourth paragraphs state the turn budget and the retire record the skill's Turn Budget and Completing the Goal passages read. C024 was written by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 3 on 2026-11-11, and its passage is read at that section's tree. C010 was amended by `docs/archive/claude-kit_stalled-entries-visible-and-recoverable_spec_v1.md` section 6 on 2026-11-11, which has a pause name its releaser, and its passage is read at that section's tree. Its fix round 1 on the same day set C010's verdict to rewrite. C013 was rewritten by `docs/archive/claude-kit_quiet-records-open-no-turn_spec_v1.md` section 4 on 2026-11-13, which has a quiet record spend no turn, and its passage is read at that section's tree. C011 and C015 were rewritten by `docs/plans/claude-kit_plan-ending-by-branch-protection_spec_v1.md` section 5 on 2026-11-15, which reads a plan that landed by a push as finished, and their passages are read at that section's tree. That section added BU001 under the plan's letter BU for the watch's reading of a closed pull request, inside the paragraph C009 quotes, whose passage is re-quoted as the two runs the insertion leaves. No line of the source moved.
 
 ### C001
 - key: Load this skill on the goal-holder priming, a root seeded from a roster entry, a design ask, a returned plan, an outcome, a spent turn budget or a root whose done statements all hold.
@@ -93,7 +93,8 @@ Written by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 3 on 2026-1
 - provenance: docs/archive/claude-kit_goal-persona_spec_v1.md section 3 2026-10-26, whose Approach has the seat watch outcomes and the tree. Amended in place by docs/archive/claude-kit_goal-persona_spec_v1.md finishing pass 2026-10-27, whose goal read found no runbook sends a goal persona an outcome record and whose design-stop ruling has the seat read outcomes itself.
 - verdict: keep
 - reason: The plan's Out of Scope keeps the goal persona's cadence the controller tick, and no runbook sends it an outcome record, so the seat reads each plan's state where it lives, the pull request. A worker's queue is steered by the coordinator, so a record from the goal persona straight to a worker would be a second steer the coordinator never saw.
-- passage: Watch each plan's outcome on the controller tick, from its pull request's state read with `gh pr view <number> --json state` and from the goal tree, since no record reports an outcome to the seat. Send no record to a worker, whose queue is the coordinator's to steer.
+- passage: Watch each plan's outcome on the controller tick, from its pull request's state read with `gh pr view <number> --json state` and from the goal tree, since no record reports an outcome to the seat.
+- passage: Send no record to a worker, whose queue is the coordinator's to steer.
 
 ### C010
 - key: Pause a step with `goal_edit` while its plan is out, naming the plan and giving the seat's own persona name as its `releasedBy`, and resume it with `goal_resume` in the turn that reads its plan's outcome.
@@ -106,13 +107,14 @@ Written by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 3 on 2026-1
 - passage: Pausing a step with `goal_edit` while its plan is out lets the controller start the next pending step. So pause a step only where the next one does not wait on the same plan, name the plan in the reason, and give the seat's own persona name as its `releasedBy`. Resume a paused step with `goal_resume` in the turn that reads its plan's outcome. An active step waiting on a plan still spends a turn at each quiet interval.
 
 ### C011
-- key: Close a step with `goal_done` once its plan merged or was abandoned, and leave a failed plan's step open with a new ask naming the failure.
+- key: Close a step with `goal_done` once its plan merged, landed by a push or was abandoned, and leave a failed plan's step open with a new ask naming the failure.
 - class: rule
 - source: plugins/grimoire/skills/goal-holder/SKILL.md:30
-- provenance: docs/archive/claude-kit_goal-persona_spec_v1.md section 3 2026-10-26.
-- verdict: keep
-- reason: The root's completion gate needs every entry complete or abandoned (C016), so each step is closed as its plan settles. A failed plan has moved no statement, so its step stays open for the next ask.
-- passage: Close a step with `goal_done` once its plan has merged or been abandoned, the note naming the plan and what it changed. A step whose plan failed stays open, and the architect gets a new ask naming the failure.
+- provenance: docs/archive/claude-kit_goal-persona_spec_v1.md section 3 2026-10-26. The landing by a push is `docs/plans/claude-kit_plan-ending-by-branch-protection_spec_v1.md` section 5, 2026-11-15, on the operator's words of 2026-11-11 and 2026-11-12 quoted in that plan's `## Intent`.
+- verdict: rewrite
+- landed: 58cd6259a section 5
+- reason: The root's completion gate needs every entry complete or abandoned (C016), so each step is closed as its plan settles. A failed plan has moved no statement, so its step stays open for the next ask. A plan that landed by a push, on the open ending of step 7 of the finishing-work skill, is finished as a merged one is, so its step closes as on a merge, and the watch tells it from an abandoned plan (BU001).
+- passage: Close a step with `goal_done` once its plan has merged, has landed by a push, or has been abandoned, the note naming the plan and what it changed. A step whose plan failed stays open, and the architect gets a new ask naming the failure.
 
 ### C012
 - key: Write to kit memory what the seat learns while holding the goal, under the memory-system skill.
@@ -145,10 +147,11 @@ Written by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 3 on 2026-1
 - key: Complete the root only when every done statement holds with checkable evidence.
 - class: rule
 - source: plugins/grimoire/skills/goal-holder/SKILL.md:44
-- provenance: docs/archive/claude-kit_goal-persona_spec_v1.md section 3 2026-10-26, whose Approach has the seat complete the root with `goal_done` only when every done statement holds with evidence named in the note.
-- verdict: keep
-- reason: No machine judges the statements, so the evidence is what lets the operator check the seat's call. The three forms named are ones a reader can open without the seat's context.
-- passage: Complete the root only when every done statement holds, each with evidence a reader can check: a merged pull request, a command a worker or the coordinator reported with its exit code, or a file at a path.
+- provenance: docs/archive/claude-kit_goal-persona_spec_v1.md section 3 2026-10-26, whose Approach has the seat complete the root with `goal_done` only when every done statement holds with evidence named in the note. The landing by a push is `docs/plans/claude-kit_plan-ending-by-branch-protection_spec_v1.md` section 5, 2026-11-15.
+- verdict: rewrite
+- landed: 58cd6259a section 5
+- reason: No machine judges the statements, so the evidence is what lets the operator check the seat's call. The three forms named are ones a reader can open without the seat's context. A pull request that landed by a push is evidence as a merged one is, since the open ending of step 7 of the finishing-work skill lands a plan without a merge.
+- passage: Complete the root only when every done statement holds, each with evidence a reader can check: a pull request that merged or landed by a push, a command a worker or the coordinator reported with its exit code, or a file at a path.
 
 ### C016
 - key: Treat `goal_done` naming the root as the one route to completing it, refused until every entry under it is complete or abandoned with at least one complete.
@@ -230,3 +233,13 @@ Written by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 3 on 2026-1
 - verdict: keep
 - reason: A goal persona asked the operator on its own channel for a roster change and a worker's restart, and the coordinator, which performs the restart and takes the operator's word for it only where its own session hears it, asked him again on its thread, so one approval cost two answers. The roster field change in that incident stays the operator's own edit, as the coordinator skill's paragraph on `fleet_add` and `fleet_retire` states, so the passage names only the acts the coordinator performs. The seat that acts is the seat that asks, and the role skill's section owns what the ask names, so this passage points there and states no shape of its own. C003's route to the operator stands for every other question.
 - passage: An ask for an act another seat performs is the exception. Adding, retiring or restarting a persona is the coordinator's act, so the seat asks the coordinator, as the role skill's Authority Over Machine-Shared State section states the ask, and the coordinator asks the operator on its own channel. The coordinator takes the operator's word for such an act only where its own session hears it, so a yes given on this seat's thread has to be given a second time. Where no coordinator is seated, that section sends the ask to the operator.
+
+### BU001
+- key: On a pull request the watch reads CLOSED, ask the coordinator persona once whether its plan was abandoned or landed by a push, naming the plan and its pull request, and leave the step open until its report.
+- class: rule
+- source: plugins/grimoire/skills/goal-holder/SKILL.md:26
+- provenance: `docs/plans/claude-kit_plan-ending-by-branch-protection_spec_v1.md` section 5 2026-11-15, on the operator's words of 2026-11-11 and 2026-11-12 quoted in that plan's `## Intent`; the route through the coordinator persona is the architect persona's ruling of 2026-11-15 as that plan's author, record DEV-GRIMOIRE-c049e7e0-0b70-47ae-92f6-b21abc0a4f40-5, and the coordinator persona's answer is the same author's ruling in record DEV-GRIMOIRE-c049e7e0-0b70-47ae-92f6-b21abc0a4f40-6.
+- verdict: keep
+- landed: 06ea3e45d section 5
+- reason: The open ending of step 7 of the finishing-work skill lands a plan by a fast-forward push and closes its pull request where the host has not marked it merged, so a CLOSED read alone cannot tell a finished plan from a dropped one. Step 7 owns the test that tells them apart (S209 in the finishing-work ledger), and it runs in a checkout, which this seat's Acts Refused keep it out of. The coordinator persona answers it, from the architect persona's word where it abandoned the plan and otherwise by running step 7's test itself (BU001 in the coordinator ledger). The goal persona may send a worker no record, so the coordinator is the one seat it can ask. The seat asks which of the two it was rather than whether the plan has not landed, so a pull request closed by mistake reads as neither and the step stays open. The ask goes once, because the watch runs on every controller tick.
+- passage: A pull request read CLOSED does not say whether its plan was abandoned or landed by a push, which step 7 of the finishing-work skill tests in a checkout the seat does not hold. Ask the coordinator persona once by `agentic_say` which it was, naming the plan's filename and its pull request, and leave the step open until its report.

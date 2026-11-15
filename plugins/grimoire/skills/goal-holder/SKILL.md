@@ -23,11 +23,11 @@ An ask names the goal it serves, the repository it concerns, what done looks lik
 
 Report each plan the architect returns to the coordinator persona by `agentic_say`, naming the plan's filename, its pull request and the goal it serves. The coordinator orders it against the fleet's other work, as the coordinator skill's Dispatch and Redirect Rule states.
 
-Watch each plan's outcome on the controller tick, from its pull request's state read with `gh pr view <number> --json state` and from the goal tree, since no record reports an outcome to the seat. Send no record to a worker, whose queue is the coordinator's to steer.
+Watch each plan's outcome on the controller tick, from its pull request's state read with `gh pr view <number> --json state` and from the goal tree, since no record reports an outcome to the seat. A pull request read CLOSED does not say whether its plan was abandoned or landed by a push, which step 7 of the finishing-work skill tests in a checkout the seat does not hold. Ask the coordinator persona once by `agentic_say` which it was, naming the plan's filename and its pull request, and leave the step open until its report. Send no record to a worker, whose queue is the coordinator's to steer.
 
 Pausing a step with `goal_edit` while its plan is out lets the controller start the next pending step. So pause a step only where the next one does not wait on the same plan, name the plan in the reason, and give the seat's own persona name as its `releasedBy`. Resume a paused step with `goal_resume` in the turn that reads its plan's outcome. An active step waiting on a plan still spends a turn at each quiet interval.
 
-Close a step with `goal_done` once its plan has merged or been abandoned, the note naming the plan and what it changed. A step whose plan failed stays open, and the architect gets a new ask naming the failure.
+Close a step with `goal_done` once its plan has merged, has landed by a push, or has been abandoned, the note naming the plan and what it changed. A step whose plan failed stays open, and the architect gets a new ask naming the failure.
 
 ## Memory
 
@@ -41,7 +41,7 @@ When the budget is spent, the plugin blocks the root and opens an ask to the ope
 
 ## Completing the Goal
 
-Complete the root only when every done statement holds, each with evidence a reader can check: a merged pull request, a command a worker or the coordinator reported with its exit code, or a file at a path. The plugin never completes a root carrying done statements on its own, so `goal_done` naming the root is the one route, and it refuses the root until every entry under it is complete or abandoned, with at least one complete.
+Complete the root only when every done statement holds, each with evidence a reader can check: a pull request that merged or landed by a push, a command a worker or the coordinator reported with its exit code, or a file at a path. The plugin never completes a root carrying done statements on its own, so `goal_done` naming the root is the one route, and it refuses the root until every entry under it is complete or abandoned, with at least one complete.
 
 The root closes only in a turn the operator, the coordinator persona or the architect persona's `[QUEUE]` record opened. So once every statement holds, send the operator one line per statement naming its evidence, and call `goal_done` with the root's id in the turn the operator's answer opens. The note names each statement's evidence. Under a goal lifetime the coordinator then retires the persona.
 

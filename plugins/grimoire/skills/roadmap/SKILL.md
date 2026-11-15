@@ -63,7 +63,7 @@ A done statement is roster text. The goal-holder skill states how the goal perso
 
 - **It names a state that holds or does not, never an activity.** "The options were reviewed" is an activity, and it holds the moment anyone looks.
 - **It holds one state.** A statement joined by "and" is two statements, and one half can hold while the other never does.
-- **It names the evidence that shows it.** The goal persona can gather a merged pull request, a command a worker or the coordinator reported with its exit code, and a file at a path. A state only the operator can see is written as the operator's own confirmation, and says so.
+- **It names the evidence that shows it.** The goal persona can gather a pull request that merged or landed by a push, a command a worker or the coordinator reported with its exit code, and a file at a path. Step 7 of the finishing-work skill tests a landing by a push, and the goal persona takes that reading from the coordinator persona's report. A state only the operator can see is written as the operator's own confirmation, and says so.
 - **It states the outcome, never the mechanism.** The statement outlives every plan written under it, and a table, a class or a file named in it binds the design before anyone has designed. Name one only where it is itself the product.
 - **A number carries its unit, its threshold and the source that measures it.**
 - **It is inside the fleet's reach.** A state that needs an outside party's act names the party, and the operator accepts that wait before the epic starts.
