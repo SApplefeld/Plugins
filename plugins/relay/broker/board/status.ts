@@ -23,7 +23,7 @@ import { span } from "../discord/render.ts";
 import { blockedAt, eventIndex } from "./card.ts";
 import { comparablePath, touchedAt } from "./events.ts";
 import type { BoardEvent, EventReaderState } from "./events.ts";
-import { queueKey } from "./queues.ts";
+import { ABANDONED, COMPLETE, queueKey } from "./queues.ts";
 import type { PersonaQueue, QueueEntry, QueuePlanReading } from "./queues.ts";
 
 /**
@@ -84,9 +84,8 @@ const ROOT_KIND = "root";
 
 /** The store statuses this module reads, each compared on the trimmed and case-folded value. The
  * plugin writes them lower case; folding costs nothing and keeps a store written by hand from
- * falling through every rule into `queued`. */
-const ABANDONED = "abandoned";
-const COMPLETE = "complete";
+ * falling through every rule into `queued`. `ABANDONED` and `COMPLETE`, the two that say an entry is
+ * finished, are imported from `./queues.ts`, whose entry cap reads the same two. */
 const BLOCKED = "blocked";
 const PAUSED = "paused";
 

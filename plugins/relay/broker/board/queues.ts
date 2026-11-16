@@ -63,11 +63,27 @@ export const HEARTBEAT_FILE_NAME = ".agentic-heartbeat.json";
 export const MAX_STORE_FILE_BYTES = 2 * 1024 * 1024;
 
 /**
- * The most queue entries one persona contributes, in queue order. The card draws a handful of
- * entries and folds the rest into one line, and the join costs a stat per entry, so a store whose
- * queue has run away is cut here rather than walked in full on every refresh tick.
+ * The most queue entries one persona contributes. The card draws a handful of entries and folds the
+ * rest into one line, and the join costs a stat per entry, so a store whose queue has run away is cut
+ * here rather than walked in full on every refresh tick.
+ *
+ * A store holding more keeps, in this order of claim, the entry `activeGoalId` names whatever its
+ * status, then the entries that are not `finished`, earliest in queue order first, then the finished
+ * entries, latest in queue order first. Open entries are taken earliest first because queue order is
+ * running order, and finished ones latest first because every reader of finished work wants recent
+ * work. The plugin keeps every finished entry, so a cut that kept the first in queue order would keep
+ * the oldest work and drop the entry in hand. The kept entries come back in queue order.
  */
 export const MAX_QUEUE_ENTRIES = 200;
+
+/**
+ * The store statuses that say an entry is finished, a closed set, each compared on the trimmed and
+ * case-folded value. The plugin writes them lower case; folding costs nothing and keeps a store
+ * written by hand from reading as unfinished. The entry cap's keep rule and the status rule in
+ * `./status.ts` both read these two.
+ */
+export const ABANDONED = "abandoned";
+export const COMPLETE = "complete";
 
 /**
  * What the free-text values one queue entry carries are held to before they leave this reader.
@@ -212,10 +228,13 @@ export type QueuePlanReading =
 export type PersonaQueue = {
   readonly name: string;
   readonly workdir: string;
-  /** The entries the store holds for this persona, in queue order, capped at `MAX_QUEUE_ENTRIES`. */
+  /** The entries the store holds for this persona, in queue order, at most `MAX_QUEUE_ENTRIES` of
+   * them. Past the cap the active entry and every open entry are kept before any finished one, and
+   * the newest finished entries fill the places left. */
   readonly entries: readonly QueueEntry[];
-  /** The entry the plugin's controller counts as active, or null. Names an entry that may not be in
-   * `entries` at all, since the cap and the entry rules both bound what comes back. */
+  /** The entry the plugin's controller counts as active, or null. The cap keeps the entry it names
+   * first, yet it may still name an entry not in `entries` at all, since the store may hold none such
+   * and the entry rules still bound what comes back. */
   readonly activeGoalId: string | null;
   /** `monitor.lastTurnComplete` from the store: when the worker last finished a turn. */
   readonly lastTurnComplete: number | null;
@@ -502,6 +521,34 @@ export function queueKey(entry: QueueEntry): number {
   return entry.sortKey ?? entry.createdAt ?? Number.MAX_SAFE_INTEGER;
 }
 
+/** Whether an entry's store status is `COMPLETE` or `ABANDONED`. Any other status, or none, is open. */
+function finished(entry: QueueEntry): boolean {
+  const status = entry.status?.trim().toLowerCase();
+  return status === COMPLETE || status === ABANDONED;
+}
+
+/**
+ * The entries `MAX_QUEUE_ENTRIES` keeps out of `sorted`, which is in queue order, by the keep rule
+ * that constant states, returned in queue order. A store at or under the cap is kept whole.
+ *
+ * Places are claimed by position, so an entry is counted once: the active entry is the first in
+ * queue order carrying the id `activeGoalId` names, the one a reader looking it up by id finds, and
+ * an entry sharing that id is judged open or finished like any other.
+ */
+function keptEntries(sorted: readonly QueueEntry[], activeGoalId: string | null): QueueEntry[] {
+  if (sorted.length <= MAX_QUEUE_ENTRIES) return [...sorted];
+  const active = activeGoalId === null ? -1 : sorted.findIndex((entry) => entry.id === activeGoalId);
+  const open: number[] = [];
+  const done: number[] = [];
+  for (const [index, entry] of sorted.entries()) {
+    if (index === active) continue;
+    (finished(entry) ? done : open).push(index);
+  }
+  const claims = [...(active < 0 ? [] : [active]), ...open, ...done.reverse()];
+  const kept = new Set(claims.slice(0, MAX_QUEUE_ENTRIES));
+  return sorted.filter((_, index) => kept.has(index));
+}
+
 /** One persona's slice of the store: everything the card reads out of it. */
 type StoreReading = {
   entries: readonly QueueEntry[];
@@ -530,10 +577,11 @@ function storeReading(value: unknown, persona: string): StoreReading | null {
   }
   entries.sort((left, right) => queueKey(left) - queueKey(right));
 
+  const activeGoalId = stringField(own.activeGoalId) ?? null;
   const monitor = isRecord(own.monitor) ? own.monitor : {};
   return {
-    entries: entries.slice(0, MAX_QUEUE_ENTRIES),
-    activeGoalId: stringField(own.activeGoalId) ?? null,
+    entries: keptEntries(entries, activeGoalId),
+    activeGoalId,
     lastTurnComplete: numberField(monitor.lastTurnComplete) ?? null,
   };
 }
