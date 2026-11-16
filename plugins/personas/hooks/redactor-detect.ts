@@ -1319,9 +1319,20 @@ function withFixedHashes(v: string): string {
   return v.replace(TAG_BODY, (_m, prefix: string) => prefix + HASH_AS_READ)
 }
 
-function looksGenerated(v: string): boolean {
+// Whether a quoted value reads as a generated password. A value that holds a
+// mark of code, a template, markup or mail text is refused. The markup mark
+// has two forms. The first, `<` before a lowercase letter with a slash
+// allowed between them, is the one the quoted-value pass of scrubAssignments
+// reads. The second, `wholeTag`, is a plain lowercase tag: `<`, a lowercase
+// letter, any lowercase letters and digits, and `>`, as `<b>` or `<h2>`.
+// lateGeneratedValues is its one caller. A random password holds `<` before
+// a lowercase letter by chance, so this form refuses only a plain tag. A tag
+// of another shape, as `<my-el>` or `<a:b>`, is not a mark. Every other
+// mark and test reads the same in both forms.
+function looksGenerated(v: string, wholeTag = false): boolean {
   if (!/[A-Z]/.test(v) || !/[a-z]/.test(v) || !/[0-9]/.test(v) || !PW_SYMBOL.test(v)) return false
-  if (/\$\{|\{\{|%\(|^\^|\$$|[A-Za-z]-[A-Za-z]\]|=>|::|\(\)|<\/?[a-z]|=[0-9A-F]{2}|[0-9]{6}/.test(v)) return false
+  if (/\$\{|\{\{|%\(|^\^|\$$|[A-Za-z]-[A-Za-z]\]|=>|::|\(\)|=[0-9A-F]{2}|[0-9]{6}/.test(v)) return false
+  if ((wholeTag ? /<[a-z][a-z0-9]*>/ : /<\/?[a-z]/).test(v)) return false
   // Real words in it: code, a format, a shortcut (`Ctrl+Alt+F12`), a payee
   // with an order number (`Merchant#a12345`).
   const words = v.match(/[A-Za-z]{4,}/g)?.filter((w) => WORDY.test(w)) ?? []
@@ -1360,6 +1371,9 @@ function isStandIn(v: string): boolean {
 
 // Credentials on a command line: `--password x`, `curl -u user:pw`,
 // `mysql -pPW`, a .pgpass line, a .netrc entry, `gh secret set --body`.
+// CLI_FLAG, CLI_USERPASS and GH_SECRET each have a late rule below,
+// LATE_CLI_FLAG, LATE_CLI_USERPASS and LATE_GH_SECRET, and an edit to one is
+// made to the other.
 const CLI_FLAG =
   /((?:^|\s)--?(?:password|passwd|pass|api-key|apikey|api_key|token|client-secret|auth-token|access-token)(?:=|[ \t]+)(["']?))(?![$<{%])([^\s"'=-][^\s"']{2,200})\2/g
 const CLI_USERPASS =
@@ -1374,6 +1388,8 @@ const GH_SECRET = /(\bgh[ \t]+secret[ \t]+set\b[^\n;&|]{0,500}?[ \t](?:-b|--body
 // Short password flags that only mean a password for one command:
 // `sshpass -p`, `docker login -p`, `mongosh -p`, `7z -pPW`, `sqlcmd -P`,
 // `zip -P`, `redis-cli -a`, `ldapsearch -w`. Each is anchored at its command.
+// CMD_PW has a late rule below, LATE_CMD_PW, built from the same rows, and
+// an edit to one template is made to the other.
 const CMD_PW_TOOLS: [cmd: string, flag: string][] = [
   [String.raw`sshpass|(?:docker|podman|nerdctl|helm[ \t]+registry)[ \t]+login|mongo(?:sh|dump|restore|import|export)?`, String.raw`-p[ \t]*`],
   [String.raw`7za?|7zz`, '-p'],
@@ -1387,11 +1403,69 @@ const CMD_PW = CMD_PW_TOOLS.map(
 const CMD_PW_GATE = /sshpass|login|mongo|7z|sqlcmd|zip|redis-cli|valkey-cli|ldap/
 // `openssl ... -passout pass:PW`, `smbclient -U user%PW`, `htpasswd -b file
 // user PW`, `rabbitmqctl add_user user PW`.
+// Each of the five rules below has a late rule, LATE_OPENSSL_PASS,
+// LATE_SMB_USER, LATE_HTPASSWD, LATE_NET_USER and LATE_RABBIT_USER, and an
+// edit to one is made to the other.
 const OPENSSL_PASS = /(-pass(?:in|out)?[ \t]+pass:)([^\s"']{3,200})/g
 const SMB_USER = /(\bsmbclient\b[^\n|;&]{0,500}?[ \t]-U[ \t]+["']?[^\s%"']+%)([^\s"']{3,200})/g
 const HTPASSWD = /(\bhtpasswd[ \t]+-[a-zA-Z]*b[a-zA-Z]*[ \t]+(?:-[a-zA-Z]+[ \t]+)*\S+[ \t]+\S+[ \t]+)(["']?)([^\s"']{3,200})\2/g
 const NET_USER = /(\bnet[ \t]+user[ \t]+(?:"[^"\n]{1,64}"|\S+)[ \t]+)(["']?)((?!\/)[^\s"'*]{3,200})\2/gi
 const RABBIT_USER = /(\brabbitmqctl[ \t]+(?:add_user|change_password)[ \t]+\S+[ \t]+)(["']?)([^\s"']{3,200})\2/g
+
+// The late rules. A late pass runs after every hiding pass of a reading and
+// the first rehideLocal, before unpark and widenKnown, and swaps only text
+// that still stands in clear. Every pass before it reads the text it reads
+// with no late pass and stores what it stores, so a late pass adds hides and
+// takes none away.
+// A late command rule names the rule it follows. It reads that rule's value
+// where the command stands inside a string, as in a JSON file or in a shell
+// command that runs another command in double quotes: the quote before the
+// value is the escaped quote, a backslash and a double quote. The quote is
+// required, and the value ends before the next escaped quote. The value
+// holds no backslash and no square bracket, so no late command rule takes a
+// placeholder into a value. The late generated-value pass reads no value
+// that holds a placeholder's body, so it takes none into a value either.
+// A value can hold the mark of a parked span, so the value a late rule
+// hides can run past its bound of 200 characters once the span is put back;
+// that hides more and shows nothing. Each lazy span keeps its rule's bound
+// of 500 characters.
+// Inside a string a line break is written as a backslash and `n`, a return
+// as a backslash and `r` and a tab as a backslash and `t`, so a command that
+// opens a line there stands after a letter. Before the command word, and
+// before the option where its rule reads `\s`, a late rule also reads a
+// backslash and one of `n`, `r` and `t`. Before the first option where its
+// rule reads a space or a tab, it also reads a backslash and `t`. Every other
+// gap a late rule reads, between two words of the command or between an
+// option and its value, takes a real space or tab.
+// A name before the value is read as its rule reads it, as written inside a
+// string. A user's name before `:` or `%` may hold a backslash, which a JSON
+// string writes as two and a shell string as one, so LATE_CLI_USERPASS and
+// LATE_SMB_USER read a backslash there wherever no double quote follows it;
+// a backslash before a double quote ends the name, so an escaped quote does.
+// LATE_NET_USER reads a quoted name that opens with an escaped quote
+// too. It may close on a bare quote: inside a string NET_USER reads the
+// name's last word and the backslash after it as a value and hides them, so
+// the name the late rule meets ends in that placeholder and a bare quote.
+// Three rules are followed another way. LATE_NET_USER reads a star inside a
+// value: NET_USER keeps a star out so the prompt form `net user bob *` is
+// left, and a quoted value of three characters or more is no prompt.
+// LATE_OPENSSL_PASS reads a quote before `pass:` in three spellings, the
+// escaped quote and a bare quote of either kind, closed by the same
+// spelling, since OPENSSL_PASS reads no quote there. MYSQL_P has no late
+// rule: it takes an escaped quote into its value and hides the value with it.
+const LATE_CLI_FLAG =
+  /((?:^|\s|\\[nrt])--?(?:password|passwd|pass|api-key|apikey|api_key|token|client-secret|auth-token|access-token)(?:=|[ \t]+)\\")(?![$<{%])([^\s"'\\[\]=-][^\s"'\\[\]]{2,200})(?=\\")/g
+const LATE_CLI_USERPASS =
+  /((?:\b|(?<=\\[nrt]))(?:curl|wget|http|https|xh|httpie|lftp|ftp)\b[^\n|;&]{0,500}?(?:\s|\\[nrt])(?:-u|-U|--user|--proxy-user)(?:[ \t]+|=)\\"(?:[^\s:"'$\\]|\\(?!"))+:)(?!\$)([^\s"'`\\[\]]{3,200})(?=\\")/g
+const LATE_GH_SECRET = /((?:\b|(?<=\\[nrt]))gh[ \t]+secret[ \t]+set\b[^\n;&|]{0,500}?(?:[ \t]|\\t)(?:-b|--body)(?:[ \t]+|=)\\")([^\s"'\\[\]]{3,400})(?=\\")/g
+const LATE_CMD_PW = CMD_PW_TOOLS.map(
+  ([cmd, flag]) => new RegExp(String.raw`((?:\b|(?<=\\[nrt]))(?:${cmd})\b[^\n|;&]{0,500}?(?:[ \t]|\\t)${flag}\\")(?![$-])([^\s"'\\[\]]{3,200})(?=\\")`, 'g'),
+)
+const LATE_OPENSSL_PASS = /(-pass(?:in|out)?[ \t]+(\\"|["'])pass:)([^\s"'\\[\]]{3,200})(?=\2)/g
+const LATE_SMB_USER = /((?:\b|(?<=\\[nrt]))smbclient\b[^\n|;&]{0,500}?(?:[ \t]|\\t)-U[ \t]+\\"(?:[^\s%"'\\]|\\(?!"))+%)([^\s"'\\[\]]{3,200})(?=\\")/g
+const LATE_HTPASSWD = /((?:\b|(?<=\\[nrt]))htpasswd(?:[ \t]|\\t)+-[a-zA-Z]*b[a-zA-Z]*[ \t]+(?:-[a-zA-Z]+[ \t]+)*\S+[ \t]+\S+[ \t]+\\")([^\s"'\\[\]]{3,200})(?=\\")/g
+const LATE_NET_USER = /((?:\b|(?<=\\[nrt]))net[ \t]+user[ \t]+(?:"[^"\n]{1,64}"|\\"[^"\\\n]{1,64}\\?"|\S+)[ \t]+\\")((?!\/)[^\s"'\\[\]]{3,200})(?=\\")/gi
+const LATE_RABBIT_USER = /((?:\b|(?<=\\[nrt]))rabbitmqctl[ \t]+(?:add_user|change_password)[ \t]+\S+[ \t]+\\")([^\s"'\\[\]]{3,200})(?=\\")/g
 
 // Cookies: every value in a Cookie header, curl -b, or cookies.txt.
 const COOKIE = /((?:^|["'\s])(?:(?:set-)?cookie["']?[ \t]*:|-b|--cookie)[ \t]*["']?)([^"'\n]*)/gim
@@ -2244,6 +2318,49 @@ function scrubCommandLines(text: string, cfg: Config): string {
   return out
 }
 
+// The late command pass: each late rule over the text the passes before it
+// left, with the keeps its rule's callback in scrubCommandLines applies. A
+// late value holds no square bracket and so cannot run into a placeholder,
+// and pairOut is handed the head and the value alone. A text that holds no
+// escaped quote is read by the openssl rule alone, whose value may stand
+// after a bare quote.
+function lateCommandValues(text: string, cfg: Config): string {
+  let out = text
+  if (out.includes('pass:')) out = clocked(out).replace(LATE_OPENSSL_PASS, (_m, head: string, _q: string, v: string) => pairOut(cfg, head, v))
+  if (!out.includes('\\"')) return out
+  out = clocked(out).replace(LATE_CLI_FLAG, (m, head: string, v: string) =>
+    /^[A-Z][A-Z0-9_]*$/.test(v) || /^[A-Za-z_]+=/.test(v) || /^[A-Za-z]+(?:[-_][A-Za-z]+)+$/.test(v) ? m : pairOut(cfg, head, v),
+  )
+  out = clocked(out).replace(LATE_CLI_USERPASS, (m, head: string, v: string) => (DIGITS_ONLY.test(v) ? m : pairOut(cfg, head, v)))
+  for (const re of [LATE_GH_SECRET, ...LATE_CMD_PW, LATE_SMB_USER, LATE_HTPASSWD, LATE_NET_USER, LATE_RABBIT_USER]) {
+    out = clocked(out).replace(re, (_m, head: string, v: string) => pairOut(cfg, head, v))
+  }
+  return out
+}
+
+// The late generated-value pass: the quoted-value pass of scrubAssignments
+// once more, over the text the passes before it left, for a quoted value that
+// holds `<` before a lowercase letter. It reads no value that holds a
+// placeholder's body, so a value an earlier pass hid in part is left as that
+// pass left it. It changes one test of the quoted-value pass, the markup mark
+// of looksGenerated, which it reads as a whole lowercase tag. It makes that
+// pass's other tests in that pass's order: isStandIn, the allow list and the
+// MIME boundary. The value it reads holds no placeholder, so it reads the
+// value as written where that pass reads a copy with a fixed hash. A text
+// that holds no `<` is not read.
+function lateGeneratedValues(text: string, cfg: Config): string {
+  if (!text.includes('<')) return text
+  return clocked(text).replace(QUOTED_VALUE, (m, q: string, v: string, offset: number, whole: string) => {
+    if (!/<[a-z]/.test(v)) return m
+    // search() starts at the first character and leaves TAG_BODY's lastIndex as it found it.
+    if (v.search(TAG_BODY) !== -1) return m
+    if (!looksGenerated(v, true) || isStandIn(v) || cfg.allow.has(v)) return m
+    // A MIME boundary is random by design and public.
+    if (/boundary=$/i.test(whole.slice(Math.max(0, offset - 9), offset))) return m
+    return q + mint('SECRET', v) + q
+  })
+}
+
 function scrubAssignments(text: string, cfg: Config): string {
   let out = text
   // A value under a key that says it is public is left: a publishable key.
@@ -2706,6 +2823,12 @@ function readText(text: string, cfg: Config, asWritten: boolean): [out: string, 
     // A value hidden at one spot in this text is hidden at its other spots
     // too: a HAR repeats each query parameter in `url` and `queryString`.
     if (local.size > 0) out = rehideLocal(out, local)
+    // The late passes, and the same-text pass once more where one of them
+    // hid a value new to this reading's same-text list.
+    const held = local.size
+    out = lateCommandValues(out, cfg)
+    out = lateGeneratedValues(out, cfg)
+    if (local.size > held) out = rehideLocal(out, local)
     const done = unpark(out)
     // A reading in which no known value was hidden again ends here.
     if (own.vault.size === 0) return [done, known]
