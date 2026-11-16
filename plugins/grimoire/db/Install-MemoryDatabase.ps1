@@ -578,20 +578,30 @@ Write-Output ("Server: " + $Server + " (" + $authentication + ")")
 Write-Output ("sqlcmd: " + $script:Sqlcmd)
 
 # The host: full-text installed, the engine new enough to hold a VECTOR
-# column, and the database created where absent.
+# column, text compared without regard to letter case, and the database
+# created where absent. The case question is a comparison the server
+# evaluates, and in master it runs under the server's default collation,
+# which a new database takes. It compares the whole lowercase alphabet with
+# the uppercase one, since a Turkish or Azeri collation ignores case yet
+# holds i and I apart.
 $hostBatch = @"
 ;SET NOCOUNT ON
 ;SELECT 'kitmem-fulltext=' + CAST(COALESCE(FULLTEXTSERVICEPROPERTY('IsFullTextInstalled'), 0) AS VARCHAR(10))
 ;SELECT 'kitmem-major=' + CAST(SERVERPROPERTY('ProductMajorVersion') AS VARCHAR(10))
+;SELECT 'kitmem-caseless=' + CASE WHEN N'abcdefghijklmnopqrstuvwxyz' = N'ABCDEFGHIJKLMNOPQRSTUVWXYZ' THEN '1' ELSE '0' END
 ;SELECT 'kitmem-database=' + CASE WHEN DB_ID(N'$Database') IS NULL THEN 'absent' ELSE 'present' END
 "@
 $hostResult = Invoke-KitSqlText -Text $hostBatch -DatabaseName 'master'
 Stop-OnBatchFailure -Result $hostResult -What "Connecting to $Server"
 $fullText = Get-TaggedValues -Lines $hostResult.Output -Tag 'fulltext'
 $major = Get-TaggedValues -Lines $hostResult.Output -Tag 'major'
+$serverCaseless = Get-TaggedValues -Lines $hostResult.Output -Tag 'caseless'
 $databaseState = Get-TaggedValues -Lines $hostResult.Output -Tag 'database'
-if ($fullText.Count -ne 1 -or $major.Count -ne 1 -or $databaseState.Count -ne 1) {
+if ($fullText.Count -ne 1 -or $major.Count -ne 1 -or $serverCaseless.Count -ne 1 -or $databaseState.Count -ne 1) {
     Stop-Install "the host batch did not answer every question it was asked."
+}
+if (@('0', '1') -notcontains $serverCaseless[0]) {
+    Stop-Install "the host batch answered whether $Server compares text without regard to case with a value this installer cannot read: $($serverCaseless[0])"
 }
 if ($fullText[0] -ne '1') {
     Stop-Install "full-text search is not installed on $Server, and mem.Record's full-text index needs it."
@@ -602,6 +612,11 @@ if ([int]$major[0] -lt 17) {
 Write-Output ("Full-text: installed")
 
 if ($databaseState[0] -eq 'absent') {
+    # A present database is judged by its own answer in the next batch, so the
+    # server's answer refuses only a database this run would create.
+    if ($serverCaseless[0] -eq '0') {
+        Stop-Install ("the server $Server compares text case-sensitively under its default collation (or holds one letter pair apart, as a Turkish collation holds i and I), which a new database takes, and the memory database treats two record names that differ only by letter case as one record; no database was created.")
+    }
     $createResult = Invoke-KitSqlText -Text ";CREATE DATABASE [$Database]" -DatabaseName 'master'
     Stop-OnBatchFailure -Result $createResult -What "Creating database $Database"
     Write-Output ("Database " + $Database + ": created")
@@ -611,9 +626,12 @@ else {
 }
 
 # The version gate. A host holding a newer schema than this installer carries
-# refuses before any script runs.
+# refuses before any script runs. The same batch asks the case question again,
+# here under the database's own collation, which can differ from the server's
+# where the database was created by hand, and over the same alphabet.
 $versionBatch = @'
 ;SET NOCOUNT ON
+;SELECT 'kitmem-caseless=' + CASE WHEN N'abcdefghijklmnopqrstuvwxyz' = N'ABCDEFGHIJKLMNOPQRSTUVWXYZ' THEN '1' ELSE '0' END
 ;IF OBJECT_ID('mem.SchemaVersion') IS NULL
 	SELECT 'kitmem-schemaversion=none'
 ELSE
@@ -623,6 +641,14 @@ $versionResult = Invoke-KitSqlText -Text $versionBatch -DatabaseName $Database
 Stop-OnBatchFailure -Result $versionResult -What "Reading mem.SchemaVersion"
 $installedVersion = Get-TaggedValues -Lines $versionResult.Output -Tag 'schemaversion'
 if ($installedVersion.Count -ne 1) { Stop-Install "the schema version batch returned no version line." }
+$databaseCaseless = Get-TaggedValues -Lines $versionResult.Output -Tag 'caseless'
+if ($databaseCaseless.Count -ne 1) { Stop-Install "the schema version batch did not answer whether the database compares text without regard to case." }
+if ($databaseCaseless[0] -eq '0') {
+    Stop-Install ("the database " + $Database + " compares text case-sensitively (or holds one letter pair apart, as a Turkish collation holds i and I), and the memory database treats two record names that differ only by letter case as one record; no script was applied.")
+}
+if ($databaseCaseless[0] -ne '1') {
+    Stop-Install ("the schema version batch answered whether the database compares text without regard to case with a value this installer cannot read: " + $databaseCaseless[0])
+}
 $installedText = $installedVersion[0]
 if ($installedText -ne 'none') {
     $installedNumber = 0

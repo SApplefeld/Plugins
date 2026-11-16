@@ -4,13 +4,14 @@ The `mem` schema on a SQL Server 2025 host holds every sandbox's published memor
 
 ## What the host needs before the installer runs
 
-The operator performs these once on the host; the installer checks the first two and refuses when either is missing.
+The operator performs these once on the host; the installer checks the first three and refuses when any is missing.
 
 1. SQL Server 2025 (product major version 17) or newer. The `VECTOR` column type and `VECTOR_DISTANCE` are what the similarity lists run on.
 2. Full-Text Search installed on the instance. `mem.Record` carries a full-text index over its description and body.
-3. Mixed-mode authentication, so the SQL logins the installer creates can connect.
-4. TCP enabled and reachable from every sandbox machine, with a certificate the clients trust, since every client connection encrypts.
-5. A login for the installing connection. The installer is run and verified as `sysadmin`, which a first run needs to create the database and the five logins. A later run that finds every login present creates nothing at server scope and touches only the database and the five logins' catalog rows, so a narrower principal may serve it; no narrower principal is verified.
+3. The server's default collation, and the database's where it already exists, must compare text without regard to letter case (case-insensitive). The kit treats two record names that differ only by letter case as one record. The server's answer refuses only a database the installer would create, and the database is asked on every run. A Turkish or Azeri collation does not meet this, since it holds i and I apart.
+4. Mixed-mode authentication, so the SQL logins the installer creates can connect.
+5. TCP enabled and reachable from every sandbox machine, with a certificate the clients trust, since every client connection encrypts.
+6. A login for the installing connection. The installer is run and verified as `sysadmin`, which a first run needs to create the database and the five logins. A later run that finds every login present creates nothing at server scope and touches only the database and the five logins' catalog rows, so a narrower principal may serve it; no narrower principal is verified.
 
 ## Running the installer
 
