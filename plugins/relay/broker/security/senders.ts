@@ -42,7 +42,11 @@ export type SenderGate = {
   participantIds: readonly string[];
 };
 
-/** Discord identifiers are snowflakes. Shared with the channel ID's check in discord/config.ts. */
+/**
+ * Discord identifiers are snowflakes. Several broker modules import this pattern, the channel ID's
+ * check in discord/config.ts among them, so an edit that loosens it for one caller loosens it for
+ * every importer.
+ */
 export const SNOWFLAKE = /^\d{17,20}$/;
 
 /**

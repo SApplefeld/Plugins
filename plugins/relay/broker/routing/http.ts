@@ -346,8 +346,9 @@ export function createRelayRoutes(
           : {};
 
       if (route === "/relay/announce") {
-        // A body naming no usable session is a final answer and not a retry: the relay asks once
-        // per connection, so a session id the broker cannot use is not asked for every half minute.
+        // A body naming no usable session is a final answer and not a retry: the relay stops
+        // announcing on a 400 for the connection it holds, so a session id the broker cannot use
+        // is not asked for every half minute.
         const answer = options.announce(processToken, fields);
         if (answer === "no-session-id") {
           send(response, 400, { error: "body has no sessionId" });

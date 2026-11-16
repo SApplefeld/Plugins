@@ -57,11 +57,10 @@ Writes text as UTF-8 with no byte-order mark.
 .DESCRIPTION
 Set-Content -Encoding UTF8 writes a BOM on Windows PowerShell 5.1 (there is no BOM-less UTF8
 encoding name until PowerShell 6's utf8NoBOM). A BOM is invisible to Get-Content, which strips it,
-but not to a Node readFileSync(..., "utf8"), which returns it as a leading character. The bot token
-is read exactly that way by broker/discord/config.ts's readToken and then only .trim()'d, and trim()
-does not remove a BOM, so a BOM-prefixed token file would authenticate as a token Discord has never
-seen and fail with no signal pointing back at this. Everything this installer writes for another
-program to read raw uses this instead of Set-Content -Encoding UTF8.
+but not to a Node readFileSync(..., "utf8"), which returns it as a leading character. A reader that
+trims the text drops the mark, as broker/discord/config.ts's readToken does, since trim() removes a
+BOM. JSON.parse does not: it throws on a text that opens with one. Everything this installer writes
+for another program to read raw uses this instead of Set-Content -Encoding UTF8.
 #>
 function Set-Utf8NoBomFile {
     param(
