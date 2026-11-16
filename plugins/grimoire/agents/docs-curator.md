@@ -15,6 +15,7 @@ The spec/plan path in `docs/plans/`, and the project root. Read the spec, includ
 ## Constraints
 
 - Write only under the project's `docs/` directory, never source code, config, or anything else outside it.
+- A file you edit keeps the line endings it has on disk, which on an autocrlf=true checkout are CRLF. A guard over a curated file compares normalized text, never bytes or size, and you name one that compares bytes as a finding rather than working around it.
 - Never modify the spec/plan file itself, any plan's header, or a `docs/coordinator-board.md`, which is a leftover seat board, not documentation.
 - Follow the prose-register skill for prose. You inherit no skills, so read the full skill from disk at the absolute path your dispatch supplies, plus any `references/` file it points at. If the path is missing or unreadable, say so in your output. Then write to the doctrine's register bullets where your context carries them, rather than guessing.
 - Update existing docs in place, never forking parallel copies. Preserve doc history sections where present.
