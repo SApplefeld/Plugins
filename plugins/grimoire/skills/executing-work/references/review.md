@@ -18,7 +18,7 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
 
    **The adversarial, security and performance lenses carry a `Failure by area:` line, and no other dispatch does.** It quotes the header and each row of the repository's `docs/verification.md` Failure by Area table whose Area holds a changed file, a file under a Skip path included, or reads `none written` where no such row exists. It closes with `Skip names context you need not read, never a changed file to pass over.` The blind-reviewer, blind-reader and scope adjudicator never carry it.
 
-   **Every reviewer dispatch carries the standing absence-check clause as the Dispatch Brief states it, each sentence before `Build the control`, the blind lens included.** The clause changes with no section, and a reviewer's clean sweep is the last check there is. The control-building and probe sentences from there on bind a writer alone, since every reviewer runs read-only and the adversarial charter asks for the author's control rather than building one.
+   **Every reviewer dispatch carries the standing absence-check clause as the Dispatch Brief states it, each sentence before `Build the control`, the blind lens included.** The clause changes with no section, and a reviewer's clean sweep is the last check there is. The control-building and probe sentences from there on bind a writer alone, since every reviewer runs read-only.
 
    **No run of this session's overlaps the round, so any contention is somebody else's.** Where exactly one shared resource in this repo would block a reviewer's build or run, and anything holds it, a sibling session's suite or build included, carry the Dispatch Brief's workspace-constraint line into every reviewer brief.
 

@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's self-improvement skill: it governs how friction with the kit itself is captured as `kaizen` issues on the kit's GitHub repository and how a "kaizen pass" turns those issues into briefs, direct fixes, promoted specs, routed learnings, or parked issues. It owns these moments: capturing a friction note as an issue (including the issue's title and body shape, the fallback file for a host with no writing login, and the public-board cap on its wording); running a pass, whether by an operator's attended request or by the standing adjudication authority the machine-coordinator and kit-expert seats hold, including the collaborator read that sets an outsider's issue aside and the 30-day close of an untouched note; writing briefs as comments on their issues and applying them through one pull request per pass, including the close reasons that disposition each issue, the reconciliation of the gathered count, and the lane that pull request takes; how an accepted lesson lands in the passage it changes; running the upstream watch as a step of its own, inside a pass or alone, whose run `references/upstream-watch.md` states; the regrowth cut of the kit's instruction text, a run of its own outside any pass, whose procedure `references/regrowth-cut.md` states; and offering a pass, gated on the pending-items predicate. Load class: `named-trigger` - the frontmatter says to load it when capturing a friction note about the kit, when running the upstream watch, when running a kaizen pass, when accepting an end-of-effort offer to reflect, or when applying a pending brief.
 
-Extracted at `6bc07fb`: whole document (`skills.kaizen.SKILL.md`). Amended by `docs/plans/claude-kit_skill-guidance-alignment_spec_v1.md` section 2 on 2026-10-05 (H001 below, with C001 retired to it, as that section rewrote the description to name note capture as a use). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `1962dd22` with its fix round at `6f26f01a`, so every live entry's `passage:` line before H001 quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` on 2026-10-06: section 2 rewrote C045 to point at the doctrine's merge rule, and section 4 rewrote C016, C017 and C067 to the targeted-lane pushes and retired C068. Amended by `docs/plans/claude-kit_public-marketplace_spec_v1.md` at its finishing pass on 2026-10-06: C025's passage and reason say the cache is an installed copy rather than a full copy of this repository, since a public install copies the published snapshot. Amended by `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` section 1 on 2026-10-06: capture and the pass became issue operations on `sapplefeld/grimoire`, so C003, C007, C008, C009, C025, C026, C047, C048, C049, C054, C055, C057, C066, C067, C070 and C077 carry the new text in place; C004, C006, C010 to C014, C016, C017, C023, C024, C042 to C046, C060 to C062, C064 and C065 retire; and K001 to K007 hold the claims that section added. Its review round on 2026-10-06 rewrote K002, C026, K005, K006, C057, K007 and C066 in place and added K008 and K009. Its second review round rewrote K002 to K007, C026, C055, C057 and C066 in place and moved the source lines of the live entries whose passages this section moved. Its finishing review on 2026-10-07 rewrote C047, C048 and K006 in place and moved every command's repository to `github.com/sapplefeld/grimoire` in the passages that quote one. Amended by `docs/plans/claude-kit_hooks-read-the-install_spec_v1.md` section 2 on 2026-11-08: C007, C077 and C078 carry the pending upstream watch and the watched vendor pages in place. Amended by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2 on 2026-11-14, which made the upstream watch a step of its own: C077 rewritten to its passage as it now reads, C007's reason reworded, H001 carrying the description that names the upstream watch as a use, C078's key naming the session running the watch, and the run's mechanics moved to `references/upstream-watch.md`, whose heading at the end of this ledger holds them. Amended by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 3 on 2026-11-16: BZ001 added under the plan's letter BZ for the 30-day close, placed between the collaborator read and the inbox read, so K005 moved to line 35, C047, C048, C049 and K008 to line 37, C050 to 38 and C051 to 39, C047's key and passage saying the count follows the close. The new bullet adds one line, so an older `source:` line past 39 reads one line short, and none is re-pointed. Amended by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 on 2026-11-16, which named the regrowth cut in the paragraph after step 3 and pointed at `references/regrowth-cut.md`: C077 rewritten in place, its `source:` line re-pointed to line 53, and the procedure's own claims under that file's heading at the end of this ledger.
+Extracted at `6bc07fb`: whole document (`skills.kaizen.SKILL.md`). Amended by `docs/plans/claude-kit_skill-guidance-alignment_spec_v1.md` section 2 on 2026-10-05 (H001 below, with C001 retired to it, as that section rewrote the description to name note capture as a use). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `1962dd22` with its fix round at `6f26f01a`, so every live entry's `passage:` line before H001 quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` on 2026-10-06: section 2 rewrote C045 to point at the doctrine's merge rule, and section 4 rewrote C016, C017 and C067 to the targeted-lane pushes and retired C068. Amended by `docs/plans/claude-kit_public-marketplace_spec_v1.md` at its finishing pass on 2026-10-06: C025's passage and reason say the cache is an installed copy rather than a full copy of this repository, since a public install copies the published snapshot. Amended by `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` section 1 on 2026-10-06: capture and the pass became issue operations on `sapplefeld/grimoire`, so C003, C007, C008, C009, C025, C026, C047, C048, C049, C054, C055, C057, C066, C067, C070 and C077 carry the new text in place; C004, C006, C010 to C014, C016, C017, C023, C024, C042 to C046, C060 to C062, C064 and C065 retire; and K001 to K007 hold the claims that section added. Its review round on 2026-10-06 rewrote K002, C026, K005, K006, C057, K007 and C066 in place and added K008 and K009. Its second review round rewrote K002 to K007, C026, C055, C057 and C066 in place and moved the source lines of the live entries whose passages this section moved. Its finishing review on 2026-10-07 rewrote C047, C048 and K006 in place and moved every command's repository to `github.com/sapplefeld/grimoire` in the passages that quote one. Amended by `docs/plans/claude-kit_hooks-read-the-install_spec_v1.md` section 2 on 2026-11-08: C007, C077 and C078 carry the pending upstream watch and the watched vendor pages in place. Amended by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2 on 2026-11-14, which made the upstream watch a step of its own: C077 rewritten to its passage as it now reads, C007's reason reworded, H001 carrying the description that names the upstream watch as a use, C078's key naming the session running the watch, and the run's mechanics moved to `references/upstream-watch.md`, whose heading at the end of this ledger holds them. Amended by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 3 on 2026-11-16: BZ001 added under the plan's letter BZ for the 30-day close, placed between the collaborator read and the inbox read, so K005 moved to line 35, C047, C048, C049 and K008 to line 37, C050 to 38 and C051 to 39, C047's key and passage saying the count follows the close. The new bullet adds one line, so an older `source:` line past 39 reads one line short, and none is re-pointed. Amended by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 on 2026-11-16, which named the regrowth cut in the paragraph after step 3 and pointed at `references/regrowth-cut.md`: C077 rewritten in place, its `source:` line re-pointed to line 53, and the procedure's own claims under that file's heading at the end of this ledger. Amended by `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 4 on 2026-11-16, a regrowth cut from base `bc6f0e57a`: K003, BZ001, K006 and C070 re-read to their shrunk passages as they now read. No line of the source moved.
 
 ### C001
 - key: Load this skill when running a kaizen pass, accepting a reflect offer, or applying a pending kaizen brief.
@@ -684,7 +684,7 @@ Extracted at `6bc07fb`: whole document (`skills.kaizen.SKILL.md`). Amended by `d
 - provenance: 830ff28 2026-06-17; section 1 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` moved the brief from a file in `kaizen/briefs/` to a comment on its issue on 2026-10-06.
 - verdict: keep
 - reason: The doctrine's handoff rule decides when to hand off; this fixes what a brief contains. Section 1 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` moved the brief to a comment on its issue on 2026-10-06, so a brief and the friction it answers sit together where the operator reads them.
-- passage: A brief is a comment on its own issue. It is self-contained, so a fresh kit-repo session can execute it without this session's context:
+- passage: A brief is self-contained, so a fresh kit-repo session can execute it without this session's context:
 
 ### C071
 - key: Use the brief template: a `# Kaizen brief: <short title>` heading, then Friction, Change, Acceptance, and a Discipline line reading "follow writing-skills; baseline-test any behavior-shaping wording."
@@ -812,7 +812,7 @@ Extracted at `6bc07fb`: whole document (`skills.kaizen.SKILL.md`). Amended by `d
 - provenance: docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md section 1, 2026-10-06, on the operator's proposal to move kaizen capture to GitHub Issues, recorded under that plan's Intent.
 - verdict: keep
 - reason: The title is what the operator's issue list and a pass's triage read first, so it carries the lesson the doctrine's capture bullet asks for. The three body fields are the ones the short note form carried, and a pass needs them to know which machine and repository to ask about the friction. The section's second review round on 2026-10-06 bound the title as literal prose in single quotes, never pasted tool output, since the title is the one composed text still on the command line and single quotes are the form the shell leaves unexpanded; and it moved the client-repository-by-role rule from the relayed note (C026) into the body sentence, so it binds every issue on the public repository, filed directly or relayed.
-- passage: The title is the lesson, stated one level above its incident. It is short literal prose the session composes, passed in single quotes with no single quote inside it, never pasted tool output, since GitHub caps a title at 256 characters. The body opens with the date, the machine and the repository the friction arose in, a client repository named by its role and never its name, then carries the evidence.
+- passage: The title is the lesson. It is short literal prose the session composes, passed in single quotes with no single quote inside it, never pasted tool output, since GitHub caps a title at 256 characters. The body opens with the date, the machine and the repository the friction arose in, a client repository named by its role and never its name, then carries the evidence.
 
 ### K004
 - key: Capture with a GitHub login that has write or triage access to the repository; no clone of it is needed.
@@ -839,7 +839,7 @@ Extracted at `6bc07fb`: whole document (`skills.kaizen.SKILL.md`). Amended by `d
 - provenance: docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md section 1, 2026-10-06, on the operator's proposal to move kaizen capture to GitHub Issues, recorded under that plan's Intent.
 - verdict: keep
 - reason: Closing with a reason and a comment records the disposition where the operator reads it, and the comment points the closed issue at its fix: the pull request, the plan or the memory record. `not planned` separates a refusal from the three dispositions that acted, which `completed` marks. The section's review round on 2026-10-06 narrowed the sentence to promote and route elsewhere, since it had closed apply-now issues at triage while K007 closes them on the merge. It split the close into a comment and a close, since `gh issue close --help` lists only `-c, --comment string` and no file form, and composed text goes through `--body-file -`. The section's second review round on 2026-10-06 added `-R github.com/sapplefeld/grimoire` to both commands. The finishing performance review on 2026-10-07 added the pacing sentence: a first pass over the migrated inbox makes on the order of 576 writes, and the migration tool needed a 3 s gap and a doubling retry on `submitted too quickly` for 287 creates.
-- passage: Promote and route elsewhere each post where the item landed with `gh issue comment <number> -R github.com/sapplefeld/grimoire --body-file -`, fed the same way, then close the issue with `gh issue close <number> -R github.com/sapplefeld/grimoire --reason completed`. The comment names the plan or memory record. An item that is not real takes the same two steps, its comment giving the reason and its close `--reason "not planned"`. An apply-now issue closes only per step 3. GitHub throttles how fast one account writes, so the pass leaves a few seconds between its comments, labels and closes, and on a `submitted too quickly` reply waits a minute and retries, doubling the wait each time.
+- passage: Promote and route elsewhere each post where the item landed with `gh issue comment <number> -R github.com/sapplefeld/grimoire --body-file -`, fed the same way, then close the issue with `gh issue close <number> -R github.com/sapplefeld/grimoire --reason completed`. An item that is not real takes the same two steps, its comment giving the reason and its close `--reason "not planned"`. An apply-now issue closes only per step 3. GitHub throttles how fast one account writes, so the pass leaves a few seconds between its comments, labels and closes, and on a `submitted too quickly` reply waits a minute and retries, doubling the wait each time.
 
 ### K007
 - key: Close each apply-now issue through a `Closes #<number>` line in the pass's pull request body, and comment on each with the pull request when it opens.
@@ -876,13 +876,13 @@ Extracted at `6bc07fb`: whole document (`skills.kaizen.SKILL.md`). Amended by `d
 - verdict: keep
 - landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 3
 - reason: A pass leaves a note open by never reaching it, and nothing else removes one, so the inbox grows by every note no pass reached. Age is a reading no session judges: an untouched note is one nothing has changed in 30 days, a pass's own triage comment included. A note a pass reaches and leaves open has been judged, and step 3 makes the pass write why. The acts run label, close, comment, so every point a stopped pass leaves is true and owes nothing: after the label, an open labelled note the same pass's triage gathers and the rule lists again once 30 more days pass; after the close, a closed note whose label says why. The comment says "Closed", so it posts only once that is true (the architect's ruling of 2026-11-16 on the plan's branch). The rule runs before the inbox read so the count step 3 reconciles against excludes what it closed. It closes only a collaborator's note and nothing where the collaborator read failed, as K005 holds every disposition to that list. The `parked` label exempts a note held on purpose. The comment says how to bring a note back, and `gh issue reopen` restores it whole, so a wrong close costs one command.
-- passage: - Close the notes untouched for 30 days. List them: `gh issue list -R github.com/sapplefeld/grimoire --label kaizen --state open --limit 1000 --search 'updated:<DATE -label:parked' --json number,author`, `DATE` being the pass's date less 30 days, as `YYYY-MM-DD`. Close each listed issue whose author is on the collaborator list. An outsider's issue is never closed by the rule, and where the collaborator read failed, none is. A close is three acts in order: `gh issue edit <number> -R github.com/sapplefeld/grimoire --add-label aged-out`, then `gh issue close <number> -R github.com/sapplefeld/grimoire --reason "not planned"`, then `gh issue comment <number> -R github.com/sapplefeld/grimoire --body-file -`, whose whole text is `Closed by the 30-day rule: nothing has touched this note in 30 days. Reopen it where the friction is met again, and add that sighting as a comment.` The rule reads no body and judges nothing. `gh issue reopen` undoes a close.
+- passage: - Close the notes untouched for 30 days. List them: `gh issue list -R github.com/sapplefeld/grimoire --label kaizen --state open --limit 1000 --search 'updated:<DATE -label:parked' --json number,author`, `DATE` being the pass's date less 30 days, as `YYYY-MM-DD`. Close each listed issue whose author is on the collaborator list, and none where the collaborator read failed. A close is three acts in order: `gh issue edit <number> -R github.com/sapplefeld/grimoire --add-label aged-out`, then `gh issue close <number> -R github.com/sapplefeld/grimoire --reason "not planned"`, then `gh issue comment <number> -R github.com/sapplefeld/grimoire --body-file -`, whose whole text is `Closed by the 30-day rule: nothing has touched this note in 30 days. Reopen it where the friction is met again, and add that sighting as a comment.` The rule reads no body and judges nothing. `gh issue reopen` undoes a close.
 
 ## plugins/grimoire/skills/kaizen/references/upstream-watch.md
 
 This document is the kaizen skill's reference file for one run of the upstream watch, the check of the beliefs in `docs/harness-assumptions.md` against the Claude Code releases and the vendor pages since the version that inventory records. It owns the run from start to end: who may start one alone, the preparation command and what it writes, the changelog read and the page read with the coverage check of each and where each reader's table is saved, the rule for a row and its marks, the sort, what is filed and the search before filing, where the version line moves and what the pull request's body counts, and what a session does after a run that stopped, a page that is gone or a fetch that still fails. Load class: `named-trigger` - the skill's paragraph after step 3 of Running a Pass names it, and a session reads it when it runs the upstream watch, inside a pass or alone.
 
-Written by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2 on 2026-11-14: whole document (C001 to C028). Its first review round on 2026-11-14 rewrote the file's paragraphs in place, so C001 to C028 carry the text as it now reads, and added C029 to C045 for the claims that round stated or found without an entry. Its second review round on 2026-11-14 rewrote C010, C013 to C016, C023 to C026, C029, C032, C034, C035, C037, C039 and C044 in place, moved the source lines of the entries whose passages that round moved, and added C046 to C050 for the claims it stated. Its finishing review on 2026-11-14 rewrote C005, C007, C020, C021, C023, C024, C028, C031 and C040 in place. Every passage below is read at the finishing review's tree. The plan's Approach states the run and its reasons, and its trial of one reader over one slice is the measurement several reasons below rest on. Amended by `docs/archive/claude-kit_harness-beliefs-match-the-vendor_spec_v1.md` section 9 on 2026-11-15, which gave the watch a reader charter, `plugins/grimoire/agents/watch-reader.md`, in place of the general-purpose type (C013, C027 and C034 rewritten in place and re-quoted at that section's tree; C037 stands, since its sentence names the slice reader's type and no type of its own).
+Written by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2 on 2026-11-14: whole document (C001 to C028). Its first review round on 2026-11-14 rewrote the file's paragraphs in place, so C001 to C028 carry the text as it now reads, and added C029 to C045 for the claims that round stated or found without an entry. Its second review round on 2026-11-14 rewrote C010, C013 to C016, C023 to C026, C029, C032, C034, C035, C037, C039 and C044 in place, moved the source lines of the entries whose passages that round moved, and added C046 to C050 for the claims it stated. Its finishing review on 2026-11-14 rewrote C005, C007, C020, C021, C023, C024, C028, C031 and C040 in place. Every passage below is read at the finishing review's tree. The plan's Approach states the run and its reasons, and its trial of one reader over one slice is the measurement several reasons below rest on. Amended by `docs/archive/claude-kit_harness-beliefs-match-the-vendor_spec_v1.md` section 9 on 2026-11-15, which gave the watch a reader charter, `plugins/grimoire/agents/watch-reader.md`, in place of the general-purpose type (C013, C027 and C034 rewritten in place and re-quoted at that section's tree; C037 stands, since its sentence names the slice reader's type and no type of its own). Amended by `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 4 on 2026-11-16, a regrowth cut from base `bc6f0e57a`: C008, C015, C017, C021, C040, C043 and C047 re-read to their shrunk passages as they now read. No line of the source moved.
 
 ### C001
 - key: Title the reference file that states one run of the upstream watch `Upstream Watch Run`.
@@ -956,7 +956,7 @@ Written by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2
 - provenance: `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` sections 1 and 2, 2026-11-14; section 2's first review round scoped the manifest's counts to slice readers, since the manifest holds a page's bytes and no count a page reader could match.
 - verdict: keep
 - reason: Nothing but a count taken before the read can prove an entry was not skipped, which is why the plan's Intent refuses one reader over the whole range. The manifest counts no part of a page, so a page's coverage count is its section's beliefs (C016).
-- passage: The manifest's entry counts are what a slice reader's coverage is checked against. The manifest holds no count for a page. A page reader's coverage is checked against the inventory instead, one row per belief of the page's section.
+- passage: The manifest's entry counts are what a slice reader's coverage is checked against. A page reader's coverage is checked against the inventory instead, one row per belief of the page's section.
 
 ### C009
 - key: Read the tool's exit as 0 for a whole run, 1 for a manifest with a failed page, and 2 for a refusal, a failed changelog fetch or an error before or after writing began, and on 2 read the line and run the tool again.
@@ -1021,7 +1021,7 @@ Written by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2
 - provenance: `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2, 2026-11-14.
 - verdict: keep
 - reason: A watched page can run to several hundred kilobytes, which no reader holds whole beside the inventory. The quoted passage and its heading are what make a row impossible to write without opening the page. They do not prove the right passage was found, and the plan's Approach calls that unproven.
-- passage: The reader works from the beliefs and never reads the page from end to end. A page can be larger than one read holds. For each belief it searches the page for the belief's subject and reads those passages. It returns one row per belief, naming the belief by its bold lead, marked `holds`, `falsified`, `in doubt` or `not covered by the page`. Every row of the first three marks quotes the passage it rests on and names the page heading the passage sits under. The quote and the heading are required so that no such row can be written without opening the page.
+- passage: The reader works from the beliefs and never reads the page from end to end. For each belief it searches the page for the belief's subject and reads those passages. It returns one row per belief, naming the belief by its bold lead, marked `holds`, `falsified`, `in doubt` or `not covered by the page`. Every row of the first three marks quotes the passage it rests on and names the page heading the passage sits under. The quote and the heading are required so that no such row can be written without opening the page.
 
 ### C016
 - key: Hold a page's section as checked only where its table holds one row for each belief, and send a table missing a row to a new reader.
@@ -1039,7 +1039,7 @@ Written by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2
 - provenance: `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2, 2026-11-14; the trial in that plan's Approach, which returned 23 rows, 22 of them in doubt; section 2's first review round made the truth test govern the verbs.
 - verdict: keep
 - reason: The trial's reader worked to a wider rule and returned rows the sort would have discarded one by one. The rule keys on the belief's truth, since a row is the session's work to settle and an entry that leaves the belief true costs that work for nothing. The verbs alone admit an entry under which the belief is still true: a deprecated behavior that still runs leaves a belief about how it runs true, and contradicts only a belief that it is supported.
-- passage: A reader returns a changelog row only where an entry bears on whether a belief is true. That truth test governs. Such an entry changes, removes, renames or deprecates behavior the belief states, or behavior the belief's own `Falsified by:` observation reads, and the four verbs are instances of the test. An entry that deprecates behavior still in place bears on the belief only where the belief states the behavior is supported. Every other entry earns no row.
+- passage: A reader returns a changelog row only where an entry bears on whether a belief is true. Such an entry changes, removes, renames or deprecates behavior the belief states, or behavior the belief's own `Falsified by:` observation reads, and the four verbs are instances of the test. An entry that deprecates behavior still in place bears on the belief only where the belief states the behavior is supported. Every other entry earns no row.
 
 ### C018
 - key: Return no row for an entry that fixes a fault toward the behavior a belief states, adds a feature the belief does not deny, sits on a surface the belief names without touching its claims, or is too vague to tie to one belief's claim.
@@ -1078,7 +1078,7 @@ Written by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2
 - provenance: `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2, 2026-11-14.
 - verdict: keep
 - reason: A `holds` row agrees with the belief and a `not covered` row rests on a page that says nothing for or against it, so neither carries a question to settle. An issue lands where others read it and draws a pass's work, so it rests on the session's reading of both sides and never on one reader's mark.
-- passage: Rows marked `holds` or `not covered by the page` are counted and not sorted. A `holds` row agrees with the belief as written, and a `not covered` row rests on a page that says nothing for or against it. A reader's row alone files nothing. An issue comes only from a belief the session settled.
+- passage: Rows marked `holds` or `not covered by the page` are counted and not sorted. A `holds` row agrees with the belief as written, and a `not covered` row rests on a page that says nothing for or against it. An issue comes only from a belief the session settled.
 
 ### C022
 - key: File each falsified belief as one ordinary kaizen issue, or as a comment on an open issue that already carries the belief.
@@ -1255,7 +1255,7 @@ Written by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2
 - provenance: `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2, 2026-11-14; its first review round moved the quote limit out of the search sentence and stated why a quote is allowed.
 - verdict: keep
 - reason: The kit keeps copies of the vendor's text out of its repository, which others read (C028). One quoted entry or passage is evidence for one belief and no copy, and the limit keeps an issue others read to the evidence it needs.
-- passage: An issue quotes the one entry or passage it rests on and no more. Such a quote is allowed where a committed copy is not. What stays out of the repository is a copy of the vendor's text, and one entry or passage is no copy.
+- passage: An issue quotes the one entry or passage it rests on and no more. One entry or passage is no copy of the vendor's text, so the quote is allowed.
 
 ### C041
 - key: Give in the pull request's body the manifest's releases, entries and slices, the rows of each mark from each read, the beliefs settled each way, the issues filed by number, and each re-read and re-cut, and the same in the plan's Chapter where a plan makes the run.
@@ -1282,7 +1282,7 @@ Written by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2
 - provenance: `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` sections 1 and 2, 2026-11-14; section 2's first review round gave the sentence its own entry.
 - verdict: keep
 - reason: Each refused input would make a run look whole that is not, or fetch an address the tool does not trust, so the tool stops before a write leaves a partial run folder. The sentence says `include` because the tool's header holds the whole set.
-- passage: The tool refuses before it fetches a page or writes a file. The refusals include an address outside the documentation host, a count of addresses that differs from the count of sections, a through version no newer than the recorded one, and a changelog that holds no release at or below the recorded version.
+- passage: The tool refuses before it fetches a page or writes a file.
 
 ### C044
 - key: Expect the tool to write whole-release slices inside the bound, a page file for each page whose fetch ended `ok`, and a manifest whose keys give each slice's releases with their entry counts and each page's outcome.
@@ -1321,7 +1321,7 @@ Written by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2
 - provenance: `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2, its second review round, 2026-11-14, on the finding that a smaller bound renumbers every slice and that a one-release slice cannot be cut smaller.
 - verdict: keep
 - reason: The tool's `cutSlices` packs whole releases from the first release, so a smaller bound moves the boundary of every slice, and a saved `tables/slice-NN.md` would name releases its new slice no longer holds. The Stopped Run keep test reads tables by name (C026), so a stale table left in `tables/` could pass a slice nobody read, and deleting every one leaves the keep test nothing to misread. A release larger than the bound is a slice alone at any bound (C044), so a re-cut hands its readers the same text, and the session's own count and read is the read left. The body names it so the review sees which release no reader's count vouches for.
-- passage: A smaller bound renumbers every slice, since the tool packs slices from the first release. A re-cut therefore sets aside every slice table saved before it: the session deletes each `tables/slice-*.md` file. Every slice is read again under the new numbering. A slice holding one release is not cut again, since no bound makes it smaller. Where both its readers' counts differ, the session counts that release's entries itself, reads the release itself, and names it in the pull request's body.
+- passage: A smaller bound renumbers every slice, so after a re-cut the session deletes each `tables/slice-*.md` file and reads every slice again under the new numbering. A slice holding one release is not cut again, since no bound makes it smaller. Where both its readers' counts differ, the session counts that release's entries itself, reads the release itself, and names it in the pull request's body.
 
 ### C048
 - key: End a run whose failed fetch still stands with its pull request, giving the counts and the issues filed and leaving the version line where it was, and cover the same range in the next run once a pass corrects the `Pages watched:` line, taking up the saved tables on the same checkout.
@@ -1355,7 +1355,7 @@ Written by `docs/plans/claude-kit_upstream-watch-caught-up_spec_v1.md` section 2
 
 This document is the kaizen skill's reference file for the regrowth cut, the cut of the kit's instruction text that repeats and reads only what grew since each entry was last cut. It owns the run from start to end: when a cut is due, who starts one, what a run reads and how many entries it takes, the run's plan and the fixed text of each of its sections, the write of the state file, what a stopped run leaves, and the cost a run records. Load class: `named-trigger` - the skill's paragraph after step 3 of Running a Pass names it, and a seat reads it when it checks whether a cut is due or writes a run's plan.
 
-Written by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 on 2026-11-16: whole document, under the plan's letter BZ (BZ001 to BZ014). Every passage below is read at that section's tree.
+Written by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 on 2026-11-16: whole document, under the plan's letter BZ (BZ001 to BZ014). Every passage below is read at that section's tree. Amended by `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 on 2026-11-16, which added four paragraphs carrying a run's terms and changed no existing line: BZ015 to BZ029 added for them, and the `source:` lines of BZ008 to BZ014 re-pointed to the lines their passages moved to.
 
 ### BZ001
 - key: Title the reference file that states the regrowth cut `Regrowth Cut Run`.
@@ -1430,7 +1430,7 @@ Written by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 
 ### BZ008
 - key: Dispatch the `corpus-drafter` once per grown corpus file of the entry, by the Agent tool, one at a time, on opus at effort medium, naming the file, its ledger heading and the base, and no word target.
 - class: rule
-- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:27
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:29
 - provenance: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 2026-11-16; `tools/corpus-compression/README.md` records the operator naming `opus-medium` the drafter.
 - verdict: keep
 - landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
@@ -1440,7 +1440,7 @@ Written by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 
 ### BZ009
 - key: Have one `grimoire:prose-reviewer` and one `grimoire:blind-reader` read the entry's diff at dispatch table row "Round 1 pair", the row over an opus writer, which the drafter is, once its files have landed.
 - class: rule
-- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:27
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:29
 - provenance: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 2026-11-16; the two whole-corpus cuts reviewed each document with the same pair, as the review wave in `tools/corpus-compression/README.md` shows.
 - verdict: keep
 - landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
@@ -1450,7 +1450,7 @@ Written by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 
 ### BZ010
 - key: Keep or shrink, and never drop, a passage whose reason names a failure a record shows.
 - class: rule
-- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:27
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:29
 - provenance: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 2026-11-16.
 - verdict: keep
 - landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
@@ -1460,8 +1460,8 @@ Written by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 
 ### BZ011
 - key: Pass a section where the entry's word count fell, or where the Chapter lists each passage added since the base with its call and why it stayed, and move the caps down by `kit-size.js sync`, with no step using the Workflow tool or running `workflow.mjs`.
 - class: rule
-- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:27
 - source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:29
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:33
 - provenance: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 2026-11-16.
 - verdict: keep
 - landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
@@ -1472,7 +1472,7 @@ Written by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 
 ### BZ012
 - key: Rewrite the state file whole in a run's last section, giving each entry whose section closed the plan-branch commit that added that section's Chapter, leaving every other base, and setting `date` to the day of the write.
 - class: mechanic
-- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:33
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:37
 - provenance: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 2026-11-16, its State File text as the architect's ruling in record DEV-GRIMOIRE-2-c049e7e0-0b70-47ae-92f6-b21abc0a4f40-16 rewrote it in the section's review fix round.
 - verdict: keep
 - landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
@@ -1482,7 +1482,7 @@ Written by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 
 ### BZ013
 - key: Read a stopped run from its plan and Chapters; the state file moves on the trunk only when the run's pull request merges.
 - class: rule
-- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:37
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:43
 - provenance: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 2026-11-16.
 - verdict: keep
 - landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
@@ -1492,9 +1492,164 @@ Written by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 
 ### BZ014
 - key: Record the dispatched agents' tokens in a run's final Chapter.
 - class: rule
-- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:41
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:47
 - provenance: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 2026-11-16; that plan's After the Merge paragraph names the monthly clock the architect seat asks the coordinator for.
 - verdict: keep
 - landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
 - reason: No regrowth cut has run, so its cost is unmeasured, and the doctrine names an unmeasured figure rather than estimating it. The first run's Chapter gives the measured cost a clock is weighed against.
 - passage: The run's final Chapter records the dispatched agents' tokens, so a run, and any clock that starts one, is priced from a measured run.
+
+### BZ015
+- key: Read a file's rationale-ledger heading as the `## ` line carrying the file's path in the entry's `references/rationale-ledger.md`.
+- class: mechanic
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:31
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: The drafter's prompt names a heading, and a ledger reuses ids such as C001 under each heading, so the prompt names the line that scopes the ids the drafter reads and quotes.
+- passage: A file's rationale-ledger heading is the `## ` line that carries the file's path in the entry's `references/rationale-ledger.md`.
+
+### BZ016
+- key: Treat a passage whose rule the base already held under `plugins/grimoire/skills/`, in any wording, in the entry or in the file it moved from, as no added passage, returned word for word, and say so in the drafter's prompt.
+- class: rule
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:31
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: The reviews of that plan found that the fixed text, followed to the letter, reads a passage moved into a new reference file as added, since `git diff <base>` shows the new file wholly added; the run's executing-work, test-gates and role sections each drafted a file whose rules the base held in another file.
+- passage: A passage whose rule the base commit `<base>` already held under `plugins/grimoire/skills/`, in any wording, in this entry or in the file it was moved from, is not an added passage.
+- passage: The drafter's prompt says so, and such a passage returns word for word.
+
+### BZ017
+- key: Pass model opus and effort medium on the drafter's Agent tool call, since its charter, which states the four calls, the return and the reason check, sets effort low.
+- class: mechanic
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:31
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: `plugins/grimoire/agents/corpus-drafter.md` sets `effort: low` in its frontmatter, and the Agent tool runs a charter's own effort unless the call passes one, so the call carries the pair BZ008 names.
+- passage: `plugins/grimoire/agents/corpus-drafter.md` states the four calls, what the drafter returns, and how it judges a ledger entry's reason against the record that reason names.
+- passage: The Agent tool call passes model opus and effort medium, since that charter's own effort is low.
+
+### BZ018
+- key: Run the build check before a session's first drafter dispatch, and record its count in the Chapter of the section being run.
+- class: rule
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:31
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: The Agent tool runs the installed kit's charter, never the checkout's, and a build cut before 2026-11-15 holds a drafter with no regrowth mode, which redrafts a whole file against a word target; that plan's section 1 states the check and its Chapters record the count.
+- passage: A session that dispatches a drafter first runs the build check this plan's first section states, and the Chapter of the section it is running records the count that check printed.
+
+### BZ019
+- key: Keep or shrink, never drop, a passage a test quotes or another file points at by its opening words, and search `plugins/`, `home/`, `test/` and `docs/` outside `docs/archive` for those words before landing a shrink or a drop.
+- class: rule
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:31
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: A dropped passage a test quotes reds the lane, and one another file points at leaves that pointer naming nothing; the search finds both before the cut lands, and the test follows a shrink's new wording.
+- passage: A passage a test quotes is kept or shrunk, never dropped, and the test follows the new wording.
+- passage: Before it lands a shrink or a drop, the main thread searches `plugins/`, `home/`, `test/` and `docs/` outside `docs/archive` for the passage's opening words.
+- passage: A passage the search finds pointed at is kept or shrunk with its opening words whole, never dropped.
+
+### BZ020
+- key: Renumber no step and remove or rename no heading in a cut.
+- class: rule
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:31
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: Other files point at a step by its number and at a section by its heading, so a renumber or rename breaks a pointer the run does not read.
+- passage: No cut renumbers a step or removes or renames a heading, since other files point at both.
+
+### BZ021
+- key: Restore a passage a reviewer finds lost a kept rule's meaning to its text at the section's open, with no second read.
+- class: rule
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:31
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: The restored text is the text at the section's open, so a second read would read nothing the run wrote.
+- passage: Where a reviewer finds that a kept rule lost its meaning, the main thread restores the passage as it read at the section's open, and no second read follows a restore.
+
+### BZ022
+- key: Record the entry's word count at the section's open from `regrowth.mjs` before the first dispatch, name each dropped passage, and name `corpus-cap` in the sync.
+- class: mechanic
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:31
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: The reviews of that plan found that the fixed text, followed to the letter, leaves the whole-text cap where it stands, since `kit-size.js sync` moves only the keys it names; the open count is what the section's pass condition compares against.
+- passage: The Chapter records the entry's word count at the section's open, read from `node tools/corpus-compression/regrowth.mjs` before the first dispatch, and names each dropped passage by its opening words.
+- passage: The sync is `node plugins/grimoire/scripts/kit-size.js sync --repo . <each file the section changed> corpus-cap`, since a sync that does not name `corpus-cap` leaves that key where it stands.
+
+### BZ023
+- key: State the drafter build check in the run's first section.
+- class: rule
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:25
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: The Agent tool runs the installed charter, so a plan whose first section does not check the build can dispatch a drafter with no regrowth mode (BZ018).
+- passage: The plan's first section states a build check: the worker's installed `corpus-drafter` charter holds its regrowth paragraph, since the Agent tool runs the installed charter.
+
+### BZ024
+- key: Name in each section's Files in scope the files that grew, read from the caps in `test/size-budget.json` at the entry's base and in the tree.
+- class: mechanic
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:25
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: The caps at the base and in the tree give each file's growth without a word count of the base, so the author reads the scope from two files.
+- passage: Each section's Files in scope names the files that grew, read from the caps in `test/size-budget.json` at the entry's base and in the tree.
+
+### BZ025
+- key: Never draft this file in a run; it changes only by a section written for it.
+- class: rule
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:25
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: A run that cut its own procedure would change the text the next run copies with no review of that text as procedure, so it changes as that plan's section 9 changed it.
+- passage: A run never drafts this file, which changes only by a section written for it.
+
+### BZ026
+- key: Name in a section each passage of its entry that states one of the operator's grants, and have the drafter return it word for word.
+- class: rule
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:25
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: A grant's text changes by a plan the operator reads for that purpose, never as a side effect of a cut; that plan's sections 6 and 8 named the operating-instructions and role skills' grant passages and checked each, by grep and by a diff of the grant sections.
+- passage: A section whose entry holds a passage that states one of the operator's grants names that passage, and the drafter returns it word for word.
+
+### BZ027
+- key: Hold each named entry's summed caps at its new base equal to its summed caps in the tree's budget, or name in the final Chapter the commit that moved them.
+- class: rule
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:39
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: The next run reads growth from the caps at the base (BZ024), so a base whose caps differ from the tree's at the write would read a change no run cut as growth, or hide one.
+- passage: For each entry the last section names, the entry's summed caps in the budget at its new base equal its summed caps in the tree's budget, or the final Chapter names the commit that moved them.
+
+### BZ028
+- key: Move no base for a commit that changed an entry after its section's Chapter.
+- class: rule
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:39
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: The base is the commit that added the section's Chapter (BZ012), so a later change to the entry sits after the base, and the next run's diff from that base reads it as added.
+- passage: A commit that changed the entry after its section's Chapter moves no base, so the next run reads what that commit added.
+
+### BZ029
+- key: Sum the token counts the dispatches' completion notices carry in the Chapter, beside the count of drafter and reviewer dispatches.
+- class: mechanic
+- source: plugins/grimoire/skills/kaizen/references/regrowth-cut.md:49
+- provenance: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9 2026-11-16, carrying the terms sections 1 to 8 of that plan ran under.
+- verdict: keep
+- landed: `docs/plans/claude-kit_regrowth-cut-2026-11_spec_v1.md` section 9
+- reason: Each completion notice reports its agent's tokens, which is the measured figure BZ014 asks for; the count beside the sum lets a reader price a run per dispatch.
+- passage: Each dispatch's completion notice carries its token count, and the Chapter sums them beside the count of drafter and reviewer dispatches.

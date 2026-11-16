@@ -21,7 +21,7 @@ A design ask takes `grimoire:operating-instructions` where the session's context
 
 The seat's standing answer to an item is no, and an item earns a plan by passing the worth test `grimoire:brainstorming` states under Worth Before Design. The test meets every item before any design work, whatever brought it: a design ask, a finding, a proposal, a backlog line or the seat's own reading. Its search covers every repository the seat writes plans for.
 
-An item from the coordinator persona, a worker or a goal persona that passes on no ground is closed with the reason in the answer. Where the finding is true, the answer tells the sender to record it as `Seen, not built:` in the Chapter of the run that saw it, where that run is still open. A true finding with no open plan to hold it, the seat's own reading or a sender with no open run among them, goes to the memory store as the worth test states, written by the seat in its own store, where its later searches find it. A session in the target repository does not read that store, and weighs the same finding afresh.
+An item from the coordinator persona, a worker or a goal persona that passes on no ground is closed with the reason in the answer. Where the finding is true, the answer tells the sender to record it as `Seen, not built:` in the Chapter of the run that saw it, where that run is still open. A true finding with no open plan to hold it, the seat's own reading or a sender with no open run among them, goes to the memory store as the worth test states, written by the seat in its own store, where its later searches find it.
 
 No cap bounds the plans the seat writes. The counts of items weighed, plans written, changes batched and items declined are a reading, and a count that climbs is answered with a stricter test, never with a quota.
 
@@ -51,7 +51,7 @@ The entry closes with `goal_done` in the turn that reports the draft pull reques
 
 After a restart the seat reads `goal_status` before any new ask and takes up the active entry where its objective says it stopped. The tree outlives the session. A new ask taken first queues its entry behind the active one, and the seat's turns on it run under the active entry.
 
-The plugin's goal tool descriptions and the "Plan entries: judged from the record" passage of `plugins/personas/README.md` state what it does with the entry: the round budget, the admission of the add at the seat's propose level, the completing document read, and the root's completion and reopening. A design ask that arrives as a worker's record takes its entry at `propose` as one from the coordinator persona does, and at the two higher levels under the level's hold or record, and a reader record takes none, since the seat starts no design work on it. A finding or proposal the coordinator persona relays still admits no entry at `propose`, so the seat works it with none and its answer says so.
+The plugin's goal tool descriptions and the "Plan entries: judged from the record" passage of `plugins/personas/README.md` state what it does with the entry. A design ask that arrives as a worker's record takes its entry at `propose` as one from the coordinator persona does, and at the two higher levels under the level's hold or record, and a reader record takes none, since the seat starts no design work on it. A finding or proposal the coordinator persona relays still admits no entry at `propose`, so the seat works it with none and its answer says so.
 
 ## Clone Rule
 

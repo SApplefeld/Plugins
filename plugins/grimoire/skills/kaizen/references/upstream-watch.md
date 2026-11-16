@@ -29,7 +29,7 @@ The tool decides nothing. It reads the recorded version, the page addresses and 
 
 A release is its `## <version>` heading through the line before the next `## ` heading. An entry is a line of a release that opens `- ` at column 0, the lines `grep -c "^- "` counts. An indented line is no entry.
 
-The manifest's entry counts are what a slice reader's coverage is checked against. The manifest holds no count for a page. A page reader's coverage is checked against the inventory instead, one row per belief of the page's section.
+The manifest's entry counts are what a slice reader's coverage is checked against. A page reader's coverage is checked against the inventory instead, one row per belief of the page's section.
 
 | Exit | What it means | What to do |
 |---|---|---|
@@ -37,7 +37,7 @@ The manifest's entry counts are what a slice reader's coverage is checked agains
 | 1 | The manifest is written with one or more pages marked `failed`. | Read each failed page's `status` or `error`, as below. |
 | 2 | The tool refused, the changelog fetch failed, or an error stopped it, before or after writing began. Its line on stderr names the reason. | Read the line, correct what it names, and run the tool again. |
 
-The tool refuses before it fetches a page or writes a file. The refusals include an address outside the documentation host, a count of addresses that differs from the count of sections, a through version no newer than the recorded one, and a changelog that holds no release at or below the recorded version.
+The tool refuses before it fetches a page or writes a file.
 
 A failed page whose `status` is 404 or 410 is gone. File one kaizen issue for that page, naming the page's address and saying the `Pages watched:` line names a page that no longer answers. The session writes that page's table itself, with the row `not covered by the page` for each belief of its section. The run goes on.
 
@@ -55,7 +55,7 @@ A reader writes nothing. Its type holds no tool that writes, runs or fetches. It
 
 A slice was read whole where each release's count equals the manifest's `entries` for that release. A slice whose counts differ goes to a new reader, whose table replaces the first under the same name. A slice whose new reader's counts also differ is cut again: the session runs the tool again with a smaller `--bound` and names the re-cut in the pull request's body.
 
-A smaller bound renumbers every slice, since the tool packs slices from the first release. A re-cut therefore sets aside every slice table saved before it: the session deletes each `tables/slice-*.md` file. Every slice is read again under the new numbering. A slice holding one release is not cut again, since no bound makes it smaller. Where both its readers' counts differ, the session counts that release's entries itself, reads the release itself, and names it in the pull request's body.
+A smaller bound renumbers every slice, so after a re-cut the session deletes each `tables/slice-*.md` file and reads every slice again under the new numbering. A slice holding one release is not cut again, since no bound makes it smaller. Where both its readers' counts differ, the session counts that release's entries itself, reads the release itself, and names it in the pull request's body.
 
 A slice whose table holds no row goes to a second reader. Nothing else tells a quiet slice from a careless read. The second reader's return is saved as `tables/slice-NN-second.md`, and both tables go to the sort. Where both hold no row, the slice is quiet, and the pull request's body records it.
 
@@ -63,13 +63,13 @@ A slice whose table holds no row goes to a second reader. Nothing else tells a q
 
 Dispatch one fresh reader per page whose fetch ended `ok`, of the same type on Opus. It is told the same as a slice reader: it writes nothing, it returns its table in its final message, and it hears nothing of what the run expects. Give it the page's file, the inventory section the manifest's `section` pairs it with, the definition of a belief and its bold lead under Changelog Read, the rules for a page row in the next paragraph, the Row Marks and the Vendor Text rule. The session saves its return as `tables/page-NN-<name>.md`, NN being the page's `index` in two digits and name its address's last segment. A gone page's table takes the same name.
 
-The reader works from the beliefs and never reads the page from end to end. A page can be larger than one read holds. For each belief it searches the page for the belief's subject and reads those passages. It returns one row per belief, naming the belief by its bold lead, marked `holds`, `falsified`, `in doubt` or `not covered by the page`. Every row of the first three marks quotes the passage it rests on and names the page heading the passage sits under. The quote and the heading are required so that no such row can be written without opening the page.
+The reader works from the beliefs and never reads the page from end to end. For each belief it searches the page for the belief's subject and reads those passages. It returns one row per belief, naming the belief by its bold lead, marked `holds`, `falsified`, `in doubt` or `not covered by the page`. Every row of the first three marks quotes the passage it rests on and names the page heading the passage sits under. The quote and the heading are required so that no such row can be written without opening the page.
 
 Every belief of a section was checked where the table holds one row for each. A page table missing a row goes to a new reader. So does a table holding a row marked `holds`, `falsified` or `in doubt` that lacks its quoted passage or its heading. The new reader's table replaces the first under the same name.
 
 ## Row Rule
 
-A reader returns a changelog row only where an entry bears on whether a belief is true. That truth test governs. Such an entry changes, removes, renames or deprecates behavior the belief states, or behavior the belief's own `Falsified by:` observation reads, and the four verbs are instances of the test. An entry that deprecates behavior still in place bears on the belief only where the belief states the behavior is supported. Every other entry earns no row.
+A reader returns a changelog row only where an entry bears on whether a belief is true. Such an entry changes, removes, renames or deprecates behavior the belief states, or behavior the belief's own `Falsified by:` observation reads, and the four verbs are instances of the test. An entry that deprecates behavior still in place bears on the belief only where the belief states the behavior is supported. Every other entry earns no row.
 
 Three kinds of entry look close and earn no row:
 
@@ -89,7 +89,7 @@ A page row is marked `holds` where the page's words state the belief's claim as 
 
 The session running the watch sorts the rows itself. It reads every row marked `falsified` or `in doubt`, from either read, against the `Source:` its belief's inventory entry names and against the vendor's words. It settles each belief they name as falsified, holding or unsettled, one verdict per belief. A belief is unsettled where neither side settles it.
 
-Rows marked `holds` or `not covered by the page` are counted and not sorted. A `holds` row agrees with the belief as written, and a `not covered` row rests on a page that says nothing for or against it. A reader's row alone files nothing. An issue comes only from a belief the session settled.
+Rows marked `holds` or `not covered by the page` are counted and not sorted. A `holds` row agrees with the belief as written, and a `not covered` row rests on a page that says nothing for or against it. An issue comes only from a belief the session settled.
 
 ## Issues Filed
 
@@ -103,7 +103,7 @@ Before filing any issue, search the open kaizen issues with `gh issue list -R gi
 
 Where an open issue matches, comment on it and file nothing new. An open issue that already quotes the same entry or passage takes no new comment. Because every issue carries its own search text, a second run files nothing twice, and a later run over another range adds to the open issue.
 
-An issue quotes the one entry or passage it rests on and no more. Such a quote is allowed where a committed copy is not. What stays out of the repository is a copy of the vendor's text, and one entry or passage is no copy.
+An issue quotes the one entry or passage it rests on and no more. One entry or passage is no copy of the vendor's text, so the quote is allowed.
 
 ## Version Line
 
