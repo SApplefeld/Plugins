@@ -12,7 +12,7 @@
 // The read-only judgment seats, matched by suffix so a plugin-namespaced id
 // ("grimoire:blind-reviewer") resolves, and anchored at the end so a longer
 // name that merely contains one ("blind-reviewer-helper") does not.
-export const STRICT_SEAT = /(^|[:/])(?:adversarial-reviewer|blind-reviewer|security-reviewer|performance-reviewer|council-member|design-facilitator|consultant|blind-reader|prose-reviewer|plan-reviewer|altitude-interviewer|corpus-drafter|scope-adjudicator|finding-verifier)$/i;
+export const STRICT_SEAT = /(^|[:/])(?:adversarial-reviewer|blind-reviewer|security-reviewer|performance-reviewer|council-member|design-facilitator|consultant|blind-reader|prose-reviewer|plan-reviewer|altitude-interviewer|corpus-drafter|scope-adjudicator|finding-verifier|watch-reader)$/i;
 
 // The QA verifier, which builds and runs the suites, matched as the seats are.
 export const GATE_SEAT = /(^|[:/])qa-verifier$/i;

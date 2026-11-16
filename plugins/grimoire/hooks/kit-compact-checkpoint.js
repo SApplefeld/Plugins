@@ -154,11 +154,12 @@ function usage() {
 }
 
 // The calling session's own id, from the environment the harness sets for a
-// session's tool shell, or null when nothing usable is there. The variable is
-// an undocumented harness detail that can change or vanish upstream. A
-// dispatched subagent's shell carries the dispatching session's id rather than
-// one of its own, so a subagent running a scoped verb acts as the seat that
-// dispatched it, which is the granularity the file header states this guard has.
+// session's tool shell, or null when nothing usable is there. The harness's
+// environment variables page documents the variable for a session's tool
+// shells. A dispatched subagent's shell carries the dispatching session's id
+// rather than one of its own, so a subagent running a scoped verb acts as the
+// seat that dispatched it, which is the granularity the file header states this
+// guard has.
 // The refusal at the call sites is the designed degradation for the variable
 // vanishing: where no id is derivable, this CLI refuses to write a scoped marker
 // rather than writing an unscoped one.

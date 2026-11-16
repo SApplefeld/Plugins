@@ -885,7 +885,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - provenance: 10518d6 2026-08-31, the window defined from what a payload update does to running sessions.
 - verdict: rewrite
 - landed: fe0f812 section 23
-- reason: The definition stays because nothing else says what a window is (A130); the derivation moves here: the harness resolves the plugin root once per session and a resumed session keeps the view it started with, so an update cannot reach a running session and every session on the stale cache has to die.
+- reason: The definition stays because nothing else says what a window is (A130); the derivation moves here: a running session keeps the plugin root it resolved at its start until an in-session reload or a restart replaces it, as `docs/harness-assumptions.md` states, so an update reaches a running session only through one of those, and the window waits for every session on the stale cache to be killed.
 - proposed: Keep one sentence defining the window; drop the plugin-root derivation.
 - baseline-test: yes
 - passage: A window is the interval in which the machine's sessions stop at safe boundaries and wait to be killed, since updating the installed kit payload kills every session running from the stale cache.

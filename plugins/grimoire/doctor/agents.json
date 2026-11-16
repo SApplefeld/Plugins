@@ -19,5 +19,6 @@
   "prose-reviewer",
   "qa-verifier",
   "scope-adjudicator",
-  "security-reviewer"
+  "security-reviewer",
+  "watch-reader"
 ]
