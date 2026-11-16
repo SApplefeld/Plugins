@@ -288,8 +288,10 @@ task, and before any copy, so a refused run reads and writes nothing. -Remove ne
 it skips the first. $IsElevated is a parameter so a caller can drive the guard. With -LauncherRoot
 the launcher and the shared functions file are copied into the root before the task is written, so
 no task names a launcher that is not there yet; the shared file goes first, so a launcher never
-lands without the file it reads, and each copy overwrites an older one, which is how a
-re-registration from a newer plugin version updates them. Registration passes -Force, which
+lands without the file it reads, and each copy overwrites an older one, so a re-registration from a
+newer plugin version is one of two ways the copies are updated. The other is the fleet supervisor,
+which replaces each copy that differs from its own build's once it has run a minute, where the root
+is the one the AgentFleet task's launchers run from. Registration passes -Force, which
 replaces a task of the same name in place, so a second run updates the first. Every scheduler call
 carries -TaskPath '\' explicitly, since Get-ScheduledTask with no path searches every folder.
 #>

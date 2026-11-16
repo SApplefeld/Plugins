@@ -1,13 +1,21 @@
-# The installed-plugin pieces the three launchers and both registration scripts share. Each of the
-# five dot-sources this file from its own folder:
+# The installed-plugin pieces the three launchers, the fleet supervisor and both registration
+# scripts share. Each of the six dot-sources this file from its own folder:
 #
 #   . "$PSScriptRoot\installed-plugin-functions.ps1"
 #
 # bin/Register-PersonaTasks.ps1 and bin/Register-OrphanSweepTask.ps1 read it from the plugin's bin
 # folder, and with -LauncherRoot each copies it into the launcher root beside its launchers, where
 # bin/Start-InstalledFleet.ps1, bin/Start-InstalledPersona.ps1 and bin/Start-InstalledOrphanSweep.ps1
-# read it at every start. It is written to Windows PowerShell 5.1, since every task action runs the
-# System32 powershell.exe. It defines variables and functions and runs nothing else.
+# read it at every start. bin/Start-Fleet.ps1 reads the copy in its own snapshot's bin folder, and
+# only where the fleet launcher gave it the four values that turn its new-build check on. Once it
+# has run a minute, the fleet supervisor also replaces the launcher root's copy where its bytes
+# differ from its own build's. The running fleet launcher reads the record through the copy it
+# loaded at the task's start, and the fleet supervisor reads it through its own build's copy, so a
+# change to which record or version Get-InstalledPluginRecord returns can meet the launcher's
+# NO-MOVE rule on its first move: where the launcher's copy still names the version the fleet
+# supervisor was given, the launcher holds the running build until the task's next start.
+# The file is written to Windows PowerShell 5.1, since every task
+# action runs the System32 powershell.exe. It defines variables and functions and runs nothing else.
 
 # The folders a plugin update replaces, written once: a plugins\marketplaces or plugins\cache
 # segment pair under either separator, matched in a path that carries a segment after it, so a
@@ -42,7 +50,9 @@ first record otherwise. The version becomes a folder name under
 the launchers' runtime root, so it must start with a letter, digit, underscore or hyphen,
 hold only those and dots after that, and not end in a dot, which Windows drops from a folder name. A
 reserved device name (CON, PRN, AUX, NUL, COM1 to COM9, LPT1 to LPT9), with or without an extension,
-is refused too. Every refusal is a throw, which each launcher catches, logs and exits 1 on.
+is refused too. Every refusal is a throw. The persona and orphan sweep launchers catch it, log it
+and exit 1, and so does the fleet launcher on its first pass; on a later pass the fleet launcher
+falls back to the version that ran before, and the fleet supervisor logs it and keeps running.
 #>
 function Get-InstalledPluginRecord {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Id)

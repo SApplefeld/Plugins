@@ -5,13 +5,16 @@
 #
 #   powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File <LauncherRoot>\Start-InstalledPersona.ps1 -Name <n> [-Roster <path>] [-EnvFile <path>]
 #
-# Registration copies this file into the launcher root, a folder outside the plugin folder, the
-# marketplace and the plugin cache, so the path the fleet supervisor starts is one no plugin update
-# moves. It copies bin/installed-plugin-functions.ps1 beside it, which this script dot-sources for
-# the record lookup and the snapshot. At each start the script reads the
-# installed plugin's record from installed_plugins.json, copies that version's plugin folder into
-# <LauncherRoot>\runtime\<version> unless the snapshot is already there, and runs the snapshot's
-# bin\Start-Persona.ps1 with -Name, -Roster and -EnvFile, exiting with its exit code.
+# Registration first copies this file into the launcher root, a folder outside the plugin folder,
+# the marketplace and the plugin cache, so the path the fleet supervisor starts is one no plugin
+# update moves. It copies bin/installed-plugin-functions.ps1 beside it, which this script
+# dot-sources for the record lookup and the snapshot. A fleet supervisor running from a snapshot
+# under this folder keeps both copies current: once in each run, after its first minute, it
+# replaces each one whose bytes differ from its own build's (bin/Start-Fleet.ps1), and each keeper
+# start after that runs the replaced file. At each start the
+# script reads the installed plugin's record from installed_plugins.json, copies that version's
+# plugin folder into <LauncherRoot>\runtime\<version> unless the snapshot is already there, and runs
+# the snapshot's bin\Start-Persona.ps1 with -Name, -Roster and -EnvFile, exiting with its exit code.
 #
 # The keeper runs from the snapshot rather than from the cache folder for two reasons. The cache
 # folder is named for one version, so a keeper started from it keeps that version after an update.
@@ -21,12 +24,15 @@
 # keeper's command line names the version, and a keeper never adopts a supervisor of another one
 # (Open-KeeperLiveSupervisor in bin/Start-Persona.ps1 matches on the full command line).
 #
-# A new plugin version reaches a persona at its keeper's next start, a reboot included, and never
-# mid-run: the keeper's relaunch loop keeps the supervisor path it started with. Where the keeper
-# restarts while an older version's supervisor is still alive, the new supervisor waits at its
-# pre-launch gate, exits 2 on GATE TIMEOUT, and the keeper relaunches it after the base delay
-# (keeper-functions.ps1, the exit-2 row) until the old supervisor has ended. Stop the old one the
-# way the README's stop procedure says to move the persona over at once.
+# A new plugin version reaches a persona at its keeper's next start. A reboot brings one, and so
+# does every requested restart: the keeper ends on it and the fleet supervisor starts the persona
+# again through this script (bin/Start-Persona.ps1 says when the keeper launches the supervisor
+# again itself instead). A supervisor the keeper launches again after a fault keeps the path the
+# keeper started with. Where the keeper restarts while an older version's supervisor is still
+# alive, the new supervisor waits at its pre-launch gate, exits 2 on GATE TIMEOUT, and the keeper
+# relaunches it after the base delay (keeper-functions.ps1, the exit-2 row) until the old
+# supervisor has ended. Stop the old one the way the README's stop procedure says to move the
+# persona over at once.
 #
 # The fleet supervisor starts up to five keepers in one tick, and bin/Start-InstalledFleet.ps1
 # takes its own snapshot under the same runtime root, so several launchers can build one snapshot at
@@ -61,22 +67,40 @@ param(
 
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:LogPath = Join-Path $PSScriptRoot 'launcher.log'
+# Write-LauncherLog tries one append this many times, with this wait between two tries, so the
+# waits together come to 1.9 seconds.
+$script:LogAppendTries = 20
+$script:LogAppendWaitMs = 100
 
 <#
 .SYNOPSIS
 Appends one timestamped line to launcher.log as UTF-8 without a byte-order mark.
 
 .DESCRIPTION
-A failed append goes to stderr, the only other channel the launcher has. The log is not rotated: it
-takes one line per keeper start, so it grows by a few lines per boot.
+An append that throws is tried again after $script:LogAppendWaitMs, up to $script:LogAppendTries
+tries, and only a line still unwritten after the last try goes to stderr, the only other channel the
+launcher has. The fleet supervisor starts several keepers in one tick and each one's launcher appends
+to this one file, so one launcher can find it held by another for the length of that one's append.
+A try that finds the file held throws before it writes, so a retry after it never writes a line
+twice. A line keeps the time of its first try, so a line that lands on a later try can sit below
+another launcher's later line. An error that does not clear, such as a launcher root this account
+cannot write, spends the whole bound before its stderr line. A failed append never stops the start.
+The log is not rotated: it takes one line per keeper start, so it grows by a few lines per boot and one per requested restart.
 #>
 function Write-LauncherLog {
     param([Parameter(Mandatory)][string]$Text)
     $stamp = [DateTime]::UtcNow.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
-    try {
-        [System.IO.File]::AppendAllText($script:LogPath, "$stamp $Text" + [Environment]::NewLine, $script:Utf8NoBom)
-    } catch {
-        [Console]::Error.WriteLine("Start-InstalledPersona: could not append to '$script:LogPath': $($_.Exception.Message)")
+    for ($try = 1; ; $try++) {
+        try {
+            [System.IO.File]::AppendAllText($script:LogPath, "$stamp $Text" + [Environment]::NewLine, $script:Utf8NoBom)
+            return
+        } catch {
+            if ($try -ge $script:LogAppendTries) {
+                [Console]::Error.WriteLine("Start-InstalledPersona: could not append to '$script:LogPath': $($_.Exception.Message)")
+                return
+            }
+            Start-Sleep -Milliseconds $script:LogAppendWaitMs
+        }
     }
 }
 

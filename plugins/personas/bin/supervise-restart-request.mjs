@@ -1,7 +1,7 @@
-// bin/supervise-restart-request.mjs - When was this persona's child last asked to restart.
+// bin/supervise-restart-request.mjs - When was this persona last asked to restart.
 //
 // The coordinator persona's fleet_restart tool (hooks/index.ts) asks for a
-// restart of another persona's child by writing one file into that persona's
+// restart of another persona by writing one file into that persona's
 // run directory, restart.request, holding one JSON object { at, by, reason }
 // with at in epoch milliseconds. The request is a file rather than a
 // restart_requested decision because the persona's store has one writer, the

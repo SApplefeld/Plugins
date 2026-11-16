@@ -82,8 +82,50 @@
 # outlived with no request beside it, by its adoption.
 #
 # A roster that cannot be read, or reads as not an array, is one ERROR line and leaves every live
-# keeper alone until the next tick. The script itself exits only under -Once, the test seam that
-# runs one tick; a scheduled task runs it without that switch and it ticks until stopped.
+# keeper alone until the next tick. -Once is the test seam that runs one tick and exits. A scheduled
+# task runs the script without that switch, and it then ticks until it is stopped or reaches one of
+# two ends of its own. The first is exit 7 for a new build. Where the installed route's launcher,
+# Start-InstalledFleet.ps1, gave all four of -PluginList, -PluginId, -RunningVersion and
+# -RuntimeRoot, the script reads the plugin's record from the list after every tick, under -Once as
+# well. Where the record names a version other than -RunningVersion and its install folder holds
+# every file $InstalledPluginRequiredFiles names (bin/installed-plugin-functions.ps1), the script
+# takes that version's snapshot under -RuntimeRoot, writes one HANDOFF line to fleet.log naming
+# both versions and the snapshot, and exits 7, which the launcher reads as the word to start the
+# new build's fleet supervisor. No keeper is touched. A record that does not read, and an install
+# folder missing a required file, leave the script running and are read again after the next tick.
+# A snapshot that fails leaves it running too, and that version is not tried again by this process.
+# Each cause is one ERROR line: once for a version, and for a record that does not read, once until
+# a read next succeeds. With any of the four values empty the list is never read. The second end
+# is exit 0 where the launcher is gone. The process that started the script is read off the first
+# process list a tick reads that holds the script's own process. Where that process runs
+# Start-InstalledFleet.ps1, and a later list that holds the script's own process no longer holds
+# it, the script writes one LAUNCHER-GONE line and exits 0 before it decides anything. Where the
+# four values were given and that first list no longer holds the process that started the script,
+# the script ends the same way at that first list. So a launcher that was ended alone leaves no
+# fleet supervisor running beside the one the next task start brings. A script that anything else
+# started follows no parent, and neither does one not given all four values whose parent has gone
+# by that first list.
+#
+# On the installed route the script also keeps the launcher folder's files current. Once it has run
+# a minute, after the first tick that ends 60 seconds or more after its start and before that
+# tick's new-build check, it reads four files in the launcher folder against its own build's copies
+# beside it, in this order: installed-plugin-functions.ps1, Start-InstalledPersona.ps1,
+# Start-InstalledFleet.ps1 and Start-InstalledOrphanSweep.ps1. It does so only where two things
+# hold. -KeeperLauncher names a file called Start-InstalledPersona.ps1, and the script's own folder
+# is runtime\<name>\bin under that file's folder, the two folders compared as full paths without
+# regard to case or to the direction of a slash. A file the launcher folder holds, whose bytes
+# differ from the copy in the script's own folder, is replaced: the new bytes go to a temporary
+# file in the launcher folder, one rename puts that file over the old one, and one REFRESH line in
+# fleet.log names the file and <name>, the version it came from. A file the launcher folder lacks
+# is never created, and one whose bytes are equal is not written. A step that fails is one ERROR
+# line, leaves the old file whole, removes the temporary file it wrote or names it where it could
+# not be removed, and leaves the files after it in that order as they were, so a failed shared
+# functions file never has a launcher written beside it. The refresh runs once in the script's
+# life, whatever it found, and touches no keeper and no run directory. A build that ends inside
+# its first minute, which is the fleet launcher's failed-move window, has therefore written no
+# launcher file. -DelayScale multiplies the 60 seconds, so under -Once the refresh runs only
+# where the scaled wait has passed. The running fleet launcher keeps the code it loaded, and a
+# replaced file reaches it at the task's next start.
 #
 # [CmdletBinding()] is what makes an unknown switch a binding error (exit 1) rather than a value
 # that lands in $args while the body runs anyway.
@@ -114,7 +156,15 @@ param(
     # record the unscaled delay. Exists so the unit test can walk the doubling ladder in
     # milliseconds; a task never passes it. A negative scale is a binding error.
     [ValidateRange(0, [double]::MaxValue)]
-    [double]$DelayScale = 1.0
+    [double]$DelayScale = 1.0,
+    # The four values the installed route's launcher, Start-InstalledFleet.ps1, gives: the path of
+    # installed_plugins.json, the plugin's id in it, the version this script was started from, and
+    # the folder that holds one snapshot folder per version. The new-build check after each tick
+    # runs only where all four hold a value.
+    [string]$PluginList,
+    [string]$PluginId,
+    [string]$RunningVersion,
+    [string]$RuntimeRoot
 )
 
 . (Join-Path $PSScriptRoot 'keeper-functions.ps1')
@@ -166,6 +216,56 @@ $script:UnknownLogged = New-Object 'System.Collections.Generic.HashSet[int]'
 # The number of starts the last tick left for a later tick, which the main loop reads to choose
 # its wait. Every tick sets it, a tick that ends early included.
 $script:FleetDeferredCount = 0
+
+# The launcher this fleet supervisor follows: the id and creation time of the process that started
+# it, held only where that process runs Start-InstalledFleet.ps1. LauncherRead says a process list
+# holding this process's own record has been read for it, so the parent is looked for once, at the
+# first such list.
+$script:Launcher = $null
+$script:LauncherRead = $false
+
+# What the new-build check has already logged, so each cause costs one line per fleet supervisor
+# run: the versions whose install folder was found incomplete, the versions whose snapshot failed,
+# which are not tried again, and whether the last read of the plugin's record failed.
+$script:IncompleteVersions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+$script:FailedVersions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+$script:RecordUnread = $false
+
+# The launcher folder's files this script keeps current on the installed route, in the order it
+# replaces them: the shared functions file first, so a launcher is never written after a failed
+# write of the file it reads.
+$script:LauncherFileNames = @('installed-plugin-functions.ps1', 'Start-InstalledPersona.ps1', 'Start-InstalledFleet.ps1', 'Start-InstalledOrphanSweep.ps1')
+
+# How long the script runs before it refreshes those files, in seconds, which -DelayScale
+# multiplies. It equals the fleet launcher's failed-move window, so a build the launcher falls back
+# from has written no launcher file. RunClock counts from the script's start, and RefreshDone says
+# the one refresh of this run has been reached, whatever it did.
+$script:RefreshAfterSeconds = 60
+$script:RunClock = [System.Diagnostics.Stopwatch]::StartNew()
+$script:RefreshDone = $false
+
+# The one rename a refresh makes. MoveFileExW with MOVEFILE_REPLACE_EXISTING puts the temporary
+# file over the old one in a single step on one volume, so a rename that fails leaves the old file
+# under its name with its bytes whole. File.Move on the .NET Framework that Windows PowerShell 5.1
+# runs on cannot replace a file that exists, so the call is made directly.
+$script:FleetLauncherFileSource = @'
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class FleetLauncherFile
+{
+    private const uint MOVEFILE_REPLACE_EXISTING = 0x00000001;
+    private const uint MOVEFILE_WRITE_THROUGH = 0x00000008;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool MoveFileExW(string existing, string replacement, uint flags);
+
+    public static void RenameOver(string from, string to)
+    {
+        if (!MoveFileExW(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) throw new Win32Exception();
+    }
+}
+'@
 
 <#
 .SYNOPSIS
@@ -895,6 +995,237 @@ function Write-FleetRetireRequest {
 
 <#
 .SYNOPSIS
+Reads the launcher that started this script off the tick's process list; returns the read, or nothing where the list holds no record of this process.
+
+.DESCRIPTION
+Processes is the tick's own process list. A list that holds no record of this process answers
+nothing, and the launcher is read again off the next list. Otherwise this process's record names
+its parent. A parent record created no later than this process is the launcher only where the
+token after the first -File on its command line is a path whose file name is
+Start-InstalledFleet.ps1, compared whole and ignoring case, which is the read
+Test-KeeperFleetSupervisorCommandLine (bin/keeper-functions.ps1) makes of a fleet script. A parent
+that runs anything else turns the follow rule off, so a fleet supervisor that a task, a test or a
+hand run started directly follows no parent. A parent id the list does not hold, or one a process
+created after this process holds, is a parent that has already gone. Where the four values were
+given, which only the launcher gives, that is the launcher gone; where they were not, the follow
+rule is off. A record with no creation time to compare is read as created no later.
+
+Returns $null where the list holds no record of this process, or a hashtable: Launcher is the
+followed process's ProcessId and CreationDate, or $null where the follow rule is off, and Gone says
+the launcher has already gone.
+#>
+function Get-FleetLauncher {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Processes)
+    $ignoreCase = [System.StringComparison]::OrdinalIgnoreCase
+    $own = $null
+    foreach ($record in $Processes) {
+        if ($null -ne $record -and [int]$record.ProcessId -eq $PID) { $own = $record; break }
+    }
+    if ($null -eq $own) { return $null }
+    $parent = $null
+    foreach ($record in $Processes) {
+        if ($null -ne $record -and [string]$record.ProcessId -eq [string]$own.ParentProcessId) { $parent = $record; break }
+    }
+    # A parent created after this process holds a reused id: the process that started this one has gone.
+    if ($null -ne $parent -and $null -ne $parent.CreationDate -and $null -ne $own.CreationDate -and [DateTime]$parent.CreationDate -gt [DateTime]$own.CreationDate) {
+        $parent = $null
+    }
+    if ($null -eq $parent) {
+        if ($script:LauncherGaveValues) {
+            return @{ Launcher = @{ ProcessId = [int]$own.ParentProcessId; CreationDate = $null }; Gone = $true }
+        }
+        return @{ Launcher = $null; Gone = $false }
+    }
+    $tokens = Split-KeeperCommandLine -CommandLine ([string]$parent.CommandLine)
+    for ($k = 1; $k -lt $tokens.Count - 1; $k++) {
+        if (-not [string]::Equals($tokens[$k], '-File', $ignoreCase)) { continue }
+        $leaf = $tokens[$k + 1].Substring($tokens[$k + 1].LastIndexOfAny([char[]]@('\', '/')) + 1)
+        if ([string]::Equals($leaf, 'Start-InstalledFleet.ps1', $ignoreCase)) {
+            return @{ Launcher = @{ ProcessId = [int]$parent.ProcessId; CreationDate = $parent.CreationDate }; Gone = $false }
+        }
+        break
+    }
+    return @{ Launcher = $null; Gone = $false }
+}
+
+<#
+.SYNOPSIS
+Says whether the launcher this script follows has gone, read off the tick's own process list.
+
+.DESCRIPTION
+A list that holds no record of this process says nothing about the launcher, and reads as not
+gone. Otherwise the launcher is gone where no record carries its id, or where the record that does
+was created at another time, which is another process on a reused id. A record with no creation
+time to compare is read as the launcher, since a fleet supervisor that ends wrongly leaves the
+machine with none.
+#>
+function Test-FleetLauncherGone {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Processes)
+    $ownSeen = $false
+    $held = $null
+    foreach ($record in $Processes) {
+        if ($null -eq $record) { continue }
+        if ([int]$record.ProcessId -eq $PID) { $ownSeen = $true }
+        if ($null -eq $held -and [int]$record.ProcessId -eq $script:Launcher.ProcessId) { $held = $record }
+    }
+    if (-not $ownSeen) { return $false }
+    if ($null -eq $held) { return $true }
+    if ($null -eq $held.CreationDate -or $null -eq $script:Launcher.CreationDate) { return $false }
+    return ([DateTime]$held.CreationDate -ne [DateTime]$script:Launcher.CreationDate)
+}
+
+<#
+.SYNOPSIS
+Reads which build is installed and, where it is another whole build, takes its snapshot; returns the move or nothing.
+
+.DESCRIPTION
+The record is read through Get-InstalledPluginRecord and the snapshot taken through
+Install-PluginSnapshot (bin/installed-plugin-functions.ps1), the functions the launchers use. A
+record naming -RunningVersion is nothing to do. For any other version the install folder is read
+first for every file $InstalledPluginRequiredFiles names, so a folder Claude Code is still writing
+costs those file reads and no copy, and is read again after the next tick. Only a whole folder is
+copied. A snapshot that fails, or one that holds no bin\Start-Fleet.ps1, is not tried again for
+that version by this process, since the launcher could start nothing from it. Each cause that
+leaves this build running is one ERROR line: once for a version, and for a record that does not
+read, once until a read next succeeds.
+
+Returns $null, or a hashtable the caller hands off on: Version is the new version and Snapshot its
+snapshot folder.
+#>
+function Get-FleetNewBuild {
+    try {
+        $record = Get-InstalledPluginRecord -Path $PluginList -Id $PluginId
+    } catch {
+        if (-not $script:RecordUnread) {
+            $script:RecordUnread = $true
+            Write-FleetLog "ERROR new-build check: $($_.Exception.Message); version $($script:RunningBuild) keeps running and the list is read again after each tick"
+        }
+        return $null
+    }
+    $script:RecordUnread = $false
+    $version = [string]$record.Version
+    if ([string]::Equals($version, $RunningVersion, [System.StringComparison]::OrdinalIgnoreCase)) { return $null }
+    if ($script:FailedVersions.Contains($version)) { return $null }
+
+    $fault = $null
+    try {
+        $missing = @($InstalledPluginRequiredFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $record.InstallPath $_ -ErrorAction Stop) -PathType Leaf -ErrorAction Stop) })
+        if ($missing.Count -gt 0) { $fault = "is missing $($missing -join ', ')" }
+    } catch {
+        $fault = "could not be read: $($_.Exception.Message)"
+    }
+    if ($null -ne $fault) {
+        if ($script:IncompleteVersions.Add($version)) {
+            Write-FleetLog "ERROR new-build check: the install folder '$($record.InstallPath)' of version $version $fault; version $($script:RunningBuild) keeps running and the folder is read again after each tick"
+        }
+        return $null
+    }
+
+    try {
+        $snapshot = Install-PluginSnapshot -InstallPath $record.InstallPath -Version $version -RuntimeRoot $RuntimeRoot
+        if (-not (Test-Path -LiteralPath (Join-Path $snapshot 'bin\Start-Fleet.ps1') -PathType Leaf)) {
+            throw "the snapshot '$snapshot' holds no bin\Start-Fleet.ps1"
+        }
+    } catch {
+        [void]$script:FailedVersions.Add($version)
+        Write-FleetLog "ERROR new-build check: the snapshot of version $version from '$($record.InstallPath)' failed and is not tried again by this fleet supervisor, so version $($script:RunningBuild) keeps running: $($_.Exception.Message)"
+        return $null
+    }
+    return @{ Version = $version; Snapshot = $snapshot }
+}
+
+<#
+.SYNOPSIS
+Returns the launcher folder this script refreshes and the version it runs from, or nothing off the installed route.
+
+.DESCRIPTION
+Two things must hold. -KeeperLauncher names a file called Start-InstalledPersona.ps1, and this
+script's own folder is runtime\<name>\bin under that file's folder. The folders are compared as
+full paths, in which every slash runs one way, and without regard to case. So a script run from a
+checkout, or from a runtime folder under any other folder, refreshes nothing, whatever
+-KeeperLauncher names. The comparison reads the path text alone: a path spelled another way, as a
+UNC form, refreshes nothing, and a link or junction inside either path is not
+looked through.
+
+Returns $null, or a hashtable: Folder is the launcher folder and Version is <name>, the name of
+the snapshot folder the script runs from.
+#>
+function Get-FleetLauncherRefresh {
+    $ignoreCase = [System.StringComparison]::OrdinalIgnoreCase
+    $launcherFull = [System.IO.Path]::GetFullPath($KeeperLauncher)
+    if (-not [string]::Equals([System.IO.Path]::GetFileName($launcherFull), 'Start-InstalledPersona.ps1', $ignoreCase)) { return $null }
+    $folder = [System.IO.Path]::GetDirectoryName($launcherFull)
+    $own = [System.IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+    $versionFolder = [System.IO.Path]::GetDirectoryName($own)
+    if ([string]::IsNullOrEmpty($folder) -or [string]::IsNullOrEmpty($versionFolder)) { return $null }
+    $version = [System.IO.Path]::GetFileName($versionFolder)
+    if ([string]::IsNullOrEmpty($version)) { return $null }
+    $expected = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($folder, 'runtime', $version, 'bin'))
+    if (-not [string]::Equals($own, $expected, $ignoreCase)) { return $null }
+    return @{ Folder = $folder; Version = $version }
+}
+
+<#
+.SYNOPSIS
+Replaces each launcher file whose bytes differ from this build's copy, with one REFRESH line per file replaced.
+
+.DESCRIPTION
+Does nothing where Get-FleetLauncherRefresh names no folder. Otherwise the files LauncherFileNames
+lists are taken in order. One the launcher folder lacks is skipped, so no file is ever created
+there, and so is one this script's own folder lacks. Where both are there and their bytes are
+equal, nothing is written and the file keeps its last-write time. Where they differ, the new bytes
+are written through to disk in a new file .<file>.<pid>.tmp in the launcher folder, a name no
+launcher file carries and one that must not exist yet, and one rename puts that file over the old
+one (FleetLauncherFile). The rename's type is compiled before the temporary file is written. A
+read, a compile, a write or a rename that fails is one ERROR line for that file and ends the
+refresh: the old file is as it was, a temporary file this run made is removed, or named in that
+line where it could not be, and the files after it are left as they were. Nothing else in the
+launcher folder is written or removed.
+#>
+function Update-FleetLauncherFiles {
+    $refresh = Get-FleetLauncherRefresh
+    if ($null -eq $refresh) { return }
+    for ($index = 0; $index -lt $script:LauncherFileNames.Count; $index++) {
+        $name = $script:LauncherFileNames[$index]
+        $target = Join-Path $refresh.Folder $name
+        $source = Join-Path $PSScriptRoot $name
+        $temp = Join-Path $refresh.Folder ".$name.$PID.tmp"
+        $made = $false
+        try {
+            if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { continue }
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { continue }
+            [byte[]]$new = [System.IO.File]::ReadAllBytes($source)
+            [byte[]]$old = [System.IO.File]::ReadAllBytes($target)
+            if ([System.Linq.Enumerable]::SequenceEqual($old, $new)) { continue }
+            if ($null -eq ('FleetLauncherFile' -as [type])) { Add-Type -TypeDefinition $script:FleetLauncherFileSource -ErrorAction Stop }
+            $stream = New-Object System.IO.FileStream($temp, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None, 4096, [System.IO.FileOptions]::WriteThrough)
+            $made = $true
+            try {
+                $stream.Write($new, 0, $new.Length)
+                $stream.Flush($true)
+            } finally {
+                $stream.Dispose()
+            }
+            [FleetLauncherFile]::RenameOver($temp, $target)
+            Write-FleetLog "REFRESH $name from version $($refresh.Version): the copy '$target' differed from this build's and was replaced"
+        } catch {
+            $fault = $_.Exception.Message
+            $stray = ''
+            if ($made -and (Test-Path -LiteralPath $temp)) {
+                Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+                if (Test-Path -LiteralPath $temp) { $stray = "; the temporary file '$temp' could not be removed" }
+            }
+            $left = @($script:LauncherFileNames | Select-Object -Skip ($index + 1))
+            $after = ''
+            if ($left.Count -gt 0) { $after = ", and $($left -join ', ') are left as they were" }
+            Write-FleetLog "ERROR refresh of '$target' from version $($refresh.Version) failed, so the old copy stays as it was$after$($stray): $fault"
+            return
+        }
+    }
+}
+
+<#
+.SYNOPSIS
 Runs one tick: reads the roster, the state and the process list, and applies one decision per entry.
 
 .DESCRIPTION
@@ -904,8 +1235,12 @@ is not a JSON boolean, with neither rundir nor workdir, with a repo and no workd
 into, or whose name another entry carries once
 case is ignored, is one ERROR line and is left alone, as is every keeper for it. The process list
 is read once; a read that fails ends the tick, since a liveness unknown is no basis for a start or
-a retire. Names come from the roster and from the state, so a keeper whose entry has left the roster
-is still judged, through the run directory its record holds. A live keeper neither names is logged
+a retire. The first list read that holds this process's own record is where the launcher that
+started this script is read (Get-FleetLauncher). A launcher already gone at that read, which
+counts only where the four values were given, or gone from a later list that holds this process's
+own record, ends the run at exit 0 with one LAUNCHER-GONE line, before any entry is judged. Names
+come from the roster and from the state, so a keeper whose entry has left the roster is still
+judged, through the run directory its record holds. A live keeper neither names is logged
 unknown once and left alone. The boot time is read once per tick, and only where some entry has no
 live keeper, since only a boot marker read needs it. A live keeper is asked to stop in the run
 directory its record says it was started on, which an edit to rundir or workdir moves away from
@@ -971,6 +1306,33 @@ function Invoke-FleetTick {
     } catch {
         Write-FleetLog "ERROR SCAN failed, nothing decided this tick: $($_.Exception.Message)"
         return
+    }
+
+    # The launcher is read once, off the first process list that holds this process's own record,
+    # and a list that lacks that record decides nothing about the launcher. A launcher that has
+    # gone, found so at that read or on a later list, ends the run here, before anything is
+    # decided: no keeper is started or retired and no state is written, and the keepers run on for
+    # the fleet supervisor the next task start brings.
+    $launcherGone = $false
+    $goneAtFirstRead = $false
+    if (-not $script:LauncherRead) {
+        $read = Get-FleetLauncher -Processes $processes
+        if ($null -ne $read) {
+            $script:LauncherRead = $true
+            $script:Launcher = $read.Launcher
+            $launcherGone = $read.Gone
+            $goneAtFirstRead = $read.Gone
+        }
+    } elseif ($null -ne $script:Launcher) {
+        $launcherGone = Test-FleetLauncherGone -Processes $processes
+    }
+    if ($goneAtFirstRead) {
+        Write-FleetLog "LAUNCHER-GONE pid=$($script:Launcher.ProcessId): the process that started this fleet supervisor had ended by the first process list that holds this one, and the four values it was given name that process the launcher, so it ends at exit 0 and leaves every keeper as it is"
+        exit 0
+    }
+    if ($launcherGone) {
+        Write-FleetLog "LAUNCHER-GONE pid=$($script:Launcher.ProcessId): the Start-InstalledFleet.ps1 process that started this fleet supervisor is no longer running, so it ends at exit 0 and leaves every keeper as it is"
+        exit 0
     }
 
     $keys = New-Object System.Collections.Generic.List[string]
@@ -1163,15 +1525,70 @@ function Invoke-FleetTick {
 }
 
 # A keeper launcher that is not there makes every start exit at once, which the ticks read as quick
-# exits and back off from without naming the file, so its absence ends the run where the task's
-# restart policy and the launcher's log surface it.
+# exits and back off from without naming the file, so its absence ends the run at exit 1 with one
+# ERROR line, and the fleet supervisor stays down until the task next starts.
 if (-not (Test-Path -LiteralPath $KeeperLauncher -PathType Leaf)) {
     Write-FleetLog "ERROR keeper launcher '$KeeperLauncher' does not exist"
     exit 1
 }
 
+# The new-build check is on only where the launcher gave all four values. It reads the plugin's
+# record and takes the snapshot through the shared functions file beside this script, which is
+# loaded only then. Where that file is missing or does not load, the check is off for this run and
+# one line says so. The follow rule reads whether the four values were given whatever that file
+# holds, since a parent already gone counts as the launcher gone only where they were.
+$script:LauncherGaveValues = -not ([string]::IsNullOrWhiteSpace($PluginList) -or [string]::IsNullOrWhiteSpace($PluginId) -or [string]::IsNullOrWhiteSpace($RunningVersion) -or [string]::IsNullOrWhiteSpace($RuntimeRoot))
+$script:NewBuildCheck = $script:LauncherGaveValues
+# The log names the build this script runs from: where it runs from a snapshot under -RuntimeRoot,
+# that snapshot folder's name. After a fall-back that is the build before, while -RunningVersion
+# holds the version that failed. A script run from anywhere else names -RunningVersion.
+$script:RunningBuild = $RunningVersion
+if ($script:LauncherGaveValues) {
+    $ownBuild = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\'))
+    $ownRoot = [System.IO.Path]::GetDirectoryName($ownBuild)
+    if (-not [string]::IsNullOrEmpty($ownRoot) -and [string]::Equals($ownRoot, [System.IO.Path]::GetFullPath($RuntimeRoot).TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) {
+        $script:RunningBuild = [System.IO.Path]::GetFileName($ownBuild)
+    }
+}
+if ($script:NewBuildCheck) {
+    $sharedFunctions = Join-Path $PSScriptRoot 'installed-plugin-functions.ps1'
+    $sharedFault = $null
+    if (Test-Path -LiteralPath $sharedFunctions -PathType Leaf) {
+        try { . $sharedFunctions } catch { $sharedFault = "did not load: $($_.Exception.Message)" }
+    } else {
+        $sharedFault = 'is missing'
+    }
+    if ($null -ne $sharedFault) {
+        $script:NewBuildCheck = $false
+        Write-FleetLog "ERROR the shared functions file '$sharedFunctions' $sharedFault, so the new-build check is off and version $($script:RunningBuild) runs until this fleet supervisor is started again"
+    }
+}
+
 while ($true) {
     Invoke-FleetTick
+    # The launcher files are refreshed once in this run: after the first tick that ends the scaled
+    # RefreshAfterSeconds or more after the script's start, and ahead of that tick's new-build
+    # check, so a tick that ends the run for a new build has refreshed them first. The refresh is
+    # marked done before it runs, so one that failed is not tried again, and a fault in it reaches
+    # neither the new-build check nor the loop.
+    if (-not $script:RefreshDone -and $script:RunClock.Elapsed.TotalSeconds -ge ($script:RefreshAfterSeconds * $DelayScale)) {
+        $script:RefreshDone = $true
+        try {
+            Update-FleetLauncherFiles
+        } catch {
+            Write-FleetLog "ERROR refresh of the launcher folder failed and is not tried again by this fleet supervisor: $($_.Exception.Message)"
+        }
+    }
+    # The new-build check comes after the tick and its state write, never inside a tick, and under
+    # -Once as well. The snapshot is taken before the exit, so the launcher's next pass finds it
+    # present and an install still being written never ends this run.
+    if ($script:NewBuildCheck) {
+        $move = Get-FleetNewBuild
+        if ($null -ne $move) {
+            Write-FleetLog "HANDOFF running=$($script:RunningBuild) new=$($move.Version) snapshot=$($move.Snapshot): the plugin list names another version, so this fleet supervisor ends at exit 7 for its launcher to start that one, with every keeper left as it is"
+            exit 7
+        }
+    }
     if ($Once) { break }
     # A tick that left starts for later is followed sooner, so the next batch starts in seconds.
     $wait = $TickSeconds

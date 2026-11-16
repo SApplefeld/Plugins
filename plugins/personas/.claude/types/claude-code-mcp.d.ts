@@ -52,7 +52,7 @@ declare module 'claude-code' {
       /** park: true stops the supervisor on the park code and the keeper brings the persona back at the next boot or a start after the operator's -Release. */
       park?: boolean
     }
-    /** Relaunch the supervised child without stopping the supervisor: this child exits by the graceful EOF path and a fresh one starts with the goal tree intact and resumes the active plan. Use when the operator asks for a restart, or to pick up an updated runtime (a plugin update) without ending the run. Never for a completed goal (goal_done already returns the supervisor to its passive waiting state). Owner only. */
+    /** Restart this persona: this child exits by the graceful EOF path and a fresh one starts with the goal tree intact and resumes the active plan. Under a keeper that can hand the persona to the fleet supervisor, the supervisor and the keeper end too, and the fleet supervisor starts the persona again on the installed plugin build. Otherwise, and in a run with no keeper, the child is relaunched alone. Call it on the operator's ask for a restart, or to pick up an updated runtime such as a plugin update. A finished goal needs no call here either. Owner only. */
     "mcp__personas__supervisor_restart": {
       /** Optional. Why the operator asked for a restart. */
       reason?: string

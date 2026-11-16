@@ -7,8 +7,17 @@
 # The wrapper reads the persona's roster entry, applies the env file's allowlisted keys to its own
 # process, launches bin/supervise.sh through the bash the env file names, and loops on
 # Get-KeeperDecision (bin/keeper-functions.ps1) over the supervisor's exit code: relaunch after a
-# delay, hold, park, or exit. Exit -1 is a termination with no signal (Stop-Process and Process.Kill
-# leave it where taskkill /F leaves 1): it relaunches after the base delay with the ladder untouched.
+# delay, hold, park, hand off, or exit. Exit -1 is a termination with no signal (Stop-Process and
+# Process.Kill leave it where taskkill /F leaves 1): it relaunches after the base delay with the
+# ladder untouched. Exit 7 is a requested restart. A supervisor this wrapper launches ends its run
+# on one, because the wrapper sets SUPERVISOR_RESTART_EXITS=1 for it, and the wrapper then hands the
+# persona off: it exits and writes no marker, so the fleet supervisor's next tick starts the persona
+# again through its launcher, with the roster and the env file read afresh. It hands off only where
+# a fleet supervisor serving its roster is live, the roster still names the entry once and enabled,
+# with the workdir a keeper needs to launch, and neither a hold marker nor a boot marker that can
+# name this boot stands in the run directory, since the fleet supervisor leaves an entry down beside
+# either. Where any of the four is not so, nothing would start the persona again, so it logs
+# HANDOFF not taken with the reason and launches the supervisor again at once.
 # Before each launch it looks for a supervisor already running for the
 # persona, and where it finds one it waits on that one instead of launching (ADOPT in keeper.log).
 # State the operator can read lives under the entry's run directory:
@@ -27,11 +36,11 @@
 # keeper-refused.log beside the roster file, the only place known at that point, because a
 # scheduled task has no console for stderr to reach.
 #
-# Exit codes of the wrapper itself: 0 when the policy said hold, park or exit, or when -Release
-# ran, or when a hold marker was already present, or when the boot marker already named this boot
-# (BOOTED); 1 on a fault of the wrapper's own (an unknown flag, a roster or env file that cannot
-# be read, a supervisor that cannot be launched). The fleet supervisor's quick-exit backoff is the
-# backstop for the 1s.
+# Exit codes of the wrapper itself: 0 when the policy said hold, park or exit, or when the wrapper
+# handed the persona off, or when -Release ran, or when a hold marker was already present, or when
+# the boot marker already named this boot (BOOTED); 1 on a fault of the wrapper's own (an unknown
+# flag, a roster or env file that cannot be read, a supervisor that cannot be launched). The fleet
+# supervisor's quick-exit backoff is the backstop for the 1s.
 #
 # [CmdletBinding()] is what makes an unknown switch a binding error (exit 1) rather than a value
 # that lands in $args while the body runs anyway.
@@ -50,7 +59,21 @@ param(
     # negative scale would make Start-Sleep throw and end the loop at the first relaunch, so it is
     # a binding error instead.
     [ValidateRange(0, [double]::MaxValue)]
-    [double]$DelayScale = 1.0
+    [double]$DelayScale = 1.0,
+    # The four facts a hand-off is decided from. read, the default, reads the first from the
+    # machine's process list and the second from the roster. It reads the third from the boot time
+    # this keeper read at its start, and checks for keeper.boot only where that read failed. It reads
+    # the fourth with one check for keeper.hold. true and false fix the fact with no read. They exist
+    # so the unit test decides a hand-off without this machine's fleet supervisor or its boot time; a
+    # task never passes them.
+    [ValidateSet('read', 'true', 'false')]
+    [string]$FleetSupervisorLive = 'read',
+    [ValidateSet('read', 'true', 'false')]
+    [string]$RosterEnabled = 'read',
+    [ValidateSet('read', 'true', 'false')]
+    [string]$BootMarkerClear = 'read',
+    [ValidateSet('read', 'true', 'false')]
+    [string]$HoldClear = 'read'
 )
 
 . (Join-Path $PSScriptRoot 'keeper-functions.ps1')
@@ -544,6 +567,31 @@ function Wait-KeeperAdoptedSupervisor {
 
 <#
 .SYNOPSIS
+Says whether a fleet supervisor serving the given roster is live on this machine.
+
+.DESCRIPTION
+The machine's process list is read and each command line is handed to
+Test-KeeperFleetSupervisorCommandLine (bin/keeper-functions.ps1), which says what counts. A process
+list that cannot be read within 30 seconds is one SCAN failed line and $false, since a hand-off to a
+fleet supervisor nobody saw could leave the persona with nothing to start it.
+#>
+function Test-KeeperFleetSupervisorLive {
+    param([Parameter(Mandatory)][string]$RosterPath)
+    try {
+        $processes = @(Get-CimInstance Win32_Process -Property ProcessId, CommandLine -OperationTimeoutSec 30 -ErrorAction Stop)
+    } catch {
+        Write-KeeperLog "SCAN failed: $($_.Exception.Message)"
+        return $false
+    }
+    foreach ($record in $processes) {
+        if ($null -eq $record) { continue }
+        if (Test-KeeperFleetSupervisorCommandLine -CommandLine ([string]$record.CommandLine) -RosterPath $RosterPath) { return $true }
+    }
+    return $false
+}
+
+<#
+.SYNOPSIS
 Writes keeper.json as UTF-8 without a byte-order mark; a failure is logged and stepped over.
 #>
 function Write-KeeperState {
@@ -709,6 +757,11 @@ try {
 } catch {
     Stop-KeeperWithError $_.Exception.Message
 }
+# A supervisor this wrapper launches ends a requested restart at exit 7 rather than launching the
+# next child itself, which is what brings the restart to the decision loop below as a hand-off. The
+# value is set here and is not an env file key, so no line of that file changes it. A supervisor the
+# wrapper adopts keeps the environment it was started with.
+$invocation.Environment['SUPERVISOR_RESTART_EXITS'] = '1'
 foreach ($key in $invocation.Environment.Keys) {
     try {
         Set-Item -Path "env:$key" -Value $invocation.Environment[$key] -ErrorAction Stop
@@ -831,6 +884,32 @@ while ($true) {
             # must not bring the persona back.
             Write-KeeperBootMarker
             exit 0
+        }
+        'handoff' {
+            # A wrapper that exits here leaves no marker, so only a fleet supervisor that is running
+            # for this roster, and still finds the entry in it once and enabled with no hold or boot
+            # marker beside it, starts the persona again. The roster fact also asks for the workdir a
+            # keeper needs to launch.
+            # Each fact is read now, and one that cannot be read is false.
+            $fleetFact = $FleetSupervisorLive -eq 'true'
+            if ($FleetSupervisorLive -eq 'read') { $fleetFact = Test-KeeperFleetSupervisorLive -RosterPath $Roster }
+            $rosterFact = $RosterEnabled -eq 'true'
+            if ($RosterEnabled -eq 'read') { $rosterFact = Test-KeeperRosterHandoffEntry -Path $Roster -Name $personaName }
+            # A start that read the boot time and found a marker naming this boot exited BOOTED, so
+            # only a keeper that could not read the boot time can stand beside one. The boot time is
+            # the one this keeper read at its start, and it is read no second time.
+            $bootFact = $BootMarkerClear -eq 'true'
+            if ($BootMarkerClear -eq 'read') { $bootFact = ($null -ne $bootTime) -or -not (Test-Path -LiteralPath $bootPath -PathType Leaf) }
+            # A hold counts whatever stands beside it, the fleet supervisor's own sidecar included.
+            $holdFact = $HoldClear -eq 'true'
+            if ($HoldClear -eq 'read') { $holdFact = -not (Test-Path -LiteralPath $holdPath -PathType Leaf) }
+            $handoff = Get-KeeperHandoffDecision -FleetSupervisorLive $fleetFact -RosterEnabled $rosterFact -BootMarkerClear $bootFact -HoldClear $holdFact
+            if ($handoff.Handoff) { exit 0 }
+            # Nothing would start the persona again, so the supervisor is launched again from this
+            # wrapper's own copy with no sleep, on the ladder values the decision carried.
+            Write-KeeperLog "HANDOFF not taken: $($handoff.Reason), so the build did not move and the supervisor is launched again by this keeper"
+            $delay = $decision.NextDelaySeconds
+            $exit1Count = $decision.NextExit1Count
         }
         default {
             $delay = $decision.NextDelaySeconds

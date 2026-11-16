@@ -687,7 +687,9 @@ function Register-PersonaTasks {
     # before any write leaves the launcher root as it found it, and no task names a launcher that is
     # not there yet. The shared file goes first, so a launcher never lands without the file it
     # reads, and the persona launcher before the fleet launcher that starts it. Each copy overwrites
-    # an older one, which is how a re-registration from a newer plugin version updates them.
+    # an older one, so a re-registration from a newer plugin version is one of two ways the copies
+    # are updated. The other is the fleet supervisor, which replaces each copy that differs from its
+    # own build's once it has run a minute (bin/Start-Fleet.ps1).
     if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
         $repoBin = Join-Path $RepoRoot 'bin'
         $copies = @(

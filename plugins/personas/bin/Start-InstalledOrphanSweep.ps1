@@ -3,9 +3,12 @@
 #
 #   powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File <LauncherRoot>\Start-InstalledOrphanSweep.ps1 -FindingsPath <path> -ConfigDir <folder> [-EndAfterHours <n>] [-RepeatHours <n>]
 #
-# Registration copies this file and bin/installed-plugin-functions.ps1, which it dot-sources for the
-# record lookup, into the launcher root, a folder outside the plugin cache, so the task's action
-# names one path that no plugin update moves. At each fire the script reads the installed plugin's
+# Registration first copies this file and bin/installed-plugin-functions.ps1, which it dot-sources
+# for the record lookup, into the launcher root, a folder outside the plugin cache, so the task's
+# action names one path that no plugin update moves. Where that root is the one the AgentFleet
+# task's launchers run from, the fleet supervisor keeps both copies current: once it has run a
+# minute, it replaces each one whose bytes differ from its own build's (bin/Start-Fleet.ps1), and
+# each fire after that runs the replaced file. At each fire the script reads the installed plugin's
 # record from installed_plugins.json, checks that the version's bin folder holds orphan-sweep.ps1,
 # orphan-sweep-functions.ps1 and orphan-sweep-allowlist.json, runs that orphan-sweep.ps1 with
 # -FindingsPath, and with -EndAfterHours and -RepeatHours where the action named them, and exits with

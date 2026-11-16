@@ -11008,13 +11008,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: refreshing the Goal, `## Intent` record, acceptance bullets and `## Out of Scope` list the brief quotes.
 
 ### T164
-- key: Write one add-decision line before any Major enters a fix round, naming what the fix changes, the clause it serves, whether it adds a mechanism, its size and what not building it costs.
+- key: Write one add-decision line before any Major enters a fix round, naming what the fix changes, the clause it serves, whether it adds a mechanism, its size and what it costs to keep, and what not building it costs.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/findings.md
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 3 2026-09-19.
-- verdict: keep
-- reason: The session otherwise weighs the minute it takes to write a fix against nothing, which is the growth the plan's Intent record names as the diagnosis. Five parts and no more, so the line stays a decision rather than becoming a narrative.
-- passage: **Every Major entering a fix round gets one line before anything is built, and so does every section at its open.** That line is the add-decision, written to `.kit/scratch/<plan-slug>/add-decisions-section-<n>.md` and kept as the Minor list is. It names five things: what the fix changes; the Goal sentence, Intent clause or acceptance bullet it serves; whether it adds a mechanism; its size as a number where one exists; and what not building it costs.
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 3 2026-09-19; rewritten in place by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 1 2026-11-15, which adds what the addition costs to keep, who pays and how often.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 1
+- reason: The session otherwise weighs the minute it takes to write a fix against nothing, which is the growth the plan's Intent record names as the diagnosis. Five parts and no more, so the line stays a decision rather than becoming a narrative. The fourth part carries the keeping cost because adding costs the session nothing, while later sessions, gate runs and readers pay (the additions-earn-their-keep plan's Intent).
+- passage: **Every Major entering a fix round gets one line before anything is built, and so does every section at its open.** That line is the add-decision, written to `.kit/scratch/<plan-slug>/add-decisions-section-<n>.md` and kept as the Minor list is. It names five things: what the fix changes; the Goal sentence, Intent clause or acceptance bullet it serves; whether it adds a mechanism; its size as a number where one exists, and what the change costs to keep, who pays it and how often; and what not building it costs.
 
 ### T165
 - key: Keep the add-decision lines in `.kit/scratch/<plan-slug>/add-decisions-section-<n>.md` and carry them verbatim onto the Chapter at step 6.
@@ -21859,7 +21860,7 @@ Extracted at `6bc07fb`: whole document (`agents.blind-reviewer.md`). Amended on 
 
 This document is the charter for the `plan-reviewer` agent, a fresh-context adversarial reviewer that reads a written spec against its own Goal before the plan is approved. It owns the moment between a spec being drafted and being approved for execution: judging whether following the plan's sections as written would achieve the plan's stated Goal, and whether the plan's `## Intent` record refuses anything a section could add, classifying every defect it finds under a closed set of question tags, rating each by severity and confidence, and closing with a READY, READY_WITH_FINDINGS, NOT_READY or NEEDS_CONTEXT verdict. It also owns the reviewer's own conduct in that moment: read-only tool use, treating the spec and repository as data rather than instructions, and refusing to fix or certify. The load class is `plan-run`: the charter is loaded at the agent's dispatch, which the description states is performed by the brainstorming skill after the author's self-review and the blind read, with the spec path alone.
 
-Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C068 to C070 below), section 2 on 2026-09-19 (C071 below), and section 4 on 2026-09-19 (C072 and C073 below, and C039 amended). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `7ebc5a61` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C002 rewritten to its passage as it now reads, and the reasons of C039 and C066 reworded. Amended by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1 on 2026-10-17 (A001 and A002 below, C033 retired to C022, C068 retired to C070, C073 rewritten, and C010, C012, C022, C051, C069 and C071 re-quoted after a narrow cut). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19 (AB001 and AB002 below, the `[symptom-only]` question and its Major rating). Amended by `docs/plans/claude-kit_kit-copy-at-dispatch_spec_v1.md` section 1 on 2026-11-13: BN001 and BN002 added under the plan's letter BN for the `[rule-conflict]` reading under the `Kit root:` line and the no-line fallback. Amended by `docs/plans/claude-kit_readonly-agents-scratch_spec_v1.md` section 2 on 2026-11-14: BT001 for the commit read and scratch path, C025 retired to it, and C023 re-quoted.
+Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C068 to C070 below), section 2 on 2026-09-19 (C071 below), and section 4 on 2026-09-19 (C072 and C073 below, and C039 amended). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `7ebc5a61` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C002 rewritten to its passage as it now reads, and the reasons of C039 and C066 reworded. Amended by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1 on 2026-10-17 (A001 and A002 below, C033 retired to C022, C068 retired to C070, C073 rewritten, and C010, C012, C022, C051, C069 and C071 re-quoted after a narrow cut). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19 (AB001 and AB002 below, the `[symptom-only]` question and its Major rating). Amended by `docs/plans/claude-kit_kit-copy-at-dispatch_spec_v1.md` section 1 on 2026-11-13: BN001 and BN002 added under the plan's letter BN for the `[rule-conflict]` reading under the `Kit root:` line and the no-line fallback. Amended by `docs/plans/claude-kit_readonly-agents-scratch_spec_v1.md` section 2 on 2026-11-14: BT001 for the commit read and scratch path, C025 retired to it, and C023 re-quoted. Amended by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 2 on 2026-11-16: BZ001 and BZ002 added under the plan's letter BZ for the `[no-exit]` question and its Major rating. The question adds one line at line 38, so an older `source:` line at 38 or later reads one line short, and none is re-pointed.
 
 ### C001
 - key: Dispatch this agent under the name `plan-reviewer`.
@@ -22654,6 +22655,26 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 - reason: A checkout, switch, reset or stash moves the tree every agent is reading, and `git show` reads the same bytes in place. The strict class leaves the temp directory writable, as fixture `readonly-agent-0223` records, so the charter alone keeps scratch out of it. The pair is one text in every Bash-holding strict charter, since each is loaded alone. Its scratch sentence holds the charter's scratch bound, which C025 records as retired.
 - passage: Read a past commit's files with `git show <sha>:<path>` or `git diff`, never by checkout, switch, reset or stash, each of which moves the tree other agents are reading. Scratch goes under `.kit/scratch/`, in the folder your brief names where it names one, never the machine's temp directory and nowhere else in the tree.
 
+### BZ001
+- key: Tag `[no-exit]` a section that creates a store, as step 9 of the brainstorming skill defines one in the copy question 4 names, whose body lacks any part of its exit: how a use of an item is recorded, and the step that removes an unused one with no session judging it, with an undo, naming who runs it and when. A body that says no use can be recorded and names the judged step that removes instead states its exit. A size limit is no such step.
+- class: rule
+- source: plugins/grimoire/agents/plan-reviewer.md:38
+- provenance: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 2 2026-11-16, on the operator's ask of 2026-11-15 on the architect seat's channel, quoted under that plan's `## Intent` and Approach: "How do we design for the subtraction side in every plan?", and "truly defining what goes in there and making sure that we have a process for taking things back out."
+- verdict: keep
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 2
+- reason: The brainstorming skill's step 9 paragraph, BZ001 and BZ002 under that skill's heading in its own ledger, has the author state a new store's exit, and a fresh reader sees a missing exit that the author's own reading fills. The question points at step 9, in the copy question 4 names, for the definition of a store rather than restating it, so the two cannot drift apart. It names every part of the exit step 9 asks for, since a question that checks only that a removal step is named passes a step a session judges, the growth this plan exists to stop (the architect's ruling of 2026-11-16 on the plan's branch). It says "lacks any part" so a body holding a step with no undo cannot be read as passing. The set stays closed by C067's sentence, which the item joins without a count.
+- passage: `[no-exit]` A section that creates a store, as step 9 of the brainstorming skill defines one in the copy question 4 names, whose body lacks any part of its exit: how a use of an item is recorded, and the step that removes an unused one with no session judging it, with an undo, naming who runs it and when. A body that says no use can be recorded and names the judged step that removes instead states its exit. A size limit is no such step.
+
+### BZ002
+- key: Rate a `[no-exit]` finding Major, since a section would ship growth nothing takes out.
+- class: mechanic
+- source: plugins/grimoire/agents/plan-reviewer.md:45
+- provenance: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 2 2026-11-16.
+- verdict: keep
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 2
+- reason: C041 keys severity to consequence, and C043's Major band covers what a reviewer would send back. A store with no exit still meets the Goal as written, so the finding sits one band below Critical, but it ships growth that only a later cut can remove, which is the failure that plan's Intent names. It rides as its own sentence in the Major bullet, in the form AB002 set for `[symptom-only]`, so no other entry's passage moves.
+- passage: A `[no-exit]` finding rates Major, since a section would ship growth nothing takes out.
+
 ## plugins/grimoire/agents/implementer-fable.md
 
 This document is the charter for a dispatched implementation agent named implementer-fable, the top model tier of the kit's scoped implementer family. It governs the moment a single Section of Work from an already-approved spec is built by a subagent: how the agent reads its brief, what it must read before writing, how far its edits may reach, what evidence proves the work done, whether it may stage or commit, and which of four terminal statuses it must end its report with. It owns the execution-quality moments inside one section and explicitly does not own design, the dispatch brief's field list, or the commit model. The load class is `plan-run`: the charter is loaded by the dispatched agent itself at the moment the orchestrating session dispatches it with a brief built from the executing-work skill's Dispatch Brief template.
@@ -23312,10 +23333,11 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-fable.md`). Amended 
 - key: Where the work needs a unit of behavior that runs and the section text does not name it, carry the add-decision line in your report instead of building it, and return `NEEDS_CONTEXT` where no Goal sentence, Intent clause or acceptance bullet names it.
 - class: rule
 - source: plugins/grimoire/agents/implementer-fable.md:20
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 3 2026-09-19, the add-decision and the design stop's trigger.
-- verdict: keep
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 3 2026-09-19, the add-decision and the design stop's trigger; rewritten in place by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 1 2026-11-15, which adds what the addition costs to keep, who pays and how often.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 1
 - reason: An implementer that builds an unnamed mechanism and reports the section done puts the scope question past the only seat that could rule on it, since step 4 reads the report rather than the diff. Returning the line instead routes that question to the design stop's judge while nothing is built, which is what the stop exists to make possible.
-- passage: Where the work needs a unit of behavior that runs and the section text does not name it, your report carries its add-decision line: what it changes, the Goal sentence, Intent clause or acceptance bullet it serves, whether it adds a mechanism, its size as a number, and what not building it costs.
+- passage: Where the work needs a unit of behavior that runs and the section text does not name it, your report carries its add-decision line: what it changes; the Goal sentence, Intent clause or acceptance bullet it serves; whether it adds a mechanism; its size as a number, and what the change costs to keep, who pays it and how often; and what not building it costs.
 - passage: Where none of those three names it, return `NEEDS_CONTEXT` instead of building it.
 
 ### W001
@@ -24012,10 +24034,11 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-opus.md`). Amended b
 - key: Where the work needs a unit of behavior that runs and the section text does not name it, carry the add-decision line in your report instead of building it, and return `NEEDS_CONTEXT` where no Goal sentence, Intent clause or acceptance bullet names it.
 - class: rule
 - source: plugins/grimoire/agents/implementer-opus.md:21
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 3 2026-09-19, the add-decision and the design stop's trigger.
-- verdict: keep
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 3 2026-09-19, the add-decision and the design stop's trigger; rewritten in place by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 1 2026-11-15, which adds what the addition costs to keep, who pays and how often.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 1
 - reason: An implementer that builds an unnamed mechanism and reports the section done puts the scope question past the only seat that could rule on it, since step 4 reads the report rather than the diff. Returning the line instead routes that question to the design stop's judge while nothing is built, which is what the stop exists to make possible.
-- passage: Where the work needs a unit of behavior that runs and the section text does not name it, your report carries its add-decision line: what it changes, the Goal sentence, Intent clause or acceptance bullet it serves, whether it adds a mechanism, its size as a number, and what not building it costs. Where none of those three names it, return `NEEDS_CONTEXT` instead of building it.
+- passage: Where the work needs a unit of behavior that runs and the section text does not name it, your report carries its add-decision line: what it changes; the Goal sentence, Intent clause or acceptance bullet it serves; whether it adds a mechanism; its size as a number, and what the change costs to keep, who pays it and how often; and what not building it costs. Where none of those three names it, return `NEEDS_CONTEXT` instead of building it.
 
 ### W001
 - key: Amend the section's `Tests:` line on contact with the code where a named contract proves to be a choice, as the testing-discipline skill defines one.
@@ -24676,10 +24699,11 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-sonnet.md`). Amended
 - key: Where the work needs a unit of behavior that runs and the section text does not name it, carry the add-decision line in your report instead of building it, and return `NEEDS_CONTEXT` where no Goal sentence, Intent clause or acceptance bullet names it.
 - class: rule
 - source: plugins/grimoire/agents/implementer-sonnet.md:21
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 3 2026-09-19, the add-decision and the design stop's trigger.
-- verdict: keep
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 3 2026-09-19, the add-decision and the design stop's trigger; rewritten in place by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 1 2026-11-15, which adds what the addition costs to keep, who pays and how often.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 1
 - reason: An implementer that builds an unnamed mechanism and reports the section done puts the scope question past the only seat that could rule on it, since step 4 reads the report rather than the diff. Returning the line instead routes that question to the design stop's judge while nothing is built, which is what the stop exists to make possible.
-- passage: Where the work needs a unit of behavior that runs and the section text does not name it, your report carries its add-decision line: what it changes, the Goal sentence, Intent clause or acceptance bullet it serves, whether it adds a mechanism, its size as a number, and what not building it costs.
+- passage: Where the work needs a unit of behavior that runs and the section text does not name it, your report carries its add-decision line: what it changes; the Goal sentence, Intent clause or acceptance bullet it serves; whether it adds a mechanism; its size as a number, and what the change costs to keep, who pays it and how often; and what not building it costs.
 - passage: Where none of those three names it, return `NEEDS_CONTEXT` instead of building it.
 
 ### W001
@@ -25326,10 +25350,11 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 - key: Where the work needs something that runs and the section text does not name it, report one add-decision line instead of building it, and return `NEEDS_CONTEXT` where no Goal sentence, Intent clause or acceptance bullet names it.
 - class: rule
 - source: plugins/grimoire/agents/implementer-haiku.md:20
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 3 2026-09-19, the add-decision and the design stop's trigger.
-- verdict: keep
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 3 2026-09-19, the add-decision and the design stop's trigger; rewritten in place by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 1 2026-11-15, which adds what the addition costs to keep, who pays and how often.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 1
 - reason: An implementer that builds an unnamed mechanism and reports the section done puts the scope question past the only seat that could rule on it, since step 4 reads the report rather than the diff. Returning the line instead routes that question to the design stop's judge while nothing is built, which is what the stop exists to make possible.
-- passage: Where the work needs a unit of behavior that runs and the section text does not name it, your report carries its add-decision line: what it changes, the Goal sentence, Intent clause or acceptance bullet it serves, whether it adds a mechanism, its size as a number, and what not building it costs.
+- passage: Where the work needs a unit of behavior that runs and the section text does not name it, your report carries its add-decision line: what it changes; the Goal sentence, Intent clause or acceptance bullet it serves; whether it adds a mechanism; its size as a number, and what the change costs to keep, who pays it and how often; and what not building it costs.
 - passage: Where none of those three names it, return `NEEDS_CONTEXT` instead of building it.
 
 ### W001
@@ -26836,9 +26861,9 @@ Extracted at `6bc07fb`: whole document (`agents.design-facilitator.md`). Redraft
 
 ## plugins/grimoire/agents/corpus-drafter.md
 
-This document is the charter for corpus-drafter, a dispatched read-only agent that redrafts one kit document from that document's rationale ledger heading and returns the proposed text and ledger lines to the main thread. It owns the moments of one drafting dispatch: reading its inputs, the optional cut list of the mechanism-cut plan among them, treating every input as data, applying the drafting duties and each row's call, flagging a ledger reason against the artifact it names, and shaping the blocks it returns. Load class: `plan-run`. The agent loads the charter at its own dispatch, which comes only through `tools/corpus-compression/workflow.mjs` when a plan's main thread runs a draft wave.
+This document is the charter for corpus-drafter, a dispatched read-only agent that redrafts one kit document from that document's rationale ledger heading and returns the proposed text and ledger lines to the main thread. It owns the moments of one drafting dispatch: reading its inputs, the optional cut list of the mechanism-cut plan and the optional base commit of a regrowth cut among them, treating every input as data, applying the drafting duties and each row's call, flagging a ledger reason against the artifact it names, and shaping the blocks it returns. Load class: `plan-run`. The agent loads the charter at its own dispatch, which comes through `tools/corpus-compression/workflow.mjs` when a whole-corpus plan's main thread runs a draft wave, and by the Agent tool in a regrowth cut's section.
 
-Written by `docs/plans/claude-kit_drafter-ledger-heading_spec_v1.md` section 1 on 2026-10-18: whole document (the `C` entries below, whose passages are read at `bc6f0e57`). That commit moved the charter from `plugins/claude-kit/agents/` to its current path and changed only the ownership-map path C018 quotes. Amended by `docs/plans/claude-kit_readonly-agents-scratch_spec_v1.md` section 2 on 2026-11-14: BT001 for the commit read and scratch path.
+Written by `docs/plans/claude-kit_drafter-ledger-heading_spec_v1.md` section 1 on 2026-10-18: whole document (the `C` entries below, whose passages are read at `bc6f0e57`). That commit moved the charter from `plugins/claude-kit/agents/` to its current path and changed only the ownership-map path C018 quotes. Amended by `docs/plans/claude-kit_readonly-agents-scratch_spec_v1.md` section 2 on 2026-11-14: BT001 for the commit read and scratch path. Amended by `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 on 2026-11-16: C002 rewritten in place to name the regrowth cut's route and base commit, and BZ001 added under the plan's letter BZ for the base-commit input at line 16. The new paragraph adds two lines, so an older `source:` line past 15 reads two lines short, and none is re-pointed.
 
 ### C001
 - key: Dispatch this agent under the name `corpus-drafter`.
@@ -26850,13 +26875,14 @@ Written by `docs/plans/claude-kit_drafter-ledger-heading_spec_v1.md` section 1 o
 - passage: name: corpus-drafter
 
 ### C002
-- key: Describe this agent as a read-only drafter for the corpus-compression and mechanism-cut plans, dispatched only through the workflow script, that returns proposed text and never edits a file.
+- key: Describe this agent as a read-only drafter for the kit's corpus cuts, dispatched through the workflow script by the two whole-corpus plans and by the Agent tool by a regrowth cut, that returns proposed text and never edits a file.
 - class: mechanic
 - source: plugins/grimoire/agents/corpus-drafter.md:3
-- provenance: f442893b 2026-09-25 wrote the description for the corpus-compression plan alone; 6da3ab76 2026-09-30 widened it to name the mechanism-cut plan and its cut-list rows, as a section 1 review fix of that plan.
-- verdict: keep
-- reason: The description is what an orchestrator reads before the body loads, so it carries the dispatch route and the read-only contract itself. The route is the one `docs/archive/claude-kit_corpus-compression_spec_v1.md` Dispatch Authorization makes the only dispatch path, and the cut-list input is the one `docs/archive/claude-kit_mechanism-cut_spec_v1.md` Approach adds in the paragraph opening "The drafting vehicle is the corpus-compression plan's".
-- passage: description: "Read-only drafter for the corpus-compression and mechanism-cut plans. Dispatched only through tools/corpus-compression/workflow.mjs with one document path, its rationale-ledger heading and, for the mechanism cut, the document's cut-list rows. Returns the proposed document text and the proposed ledger lines; never edits a file."
+- provenance: f442893b 2026-09-25 wrote the description for the corpus-compression plan alone; 6da3ab76 2026-09-30 widened it to name the mechanism-cut plan and its cut-list rows, as a section 1 review fix of that plan; section 4 of `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` named the regrowth cut's route and base commit on 2026-11-16.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
+- reason: The description is what an orchestrator reads before the body loads, so it carries each dispatch route and the read-only contract itself. The workflow route is the one `docs/archive/claude-kit_corpus-compression_spec_v1.md` Dispatch Authorization makes that plan's dispatch path, and the cut-list input is the one `docs/archive/claude-kit_mechanism-cut_spec_v1.md` Approach adds in the paragraph opening "The drafting vehicle is the corpus-compression plan's". The Agent tool route and the base commit are the regrowth cut's, as `plugins/grimoire/skills/kaizen/references/regrowth-cut.md` states under Fixed Section Text, since each Workflow use needs the operator's ask and a due run cannot wait on one. The read-only guard governs the agent by its seat name on either route.
+- passage: description: "Read-only drafter for the kit's corpus cuts. The corpus-compression and mechanism-cut plans dispatch it through tools/corpus-compression/workflow.mjs, and a regrowth cut by the Agent tool, each with one document path and its rationale-ledger heading, plus the mechanism cut's cut-list rows or a regrowth cut's base commit. Returns the proposed document text and the proposed ledger lines; never edits a file."
 
 ### C003
 - key: Run this agent with the Read, Grep, Glob and Bash tools and no write tool.
@@ -27015,14 +27041,15 @@ Written by `docs/plans/claude-kit_drafter-ledger-heading_spec_v1.md` section 1 o
 - passage: Journey text moves to the ledger, per the doctrine's current-state rule.
 
 ### C020
-- key: Retire no rule on taste, only where the ledger says another entry carries its meaning or a cut-list row drops it.
+- key: Retire no rule on taste, only where the ledger says another entry carries its meaning or a cut-list row or a regrowth call drops it.
 - class: rule
 - source: plugins/grimoire/agents/corpus-drafter.md:26
-- provenance: f442893b 2026-09-25 wrote both sentences; fdd80e95 2026-09-30 added the cut-list clause; 6da3ab76 2026-09-30 cut that clause to its current words.
-- verdict: keep
-- reason: `docs/archive/claude-kit_corpus-compression_spec_v1.md` Intent lists "any rule retired on taste" under what done does not need. `docs/archive/claude-kit_mechanism-cut_spec_v1.md` Approach keeps that duty for shrinks and merges and has it yield to the cut file for drops, "because the drop is the operator's ruling". The second sentence is the first one's bound.
+- provenance: f442893b 2026-09-25 wrote both sentences; fdd80e95 2026-09-30 added the cut-list clause; 6da3ab76 2026-09-30 cut that clause to its current words; section 4 of `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` added the regrowth call in its review fix round, on the architect's ruling in record DEV-GRIMOIRE-2-c049e7e0-0b70-47ae-92f6-b21abc0a4f40-16.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
+- reason: `docs/archive/claude-kit_corpus-compression_spec_v1.md` Intent lists "any rule retired on taste" under what done does not need. `docs/archive/claude-kit_mechanism-cut_spec_v1.md` Approach keeps that duty for shrinks and merges and has it yield to the cut file for drops, "because the drop is the operator's ruling". The second sentence is the first one's bound. A regrowth cut carries no cut list, so its own drop call is the second route.
 - passage: Retire nothing on taste.
-- passage: A rule leaves only where the ledger says another entry carries its meaning, or a cut-list row drops it.
+- passage: A rule leaves only where the ledger says another entry carries its meaning, or a cut-list row or a regrowth call drops it.
 
 ### C021
 - key: Apply each cut-list row's call.
@@ -27061,13 +27088,14 @@ Written by `docs/plans/claude-kit_drafter-ledger-heading_spec_v1.md` section 1 o
 - passage: A merge becomes a pointer at the owner's text.
 
 ### C025
-- key: Remove a mechanism whose row calls drop, and propose retire on each entry whose passage it carried, naming the row and carrying the dispatched `ruled:` line.
+- key: Remove a mechanism whose row calls drop, and propose retire on each entry whose passage it carried, naming the row and carrying the dispatched `ruled:` line; a regrowth drop names no row and writes no `ruled:` line.
 - class: rule
 - source: plugins/grimoire/agents/corpus-drafter.md:27
-- provenance: fdd80e95 2026-09-30 wrote it with "the `ruled:` line the dispatch gives"; 6da3ab76 2026-09-30 cut it to its current words when C010 made the line an input.
-- verdict: keep
-- reason: `docs/archive/claude-kit_mechanism-cut_spec_v1.md` Approach step 2 has each entry a drop carried "re-verdicted retire with the row's id and name as the reason and `- ruled: cut 2026-09-30`", and its acceptance bullet 3 checks exactly that on every such entry.
-- passage: A drop leaves, and each entry whose passage it carried is proposed retire, naming the row, with that `ruled:` line.
+- provenance: fdd80e95 2026-09-30 wrote it with "the `ruled:` line the dispatch gives"; 6da3ab76 2026-09-30 cut it to its current words when C010 made the line an input; section 4 of `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` added the regrowth drop in its review fix round, on the architect's ruling in record DEV-GRIMOIRE-2-c049e7e0-0b70-47ae-92f6-b21abc0a4f40-16.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
+- reason: `docs/archive/claude-kit_mechanism-cut_spec_v1.md` Approach step 2 has each entry a drop carried "re-verdicted retire with the row's id and name as the reason and `- ruled: cut 2026-09-30`", and its acceptance bullet 3 checks exactly that on every such entry. A `ruled:` line is the operator's (docs/rationale-ledgers.md), and a regrowth drop rests on no ruling, so its retire's reason states the ground instead.
+- passage: A drop leaves, and each entry whose passage it carried is proposed retire, naming the row, with that `ruled:` line. A regrowth drop names no row and writes no `ruled:` line, and its retire's reason says the passage's reason names no failure a record shows.
 
 ### C026
 - key: Decline a row whose call the ledger shows is wrong, and keep the rule.
@@ -27162,13 +27190,14 @@ Written by `docs/plans/claude-kit_drafter-ledger-heading_spec_v1.md` section 1 o
 - passage: Second, one entry per live ledger id: the id, `passage:` quoting your landed text verbatim, and `flag: <value>` with one line of why where a flag is earned.
 
 ### C036
-- key: With a cut list, return a third block naming each declined row's id and why, or `none`.
+- key: With a cut list, return a third block naming each declined row's id and why, or `none`; on a regrowth cut, the third block lists each added passage by its first words, its call and one line of why.
 - class: mechanic
 - source: plugins/grimoire/agents/corpus-drafter.md:36
-- provenance: fdd80e95 2026-09-30 added the third block; 6da3ab76 2026-09-30 added `none` for an empty block in the same review fix as C010.
-- verdict: keep
-- reason: Acceptance bullet 2 of `docs/archive/claude-kit_mechanism-cut_spec_v1.md` has the Chapter name each row the drafter found wrong and say why. Approach step 2 asks the drafter for "a list of rows it declined to apply, each with a reason", and `none` tells an empty list from a missing one.
-- passage: With a cut list, add a third block: each declined row's id and why, or `none`.
+- provenance: fdd80e95 2026-09-30 added the third block; 6da3ab76 2026-09-30 added `none` for an empty block in the same review fix as C010; section 4 of `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` added the regrowth block in its review fix round, on the architect's ruling in record DEV-GRIMOIRE-2-c049e7e0-0b70-47ae-92f6-b21abc0a4f40-16.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
+- reason: Acceptance bullet 2 of `docs/archive/claude-kit_mechanism-cut_spec_v1.md` has the Chapter name each row the drafter found wrong and say why. Approach step 2 asks the drafter for "a list of rows it declined to apply, each with a reason", and `none` tells an empty list from a missing one. A regrowth section passes only where its Chapter lists each added passage with its call and why it stayed (`plugins/grimoire/skills/kaizen/references/regrowth-cut.md`, Fixed Section Text), and this block is where that list is read from.
+- passage: With a cut list, add a third block: each declined row's id and why, or `none`. A regrowth cut's third block instead lists each added passage by its first words, its call and one line of why.
 
 ### C037
 - key: End the return with the word count against the target.
@@ -27188,6 +27217,16 @@ Written by `docs/plans/claude-kit_drafter-ledger-heading_spec_v1.md` section 1 o
 - landed: `docs/plans/claude-kit_readonly-agents-scratch_spec_v1.md` section 2
 - reason: A checkout, switch, reset or stash moves the tree every agent is reading, and `git show` reads the same bytes in place. The strict class leaves the temp directory writable, as fixture `readonly-agent-0223` records, so the charter alone keeps scratch out of it. The pair is one text in every Bash-holding strict charter, since each is loaded alone.
 - passage: Read a past commit's files with `git show <sha>:<path>` or `git diff`, never by checkout, switch, reset or stash, each of which moves the tree other agents are reading. Scratch goes under `.kit/scratch/`, in the folder your brief names where it names one, never the machine's temp directory and nowhere else in the tree.
+
+### BZ001
+- key: With a base commit and no word target, read `git diff <base> -- <document>`, give each passage added since the base a keep, shrink, merge or drop call under a cut-list row's rules, let the duties reach only the added passages and return every other word for word, never drop one whose reason names a failure a record shows, and end with the word count before and after.
+- class: rule
+- source: plugins/grimoire/agents/corpus-drafter.md:16
+- provenance: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4 2026-11-16, on the operator's ask of 2026-11-15 on the architect seat's channel, quoted under that plan's `## Intent`: "How do we design for the subtraction side in every plan?"
+- verdict: keep
+- landed: `docs/plans/claude-kit_additions-earn-their-keep_spec_v1.md` section 4
+- reason: A regrowth cut reads only what grew since an entry's base, as `plugins/grimoire/skills/kaizen/references/regrowth-cut.md` states under What a Run Reads, so a passage older than the base was judged by an earlier cut and returns word for word. The four calls and their rules are the ones a cut-list row takes (C021 to C025), so the drafter applies one rule set on either route. No target is named because a target would choose cuts by arithmetic, which the plan's Intent refuses. A passage whose reason names a recorded failure meets the first ground of the brainstorming skill's worth test, so it is kept or shrunk. The before and after count replaces the count against a target (C037), and a section of the run passes on it or on its Chapter's list.
+- passage: A regrowth cut's dispatch names a base commit and no word target. Read `git diff <base> -- <document>`, and give each passage added since the base a call of `keep`, `shrink`, `merge` or `drop` under the rules a cut-list row's call takes. The duties below then reach only the added passages, and every other passage returns word for word. Never drop a passage whose reason names a failure a record shows. End your return with the word count before and after, in place of the count against a target.
 
 ## plugins/grimoire/agents/finding-verifier.md
 

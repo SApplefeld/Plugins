@@ -5566,10 +5566,13 @@ export const register: Register = async (on, options) => {
     await registerTool("supervisor_restart", () => $.tool.register({
       name: "supervisor_restart",
       description:
-        "Relaunch the supervised child without stopping the supervisor: this child exits by the graceful EOF " +
-        "path and a fresh one starts with the goal tree intact and resumes the active plan. Call it on the " +
-        "operator's ask for a restart, or to pick up an updated runtime such as a plugin update without ending " +
-        "the run. A finished goal needs no call here either. Owner only.",
+        "Restart this persona: this child exits by the graceful EOF path and a fresh one starts with the " +
+        "goal tree intact and resumes the active plan. Under a keeper that can hand the persona to the fleet " +
+        "supervisor, the supervisor and the keeper end too, and the fleet supervisor starts the persona again " +
+        "on the installed plugin build. Otherwise, and in a run with no keeper, the child is relaunched alone. " +
+        "Call it on the operator's ask for a restart, or to " +
+        "pick up an updated runtime such as a plugin update. A finished goal needs no call here either. " +
+        "Owner only.",
       inputSchema: {
         type: "object",
         properties: {
@@ -5963,9 +5966,11 @@ export const register: Register = async (on, options) => {
     await registerTool("fleet_restart", () => $.tool.register({
       name: "fleet_restart",
       description:
-        "Restart another persona's child. Writes restart.request into the run directory the roster that the plugin's " +
+        "Restart another persona. Writes restart.request into the run directory the roster that the plugin's " +
         "fleetRoster setting names gives that persona; its supervisor, where one is running, reads the file at its next poll and " +
-        "restarts the child, letting a running turn end first. The goal tree is kept. Refused when this session does not hold the " +
+        "stops the child, letting a running turn end first. Under a keeper that can hand the persona off, the supervisor and the " +
+        "keeper then end and the fleet supervisor starts the persona again on the installed plugin build, and otherwise the " +
+        "supervisor relaunches the child. The goal tree is kept. Refused when this session does not hold the " +
         "coordinator persona, when no roster is set or it cannot be read, when persona is not a roster entry whose enabled " +
         "is true, when persona is this session's own (supervisor_restart restarts that one), when the run directory does " +
         "not exist, and when the persona's standing request is less than fifteen minutes old. Writes nothing to the commons " +

@@ -34,6 +34,9 @@
 #       despite every retry
 #   6 = park_requested honored: the keeper brings the persona back at the
 #       next boot or a start after the operator's -Release
+#   7 = a requested restart handed to the keeper: the run ends in place of
+#       the next launch, so the persona starts again on the installed
+#       build. Taken only where the keeper set SUPERVISOR_RESTART_EXITS=1
 
 set -u
 set -o pipefail
@@ -488,6 +491,22 @@ if ! positive_number "$TICK_MS"; then
   echo "ERROR: controllerTickMs '$TICK_MS' is not a whole number of milliseconds greater than zero (digits only, no leading zero, at most 9 digits)" >&2
   exit 1
 fi
+
+# --- Whether a requested restart ends the run ---
+# A keeper sets SUPERVISOR_RESTART_EXITS=1 for the supervisor it launches.
+# Under it a requested restart ends this run at exit 7 in place of the next
+# launch, and the keeper hands the persona to the fleet supervisor, which
+# starts it again on the installed build. Only the exact value 1 is the flag;
+# any other value reads as absent, and a restart then launches the next child
+# in place. The variable leaves the environment once read, so neither the
+# child nor any process under it inherits it: a supervisor that a persona
+# session starts with no keeper would otherwise exit 7 with nothing to start
+# it again.
+RESTART_EXITS=0
+if [ "${SUPERVISOR_RESTART_EXITS:-}" = "1" ]; then
+  RESTART_EXITS=1
+fi
+unset SUPERVISOR_RESTART_EXITS
 
 # --- Emit settings JSON (from the roster, or only if not already provided) ---
 # A keeper-launched supervisor carries SETTINGS_FROM_ROSTER=1, since its run
@@ -5037,6 +5056,10 @@ fi
 # roughly ten WAITING lines proving liveness without flooding the log.
 ALIVE_LOG_EVERY_N_POLLS=6
 
+# Whether the pass of the loop about to start follows a requested restart.
+# Each of the two restart paths sets it, and the loop head reads it once.
+RESTART_HONORED=0
+
 while true; do
   # --- A shutdown recorded while the last child was being stopped ---
   # No poll runs inside a stop, so a shutdown_requested the child records
@@ -5062,6 +5085,28 @@ while true; do
       fi
       clear_shutdown_request
       exit 0
+    fi
+  fi
+
+  # --- A requested restart handed to the keeper ---
+  # Both restart paths, the poll's and the natural exit's, come here with
+  # RESTART_HONORED set. Under a keeper the run ends at exit 7 in place of
+  # the next launch, which the keeper reads as a hand-off. A stop asked for
+  # during the restart's stop still wins and ends the run at exit 0: one the
+  # child recorded in the store is honored by the shutdown read above, and a
+  # shutdown request file is honored here, since the launch block that reads
+  # that file stands below this exit. With no keeper the pass goes on and
+  # launches the next child in place, and the launch block reads the file.
+  if [ "$RESTART_HONORED" -eq 1 ]; then
+    RESTART_HONORED=0
+    if [ "$RESTART_EXITS" -eq 1 ]; then
+      if [ -f "$SHUTDOWN_REQUEST_FILE" ]; then
+        log "SHUTDOWN_REQUEST: $SHUTDOWN_REQUEST_FILE is present after the restart's stop of child-$CHILD_INDEX, so the run ends at exit 0 rather than handing off to the keeper"
+        clear_shutdown_request
+        exit 0
+      fi
+      log "HANDOFF: restart requested; child-$CHILD_INDEX has ended and no child is launched in its place, so the run ends at exit 7 for the keeper, which hands the persona to the fleet supervisor"
+      exit 7
     fi
   fi
 
@@ -5647,7 +5692,12 @@ while true; do
           log "EXIT child-$CHILD_INDEX: a process from this child is alive or unverifiable despite every stop retry (STOP_PATH=$STOP_PATH)"
           exit 5
         fi
-        log "PASSIVE: restart requested; relaunching the child with the goal tree kept, the new child resumes the active plan"
+        # The loop head ends the run here under a keeper, and the relaunch
+        # line is written only where the next child is launched in place.
+        RESTART_HONORED=1
+        if [ "$RESTART_EXITS" -ne 1 ]; then
+          log "PASSIVE: restart requested; relaunching the child with the goal tree kept, the new child resumes the active plan"
+        fi
         continue 2  # break out of the poll loop and go to the next child
         ;;
       restart)
@@ -5816,7 +5866,11 @@ while true; do
   fi
   if [ -n "$RESTART_REQUESTED_TS" ] && [ "$RESTART_REQUESTED_TS" -gt "$CHILD_START_TS" ]; then
     log "RESTART_PASSIVE: restart_requested at $RESTART_REQUESTED_TS > child start $CHILD_START_TS (no shutdown requested)"
-    log "PASSIVE: restart requested; relaunching the child with the goal tree kept, the new child resumes the active plan"
+    # As on the poll path: the loop head ends the run here under a keeper.
+    RESTART_HONORED=1
+    if [ "$RESTART_EXITS" -ne 1 ]; then
+      log "PASSIVE: restart requested; relaunching the child with the goal tree kept, the new child resumes the active plan"
+    fi
     continue  # only the outer loop encloses this point; no crash/restart accounting
   fi
   read -r ROOT_COMPLETE_TS ROOT_COMPLETE_BACKFILLED_FLAG <<< "$(get_root_complete "$WORKDIR" "$PERSONA")"

@@ -3,7 +3,8 @@
 # the scheduled task runs) and bin/keeper-probe.ps1 (the recorder that measures what a task
 # delivers), so the allowlist, the env file reader, the roster readers, the supervisor invocation
 # builder, the native argument quoting, the live supervisor and live keeper matches, the repo URL
-# check, the exit-code policy and the fleet decision each exist once.
+# check, the exit-code policy, the hand-off decision with its fleet supervisor match and the fleet
+# decision each exist once.
 #
 #   . (Join-Path $PSScriptRoot 'keeper-functions.ps1')
 #
@@ -32,7 +33,8 @@ $script:KeeperEnvAllowlist = @(
 # crash-class exit up to the cap, and returns to the base after a run that lasted the reset uptime.
 # Exit 1 holds after the count below of consecutive exit-1 runs that each ended inside the short
 # uptime, because a configuration error repeats at once while a launch-time fault a boot can hit
-# once does not.
+# once does not. Exit 7, a requested restart, waits no delay and leaves the ladder as exit 0 does:
+# the keeper hands the persona to the fleet supervisor, or launches the supervisor again at once.
 $script:KeeperBaseDelaySeconds = 300
 $script:KeeperMaxDelaySeconds = 14400
 $script:KeeperResetUptimeSeconds = 3600
@@ -56,7 +58,8 @@ $script:FleetKeeperLauncherNames = @('Start-Persona.ps1', 'Start-InstalledPerson
 Decides what the keeper does after one supervisor exit, from the exit code and the run's shape.
 
 .DESCRIPTION
-Implements the policy table: exit 0 holds; exit 6 parks; exit 1 relaunches after the base delay
+Implements the policy table: exit 0 holds; exit 6 parks; exit 7, a requested restart the supervisor
+ended its run on, hands off; exit 1 relaunches after the base delay
 and holds once the consecutive short exit-1 count reaches the hold count; exit 2 relaunches after
 the base delay with the ladder untouched; exit -1, the code Stop-Process and Process.Kill leave
 where taskkill /F leaves 1, is a termination from outside with no signal and relaunches after the
@@ -65,12 +68,15 @@ relaunches after the current delay and doubles it up to the cap. A run that last
 or longer puts the ladder back at the base before the row is applied, so a persona that ran for an
 hour and then crashed waits the base delay, not whatever the ladder had climbed to.
 
-Returns a hashtable: Action is 'hold', 'park', 'relaunch' or 'exit'; DelaySeconds is how long to
-wait before the next launch (0 when not relaunching); NextDelaySeconds is the ladder value to carry
-into the next decision; NextExit1Count is the consecutive short exit-1 count to carry; Reason is one
-line of text with no newline, fit for the DECIDE log line and the hold and park markers. A park
-stops the wrapper as a hold does, and differs in that the next boot ends it on its own,
-where a hold stops every later start until it is released.
+Returns a hashtable: Action is 'hold', 'park', 'handoff', 'relaunch' or 'exit'; DelaySeconds is how
+long to wait before the next launch (0 when not relaunching); NextDelaySeconds is the ladder value
+to carry into the next decision; NextExit1Count is the consecutive short exit-1 count to carry;
+Reason is one line of text with no newline, fit for the DECIDE log line and the hold and park
+markers. A park stops the wrapper as a hold does, and differs in that the next boot ends it on its
+own, where a hold stops every later start until it is released. A hand-off ends the wrapper with
+no marker, so the fleet supervisor starts the persona again, and Get-KeeperHandoffDecision below
+says whether the wrapper takes it or launches the supervisor again itself with the values this row
+carries.
 #>
 function Get-KeeperDecision {
     param(
@@ -94,6 +100,12 @@ function Get-KeeperDecision {
             return @{
                 Action = 'park'; DelaySeconds = 0; NextDelaySeconds = $delay; NextExit1Count = 0
                 Reason = "supervisor exited 6: parked, back at the next boot or a start after the operator's -Release"
+            }
+        }
+        7 {
+            return @{
+                Action = 'handoff'; DelaySeconds = 0; NextDelaySeconds = $delay; NextExit1Count = 0
+                Reason = 'supervisor exited 7: requested restart, a hand-off to the fleet supervisor'
             }
         }
         1 {
@@ -147,6 +159,45 @@ function Get-KeeperDecision {
 
 <#
 .SYNOPSIS
+Decides whether a keeper whose supervisor exited 7 ends, from the four facts that say something will start the persona again.
+
+.DESCRIPTION
+A keeper that ends with no marker is started again only by a fleet supervisor that is running and
+whose roster names the entry once and enabled, where the run directory holds no hold marker and no
+boot marker naming this boot. FleetSupervisorLive says a fleet supervisor process serving the
+keeper's roster is live. RosterEnabled says that roster names the entry once, with enabled as the
+JSON boolean true and a workdir (Test-KeeperRosterHandoffEntry). BootMarkerClear says no boot
+marker that can name this boot stands in the run directory. HoldClear says no keeper.hold stands
+there, whatever stands beside it. The caller reads all four and hands them in, counting a fact it
+could not read as false. Nothing here reads the process list or a file.
+
+The facts answer the rows of Get-FleetDecision that leave a wanted entry down with no live keeper:
+an entry not wanted, which the roster fact covers; held, which the hold fact covers; and parked,
+which the boot marker fact covers. A retire in flight ends at a start a tick later, and the two
+backoff rows only delay a start. The facts do not say whether the keeper the fleet supervisor
+starts will launch: its launcher, env file and roster entry are read afresh at that start, as at a
+boot, and a fault there stops it as it would stop a boot.
+
+Returns a hashtable: Handoff is $true only where all four facts are true; Reason is one line of text
+with no newline, fit for the log, naming each fact that is false, and empty for a hand-off.
+#>
+function Get-KeeperHandoffDecision {
+    param(
+        [Parameter(Mandatory)][bool]$FleetSupervisorLive,
+        [Parameter(Mandatory)][bool]$RosterEnabled,
+        [Parameter(Mandatory)][bool]$BootMarkerClear,
+        [Parameter(Mandatory)][bool]$HoldClear
+    )
+    $failed = New-Object System.Collections.Generic.List[string]
+    if (-not $FleetSupervisorLive) { $failed.Add('no fleet supervisor is live for this roster') }
+    if (-not $RosterEnabled) { $failed.Add('the roster does not name the entry once, enabled, with a workdir') }
+    if (-not $BootMarkerClear) { $failed.Add('a boot marker stands that may name this boot, since the boot time was not read at this keeper''s start') }
+    if (-not $HoldClear) { $failed.Add('a hold marker stands in the run directory') }
+    return @{ Handoff = ($failed.Count -eq 0); Reason = ($failed -join ' and ') }
+}
+
+<#
+.SYNOPSIS
 Reads the roster file and returns the enabled entry with the given name.
 
 .DESCRIPTION
@@ -193,6 +244,40 @@ function Read-KeeperRoster {
         throw "roster '$Path' entry '$Name' is not enabled"
     }
     return $match
+}
+
+<#
+.SYNOPSIS
+Tells whether the roster names an entry the way the fleet supervisor needs in order to start it.
+
+.DESCRIPTION
+The roster is read once, through Read-FleetRoster, the fleet supervisor's own reader, so a file it
+refuses, one that does not parse or is not a JSON array, is $false here too. The entry is then judged
+as Invoke-FleetTick in bin/Start-Fleet.ps1 judges one, which leaves alone, and so never starts, an
+entry its roster names more than once, one whose enabled field is not a JSON boolean, and one that
+names neither rundir nor workdir or names a repo with no workdir. Names compare as the fleet
+supervisor compares them, lower-cased. Returns $true only where the roster names the entry once,
+with enabled as the JSON boolean true and a workdir that is not blank. That is stricter than the
+fleet supervisor's directory rule, because a keeper cannot launch without a workdir
+(Build-SupervisorInvocation), so an entry with a rundir alone reads $false and the keeper launches
+the supervisor again rather than hand off. This is the roster fact a keeper reads before a hand-off.
+#>
+function Test-KeeperRosterHandoffEntry {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name
+    )
+    try {
+        $entries = Read-FleetRoster -Path $Path
+    } catch {
+        return $false
+    }
+    $key = $Name.ToLowerInvariant()
+    $found = @($entries | Where-Object { $null -ne $_ -and ([string]$_.name).ToLowerInvariant() -eq $key })
+    if ($found.Count -ne 1) { return $false }
+    $enabledProperty = $found[0].PSObject.Properties['enabled']
+    if ($null -eq $enabledProperty -or $enabledProperty.Value -isnot [bool] -or -not $enabledProperty.Value) { return $false }
+    return -not [string]::IsNullOrWhiteSpace([string]$found[0].workdir)
 }
 
 <#
@@ -529,6 +614,63 @@ function Find-KeeperLiveSupervisor {
     return $null
 }
 
+# The two scripts a fleet supervisor's command line can name as the script it runs, the checkout's
+# and the installed route's launcher, and the roster both read when their command line names none,
+# which is the default each declares for -Roster.
+$script:FleetSupervisorScriptNames = @('Start-Fleet.ps1', 'Start-InstalledFleet.ps1')
+$script:FleetDefaultRosterPath = 'D:/personas/fleet.json'
+
+<#
+.SYNOPSIS
+Says whether one command line is a fleet supervisor that will start the personas of the given roster.
+
+.DESCRIPTION
+A keeper that hands its persona off needs a fleet supervisor that keeps running and reads the
+keeper's own roster. The line is tokenized with Split-KeeperCommandLine. It counts where the token
+after the first -File is a path whose file name is one of the fleet scripts, compared whole and
+ignoring case, so a line that only mentions such a script, as an editor's or a registration's
+does, is not one. Among the tokens after the script, a -Once is the single tick a test or a hand
+run starts, which ends before it would start anything again, so it does not count. The roster the
+process serves is the token after -Roster, and the scripts' default where the line carries none.
+It is compared with RosterPath ignoring case and treating / and \ as the same character, and
+nothing else about either path is normalized, so a fleet supervisor on another roster does not
+count. -File, -Once and -Roster are compared whole and ignoring case, and no abbreviation of them
+is read.
+
+Returns $true or $false. Nothing here reads the process list.
+#>
+function Test-KeeperFleetSupervisorCommandLine {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CommandLine,
+        [Parameter(Mandatory)][string]$RosterPath
+    )
+    $ignoreCase = [System.StringComparison]::OrdinalIgnoreCase
+    # A line that names no fleet script is passed over before it is tokenized, as most lines of a
+    # process list are.
+    $carries = $false
+    foreach ($name in $script:FleetSupervisorScriptNames) {
+        if ($CommandLine.IndexOf($name, $ignoreCase) -ge 0) { $carries = $true; break }
+    }
+    if (-not $carries) { return $false }
+    $tokens = Split-KeeperCommandLine -CommandLine $CommandLine
+    $scriptAt = -1
+    for ($k = 1; $k -lt $tokens.Count - 1; $k++) {
+        if (-not [string]::Equals($tokens[$k], '-File', $ignoreCase)) { continue }
+        $leaf = $tokens[$k + 1].Substring($tokens[$k + 1].LastIndexOfAny([char[]]@('\', '/')) + 1)
+        foreach ($name in $script:FleetSupervisorScriptNames) {
+            if ([string]::Equals($leaf, $name, $ignoreCase)) { $scriptAt = $k + 1; break }
+        }
+        break
+    }
+    if ($scriptAt -lt 0) { return $false }
+    $served = $script:FleetDefaultRosterPath
+    for ($k = $scriptAt + 1; $k -lt $tokens.Count; $k++) {
+        if ([string]::Equals($tokens[$k], '-Once', $ignoreCase)) { return $false }
+        if ([string]::Equals($tokens[$k], '-Roster', $ignoreCase) -and $k + 1 -lt $tokens.Count) { $served = $tokens[$k + 1] }
+    }
+    return [string]::Equals($served.Replace('/', '\'), $RosterPath.Replace('/', '\'), $ignoreCase)
+}
+
 # The two shapes a roster repo may take, the same two hooks/roster.ts's HTTPS_REPO_RE and
 # SSH_REPO_RE admit: https://<host>/<path> with no userinfo, port, query or fragment, and
 # git@<host>:<path>. A host is dot-separated labels of letters, digits and hyphens, neither
@@ -781,7 +923,8 @@ is nothing; and everything else starts. A clone-failed record is the fleet super
 where an entry's repository could not be cloned before its first start, and it waits out its
 notBefore as a backoff does, carrying the same ladder. held, parked and retired are recorded once,
 so a second tick in the same state is nothing. Only the sidecar and the request count with a live
-keeper, since a live keeper is the truth about the rest of its own run directory.
+keeper, since a live keeper is the truth about the rest of its own run directory. A new row that
+leaves a wanted entry down with no live keeper needs a fact in Get-KeeperHandoffDecision.
 
 Returns a hashtable: Action is one of none, start, adopted, retire, retire-timeout, retired, held,
 parked and backoff; Reason is one line of text fit for the log; Release says a start removes

@@ -2323,9 +2323,11 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
   }
 
-  // Serve supervisor_restart (plan item 8.3: mirrors supervisor_shutdown;
-  // supervise.sh's decide unit maps this fact to restart_passive, so the
-  // child is relaunched with the goal tree kept rather than the run ending).
+  // Serve supervisor_restart (plan item 8.3: mirrors supervisor_shutdown). The
+  // supervisor stops the child after this turn ends; under a keeper that can
+  // hand the persona off, the keeper and the supervisor end and the persona
+  // starts again on the installed build, and otherwise the child is relaunched
+  // in place, the goal tree kept either way.
   if (e.tool === "mcp__personas__supervisor_restart") {
     if (!sess.isOwner) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
@@ -2341,7 +2343,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     });
     const writeOk = await persist();
     if (writeOk) {
-      return { result: `Restart requested: ${reason}. The supervisor will relaunch the child after this turn ends; the goal tree is kept and the new child resumes the active plan.` };
+      return { result: `Restart requested: ${reason}. The supervisor stops the child after this turn ends. Under a keeper that can hand the persona off, the keeper and the supervisor end and the persona starts again on the installed build; otherwise the child is relaunched in place. The goal tree is kept and the new child resumes the active plan.` };
     }
     setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
     return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
@@ -2996,7 +2998,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     }, null, 2) };
   }
 
-  // Serve fleet_restart (the coordinator restarts another persona's child).
+  // Serve fleet_restart (the coordinator restarts another persona).
   // The request is a file in the target's run directory, which that
   // persona's supervisor reads as the same fact as its store's
   // restart_requested (bin/supervise-restart-request.mjs), so no session
@@ -3021,7 +3023,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const ground = deliveryGroundIn(liveClaimsOf(entries, sess.staleAfterMs, now), coordinatorPersona, sess.mySessionId, coordinatorPersona, { persona: architectPersona, records: [] });
     if (!("ground" in ground) || ground.ground !== COORDINATOR_GROUND) {
       const standing = "ground" in ground ? `the ground '${ground.ground}'` : "no ground on that persona at all";
-      return refuse(`only the session holding the '${coordinatorPersona}' persona may restart another persona's child, and this session holds ${standing}.`);
+      return refuse(`only the session holding the '${coordinatorPersona}' persona may restart another persona, and this session holds ${standing}.`);
     }
     if (fleetRoster === "") {
       return refuse("the plugin's fleetRoster setting names no roster file, so there is no persona to restart.");
@@ -3081,7 +3083,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     } catch (err) {
       return refuse(`the request file '${requestPath}' could not be written: ${boundedText(safeErrorText(err))}`);
     }
-    return { result: `Restart requested for '${shown}': where its supervisor is running, it restarts the child at its next poll and lets a running turn end first. Where none is running, the next child launched for that persona starts after the request and reads it as served.` };
+    return { result: `Restart requested for '${shown}': where its supervisor is running, it stops the child at its next poll and lets a running turn end first, and the persona starts again, on the installed build where its keeper can hand the persona off. Where none is running, the next child launched for that persona starts after the request and reads it as served.` };
   }
 
   // Serve fleet_interrupt (the coordinator ends another persona's running
@@ -3321,7 +3323,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return refuse(`'${shown}' is this session's own persona, whose lever is supervisor_shutdown.`);
     }
     // Each role field is read the way the keeper hands it to the launch.
-    // Build-SupervisorInvocation (bin/keeper-functions.ps1:315-316) skips a
+    // Build-SupervisorInvocation (bin/keeper-functions.ps1) skips a
     // value that is null or whitespace-only and passes any other value as
     // its string, untrimmed. bin/agentic-common.sh emit_settings_json then
     // reads an unset COORDINATOR_PERSONA as coordinator (:342), so a blank

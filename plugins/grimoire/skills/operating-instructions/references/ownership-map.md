@@ -116,7 +116,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Moment | Owner |
 |---|---|
 | Recall, the write bar, outcome journal, applied stamps, tags, decay, shared tiers, `memq`, and the four remedies for a bad record | `memory-system` |
-| Capturing kit friction: the bar, the adjudication pass, how an accepted lesson lands, briefs, and the upstream watch over Claude Code releases and pages | `kaizen` |
+| Capturing kit friction: the bar, the adjudication pass, the close of an untouched note, how an accepted lesson lands, briefs, the upstream watch over Claude Code releases and pages, and the regrowth cut of the instruction text | `kaizen` |
 | Validating and repairing the kit install | `kit-doctor` |
 | Writing or amending curated prose the kit ships, and proving a wording change moves behavior, except landing an accepted lesson | `writing-skills` |
 | A file growing, and who moves its cap | `writing-skills` (The size budget is a ledger rather than a ceiling), enforced by `scripts/kit-size.js` and the repository-root `test/size-ratchet.test.js` |

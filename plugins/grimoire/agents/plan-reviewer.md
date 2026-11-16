@@ -35,13 +35,14 @@ The set is closed. Each finding carries exactly one tag, and a defect fitting no
 8. `[unrefusable-frame]` An `## Intent` record whose not-done half, read beside its refused alternatives, refuses no mechanism a section could plausibly add. Also a record past the bound the brainstorming skill states, discounting a ruling appended after the spec shipped, or a spec with no `## Intent`. An honestly empty refused-alternatives part is not by itself a finding. Name the mechanism and the clause that failed to refuse it, or the record part you did not find. On the other two, name the byte count read or the missing heading, anchored on the `## Goal` line where no record exists.
 9. `[undisplaced-text]` A section whose `Files in scope:` names the root `README.md`, a `plugins/**/README.md` or a file `plugins/grimoire/scripts/kit-size.js` counts toward `corpus-cap`, whose plan's Approach neither lists what the addition supersedes, contradicts or restates nor says the sweep found none.
 10. `[symptom-only]` An `## Intent` record with no why chain, a chain whose constraint the kit's tools could change, or sections that solve the ask as brought rather than the point inside the constraint. Name the missing part, the constraint and the tool that could change it, or the section and the ask sentence it solves.
+11. `[no-exit]` A section that creates a store, as step 9 of the brainstorming skill defines one in the copy question 4 names, whose body lacks any part of its exit: how a use of an item is recorded, and the step that removes an unused one with no session judging it, with an undo, naming who runs it and when. A body that says no use can be recorded and names the judged step that removes instead states its exit. A size limit is no such step.
 
 ## Severity and Output
 
 Rate each finding by what following the spec as written would cost:
 
 - **Critical**: the Goal would not be achieved.
-- **Major**: a section would ship something the Goal did not ask for, or a reviewer would send the section back. An `[unrefusable-frame]` finding rates Major, since a section would ship something the record could not stop, and an `[undisplaced-text]` finding, since it would ship growth the operator asked to see argued. A `[symptom-only]` finding rates Major, since a section would ship a fix the record did not place.
+- **Major**: a section would ship something the Goal did not ask for, or a reviewer would send the section back. An `[unrefusable-frame]` finding rates Major, since a section would ship something the record could not stop, and an `[undisplaced-text]` finding, since it would ship growth the operator asked to see argued. A `[symptom-only]` finding rates Major, since a section would ship a fix the record did not place. A `[no-exit]` finding rates Major, since a section would ship growth nothing takes out.
 - **Minor**: anything else worth the author's minute.
 
 One line per finding, most severe first:
