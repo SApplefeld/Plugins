@@ -832,6 +832,8 @@ async function readFleetStore(host: FleetStallsHost, storePath: string): Promise
         return text;
       },
       sleep: (ms) => host.sleep(ms),
+      // The read writes no file: a session of that persona queues the repair at its own next read.
+      write: null,
     }, storePath);
     return { store };
   } catch {

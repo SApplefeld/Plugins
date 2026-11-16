@@ -2,9 +2,12 @@
 // reading of a persona store and a supervisor mailbox line, the store id of a
 // persona and the meter drain bounds.
 //
-// No import of the engine handle and no state of its own: every function takes what it
-// reads as arguments, so the tick harness, which loads a fresh hooks/index.ts per
-// case, shares nothing through it.
+// No import of the engine handle: every function takes what it reads as
+// arguments. The tick harness loads a fresh hooks/index.ts per case but not
+// this module, so its cases share one thing here: writePersonaStore's chain
+// of writes per path. Once a case's writes have settled, the chain carries
+// nothing into the next case. A write that never settles does carry over,
+// and it holds the next case's writes to the same path.
 
 import { headPoints } from "./agent-state";
 import { fnv1aHash } from "./cost-ledger";
@@ -52,6 +55,37 @@ export function parsePersonaStore(text: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+// The index one past the leading JSON value's last character, for the
+// reader's repair of a store whose text does not parse whole, or -1 where
+// the text opens with no object or array, or opens one that never closes.
+// The scan walks the text as JSON reads it: a string runs from a quote to
+// its closing quote with a backslash escaping the character after it, and
+// every bracket outside a string moves the depth, so a quote or a bracket
+// inside a string, as a decision's detail may carry, moves nothing. The
+// value ends where the depth returns to zero.
+function leadingValueEnd(text: string): number {
+  let i = 0;
+  while (i < text.length && /\s/.test(text[i])) i++;
+  if (text[i] !== "{" && text[i] !== "[") return -1;
+  let depth = 0;
+  let inString = false;
+  for (; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === "\"") inString = false;
+    } else if (c === "\"") {
+      inString = true;
+    } else if (c === "{" || c === "[") {
+      depth++;
+    } else if (c === "}" || c === "]") {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
 // The persona store file read, for every site that loads a persona's state
 // from it or writes into it. An absent file, and a file whose text is empty
 // or whitespace alone on two reads, read as a store with no entries. A
@@ -68,9 +102,48 @@ export function parsePersonaStore(text: string): Record<string, unknown> {
 // tree or a write caught midway. onEmpty is called wherever the second read
 // reads as empty, which is how session.start tells a lost store from one
 // never written.
-export type PersonaStoreFs = { exists(path: string): Promise<boolean>; read(path: string): Promise<string>; sleep(ms: number): Promise<void> };
+//
+// Text that parses but not as an object keeps parsePersonaStore's own
+// refusal, which names what the file parsed as. Text that does not parse at
+// all is what two writes in flight on one file leave behind, the shorter
+// text followed by the longer one's tail, so the reader finds the end of the
+// leading value with leadingValueEnd above. Where that prefix parses as an
+// object and bytes follow it, the read queues the prefix's store for writing
+// through repairPersonaStore, calls onRepair once with the UTF-8 byte count
+// of the tail dropped, and returns the prefix's store. Where no prefix
+// parses as an object, the read throws an error reading `the persona store
+// <path> did not parse: <the parse error>`, with JSON.parse's message for the
+// whole text as the exact tail, and writes nothing, so what reaches a caller
+// reads as the store's refusal and not as a bare syntax error.
+//
+// The read does not await its repair. The repair takes its place on the
+// path's write chain through repairPersonaStore below, which registers the
+// place when it is called, so a write called after the read returns takes a
+// later place. The repair's clean text comes from the read, and the read
+// can return after another flow in this session has queued its own write,
+// a claim or a persist carrying newer state, which then lands before the
+// repair's turn. So in its turn the repair reads the file again and writes
+// the clean text only where the file still holds the text the read saw.
+// Where the text has changed, the repair writes nothing, so a newer write's
+// text stands and a file an earlier write emptied and then rejected stays
+// empty. The chain and the compare reach only this process's writes. An
+// engine write that never settles, or one already unsettled ahead of the
+// repair on the chain, holds no read, only the repair and the later writes
+// to that path. The repair's rejection, its re-read's included, is handled
+// where it is queued, so a disk that refuses it raises nothing unhandled
+// and costs the caller nothing it asked for. onRepair fires when the repair
+// is queued, not when it lands, so every caller's log says the read queued
+// the clean store for writing.
+//
+// A reader in a session of another persona, fleet_status reading that
+// persona's store, passes the literal null for write. Its read returns the
+// leading object, queues no repair and calls no onRepair, so it writes no
+// file, and a session of that persona queues the repair at its own next read.
+// write has no default, so a new caller names the engine's write or null.
+export type PersonaStoreReadFs = { exists(path: string): Promise<boolean>; read(path: string): Promise<string>; sleep(ms: number): Promise<void> };
+export type PersonaStoreFs = PersonaStoreReadFs & (PersonaStoreWriteFs | { write: null });
 
-export async function readPersonaStore(fs: PersonaStoreFs, path: string, onEmpty?: () => void): Promise<Record<string, unknown>> {
+export async function readPersonaStore(fs: PersonaStoreFs, path: string, onEmpty?: () => void, onRepair?: (droppedBytes: number) => void): Promise<Record<string, unknown>> {
   if (!(await fs.exists(path))) return {};
   let text = await fs.read(path);
   if (text.trim() === "") {
@@ -81,7 +154,88 @@ export async function readPersonaStore(fs: PersonaStoreFs, path: string, onEmpty
       return {};
     }
   }
-  return parsePersonaStore(text);
+  let parseError: SyntaxError | null = null;
+  try {
+    return parsePersonaStore(text);
+  } catch (err) {
+    if (!(err instanceof SyntaxError)) throw err;
+    parseError = err;
+  }
+  const end = leadingValueEnd(text);
+  let store: Record<string, unknown> | null = null;
+  if (end !== -1) {
+    try { store = parsePersonaStore(text.slice(0, end)); } catch { /* the leading value is not an object of persona entries */ }
+  }
+  if (store === null) throw new Error(`the persona store ${path} did not parse: ${parseError.message}`);
+  if (fs.write === null) return store;
+  const droppedBytes = new TextEncoder().encode(text.slice(end)).length;
+  repairPersonaStore(fs, path, store, text).catch(() => { /* a repair the disk refuses, or whose re-read fails, is logged as queued and raises nothing here */ });
+  onRepair?.(droppedBytes);
+  return store;
+}
+
+// The persona store file written, for every site in hooks/ that writes it:
+// the claim write, the guarded write's two branches and the heartbeat tick's
+// deferred promotion. The engine's write empties the file when it is called
+// and lands the text after, so two writes in flight on one file leave the
+// shorter text followed by the longer one's leftover tail, which is a store
+// no reader parses. This helper hands a write to the engine only once the
+// previous write to the same path has settled, resolved or rejected, so no
+// two writes from one session are in flight on one file at once and writes
+// land in the order they were called. The chain is one promise per path,
+// held here in module scope, and queueStoreWrite places a task at its end.
+// The reader's repair, repairPersonaStore, takes the same chain, so one
+// chain per path orders every write this process makes to the file. The
+// text is serialised at the call, as every site did in place, so a store
+// the caller changes after the call is not what lands. A write that rejects
+// rejects the promise its caller awaits, as the engine's own write did, and
+// the chain's stored tail swallows that rejection so the next write to the
+// path is not blocked by it. An engine write that never settles holds every
+// later write to that path for the session, since the chain starts no write
+// while an earlier one to the path is unsettled. The engine's write spends
+// none of the calling hook's budget, as hooks/index.ts's
+// METER_WRITE_TIMEOUT_MS comment states. Waiting behind an earlier write on
+// the chain may spend that budget, since the engine stops the hook's clock
+// only while one of the hook's own `$` calls is in flight, and a wait on
+// another call's write is not one. That cost is not measured on the real
+// engine. The chain orders writes, not a site's
+// read-change-write. Two sites that read the store before either writes can
+// still each write their own copy, and the later write keeps only its own
+// changes.
+export type PersonaStoreWriteFs = { write(path: string, text: string): Promise<void> };
+
+const storeWriteTails = new Map<string, Promise<void>>();
+
+// The task placed at the end of the path's chain, started once the chain's
+// previous task has settled. The place is registered before this returns,
+// so two calls take the chain in call order. The promise returned settles
+// as the task does, and the tail the chain stores swallows a rejection.
+function queueStoreWrite(path: string, task: () => Promise<void>): Promise<void> {
+  const previous = storeWriteTails.get(path) ?? Promise.resolve();
+  const run = previous.then(task);
+  storeWriteTails.set(path, run.then(() => undefined, () => undefined));
+  return run;
+}
+
+export async function writePersonaStore(fs: PersonaStoreWriteFs, path: string, store: Record<string, unknown>): Promise<void> {
+  const text = JSON.stringify(store, null, 2);
+  await queueStoreWrite(path, () => fs.write(path, text));
+}
+
+// The reader's repair of a store whose text held a stray tail: the clean
+// store's text written in the repair's turn on the path's chain, only where
+// the file read again in that turn still holds tornText, the text the read
+// saw. Over a file holding other text by then the repair writes nothing.
+// A newer write's text stands, and a file an earlier write emptied and then
+// rejected stays empty. The re-read goes through the same read the reader's
+// fs carries, and its rejection rejects the promise returned, as the
+// write's does.
+function repairPersonaStore(fs: PersonaStoreReadFs & PersonaStoreWriteFs, path: string, store: Record<string, unknown>, tornText: string): Promise<void> {
+  const text = JSON.stringify(store, null, 2);
+  return queueStoreWrite(path, async () => {
+    if ((await fs.read(path)) !== tornText) return;
+    await fs.write(path, text);
+  });
 }
 
 // The three files a supervised session keeps in its launch directory, and

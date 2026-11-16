@@ -237,7 +237,7 @@ import { drainOwnIdNote, setOwnSessionId } from "./redactor-detect";
 import { type ExpectedTurn, turnTextEquals, findExpectedTurn, type ChannelSender as ChannelSenderFromModule, OPERATOR_SENDER, ASKED_BY_MAX_CHARS as ASKED_BY_MAX_CHARSFromModule, channelSenderOf as channelSenderOfFromModule, TASK_TEXT_MAX_CHARS as TASK_TEXT_MAX_CHARSFromModule, TASK_ID_MAX_CHARS as TASK_ID_MAX_CHARSFromModule, type SubmitOutcome, removeExpectedTurn, CHANNEL_SEGMENT_PATTERN, CHANNEL_SEGMENT_MAX_BYTES, channelSegmentPath } from "./channel-text";
 import { TURN_PLAN_EDITS_MAX as TURN_PLAN_EDITS_MAXFromModule, namesPlanDocument, planPathUnderCwd as planPathUnderCwdFromModule, reactivateAskedEntry, isPlanEntry, PLAN_CHECKOUT_TIMEOUT_MS, closingLeafObjective, closingLeafOf, isClosingLeaf, closingLeafLine, planStatusText } from "./plan-route";
 import { MEMQ_WRITE_TIMEOUT_MS, type RecallInjection, recallGetNamesOf as recallGetNamesOfFromModule, RECOGNITION_CHECK_EVERY_MS, type NudgePrepared, nudgeToolPayload } from "./recall-text";
-import { STATE_NOT_LOADED_STORE_CAUSE, STORE_EMPTY_AT_START, STORE_UNREADABLE_AT_START, readPersonaStore, HEARTBEAT_FILENAME, PERSONA_STORE_FILENAME, YIELD_LOG_FILENAME, GOAL_HISTORY_FILENAME, METER_DRAIN_EVERY_MS, METER_DRAIN_TIMEOUT_MS, personaStoreId as personaStoreIdFromModule } from "./store-files";
+import { STATE_NOT_LOADED_STORE_CAUSE, STORE_EMPTY_AT_START, STORE_UNREADABLE_AT_START, readPersonaStore, writePersonaStore, HEARTBEAT_FILENAME, PERSONA_STORE_FILENAME, YIELD_LOG_FILENAME, GOAL_HISTORY_FILENAME, METER_DRAIN_EVERY_MS, METER_DRAIN_TIMEOUT_MS, personaStoreId as personaStoreIdFromModule } from "./store-files";
 import { isWorkTool, isNudgeCountWork, type StepWatch, stepWatchOf, nextStepToolsValue, stepEffortRewrite, TURN_TOOL_RING_MAX, type TurnToolFlags, freshTurnToolFlags, RECAP_TIMEOUT_MS, RECAP_RECENT_MS, RECAP_OPERATOR_MS, recapTimeOf, recapAgeText } from "./turn-state-text";
 import { ASK_MARKER_LINE, ASK_MARKER_LINE_BREAK, LEAD_REASON_MAX, askRecommendOf, unnamedExpiredAskQuestion, readStatusLine } from "./worker-ask";
 import { type HookBudget, type LiveAskResult as LiveAskResultFromModule, filterJevLive as filterJevLiveFromModule, JEV_LIVE_DEFAULT as JEV_LIVE_DEFAULTFromModule } from "./jev-live";
@@ -2838,10 +2838,13 @@ export const yieldNow = async (dp: any, onDisk: { activeSessionId: string; epoch
 // takeover it belongs to.
 const writeClaimDirect = async (dp: any): Promise<void> => {
   const storePath = sess.storePath;
-  const store = await readPersonaStore({ exists: (p) => dp.fs.exists(p), read: (p) => dp.fs.read(p), sleep: (ms) => dp.clock.sleep(ms) }, storePath);
+  const store = await readPersonaStore({ exists: (p) => dp.fs.exists(p), read: (p) => dp.fs.read(p), sleep: (ms) => dp.clock.sleep(ms), write: (p, text) => dp.fs.write(p, text) }, storePath, /* onEmpty */ undefined, /* onRepair */ (droppedBytes) => {
+    sess.state.decisions.push({ timestamp: Date.now(), loop: "monitor", action: "store_tail_repaired", detail: headPoints(`${bracketSafeText(oneLine(storePath))} held ${droppedBytes} stray bytes after its leading object, which the claim's read dropped and queued the clean store for writing`, 400) });
+    try { dp.ui.log(`Agentic: the persona store ${bracketSafeText(oneLine(storePath))} held ${droppedBytes} stray bytes after its leading object; the claim's read dropped them and queued the clean store for writing`); } catch { /* non-fatal */ }
+  });
   sess.state.updatedAt = Date.now();
   store[sess.persona] = sess.state;
-  await dp.fs.write(storePath, JSON.stringify(store, null, 2));
+  await writePersonaStore({ write: (p, text) => dp.fs.write(p, text) }, storePath, store);
   // Write the heartbeat for the new claim.
   try {
     const heartbeatPath = heartbeatPathOf();
@@ -3278,7 +3281,10 @@ const guardedWrite = async (dp: any, rollBackOnYield?: () => void): Promise<bool
       }
     }
   }
-  const store = await readPersonaStore({ exists: (p) => dp.fs.exists(p), read: (p) => dp.fs.read(p), sleep: (ms) => dp.clock.sleep(ms) }, sess.storePath);
+  const store = await readPersonaStore({ exists: (p) => dp.fs.exists(p), read: (p) => dp.fs.read(p), sleep: (ms) => dp.clock.sleep(ms), write: (p, text) => dp.fs.write(p, text) }, sess.storePath, /* onEmpty */ undefined, /* onRepair */ (droppedBytes) => {
+    sess.state.decisions.push({ timestamp: Date.now(), loop: "monitor", action: "store_tail_repaired", detail: headPoints(`${bracketSafeText(oneLine(sess.storePath))} held ${droppedBytes} stray bytes after its leading object, which the guarded write's read dropped and queued the clean store for writing`, 400) });
+    try { dp.ui.log(`Agentic: the persona store ${bracketSafeText(oneLine(sess.storePath))} held ${droppedBytes} stray bytes after its leading object; the guarded write's read dropped them and queued the clean store for writing`); } catch { /* non-fatal */ }
+  });
   // The session moved under this write while a roll's append or the store
   // read was in flight. An owner flag dropped by now is a yield the session
   // already took, through another write or an identity call that joined as
@@ -3364,9 +3370,12 @@ const guardedWrite = async (dp: any, rollBackOnYield?: () => void): Promise<bool
         await releaseResource(commonsStoreOf(dp), resource, startSessionId, Date.now(), commonsMeta());
       } catch { /* non-fatal */ }
       // Persist the yield decision to disk before returning
-      const store2 = await readPersonaStore({ exists: (p) => dp.fs.exists(p), read: (p) => dp.fs.read(p), sleep: (ms) => dp.clock.sleep(ms) }, sess.storePath);
+      const store2 = await readPersonaStore({ exists: (p) => dp.fs.exists(p), read: (p) => dp.fs.read(p), sleep: (ms) => dp.clock.sleep(ms), write: (p, text) => dp.fs.write(p, text) }, sess.storePath, /* onEmpty */ undefined, /* onRepair */ (droppedBytes) => {
+        yieldedState.decisions.push({ timestamp: Date.now(), loop: "monitor", action: "store_tail_repaired", detail: headPoints(`${bracketSafeText(oneLine(sess.storePath))} held ${droppedBytes} stray bytes after its leading object, which the yield's read dropped and queued the clean store for writing`, 400) });
+        try { dp.ui.log(`Agentic: the persona store ${bracketSafeText(oneLine(sess.storePath))} held ${droppedBytes} stray bytes after its leading object; the yield's read dropped them and queued the clean store for writing`); } catch { /* non-fatal */ }
+      });
       store2[startPersona] = yieldedState;
-      await dp.fs.write(sess.storePath, JSON.stringify(store2, null, 2));
+      await writePersonaStore({ write: (p, text) => dp.fs.write(p, text) }, sess.storePath, store2);
       // That write landed the yielded state, the rollback above applied, so
       // the plan holders' transitions it carries go out as events against
       // the snapshot taken before the unseed: the change reached the store,
@@ -3427,7 +3436,7 @@ const guardedWrite = async (dp: any, rollBackOnYield?: () => void): Promise<bool
     return guardedWrite(dp, rollBackOnYield);
   }
   store[startPersona] = startState;
-  await dp.fs.write(sess.storePath, JSON.stringify(store, null, 2));
+  await writePersonaStore({ write: (p, text) => dp.fs.write(p, text) }, sess.storePath, store);
   // The kit event stream reads the write that landed: the plan holders'
   // status transitions since the last landed write go out as events, each
   // awaited to its bound so a tool's answer follows the line on disk. A
@@ -6171,13 +6180,21 @@ export const register: Register = async (on, options) => {
     let existing: Record<string, unknown> = {};
     let storeRefused = false;
     let storeEmpty = false;
+    // The bytes a torn store's read dropped, or null where the store was
+    // whole. The decision is pushed below, beside store_empty_at_start, since
+    // the state this read's callback would push onto is replaced by the
+    // stored one once the read returns.
+    let storeTailDropped: number | null = null;
     try {
       // parsePersonaStore, inside the reader, refuses a file that parses to
       // anything but an object, so a store holding null, an array, a number
       // or a string takes the catch below exactly as a parse error does,
       // rather than reaching the persona lookup and throwing out of
       // session.start from there.
-      existing = await readPersonaStore({ exists: (p) => $.fs.exists(p), read: (p) => $.fs.read(p), sleep: (ms) => $.clock.sleep(ms) }, sess.storePath, () => { storeEmpty = true; });
+      existing = await readPersonaStore({ exists: (p) => $.fs.exists(p), read: (p) => $.fs.read(p), sleep: (ms) => $.clock.sleep(ms), write: (p, text) => $.fs.write(p, text) }, sess.storePath, () => { storeEmpty = true; }, /* onRepair */ (droppedBytes) => {
+        storeTailDropped = droppedBytes;
+        try { $.ui.log(`Agentic: the persona store ${bracketSafeText(oneLine(sess.storePath))} held ${droppedBytes} stray bytes after its leading object; the session start's read dropped them and queued the clean store for writing`); } catch { /* non-fatal */ }
+      });
     } catch (err) {
       // The claim this session takes below cannot be written into a store
       // that would not read, so the heartbeat tick publishes it at the first
@@ -6502,6 +6519,14 @@ export const register: Register = async (on, options) => {
         loop: "monitor",
         action: "store_empty_at_start",
         detail: headPoints(`${bracketSafeText(oneLine(sess.storePath))} ${STORE_EMPTY_AT_START} (${statText}), so it came up on a fresh state and carries none of what the last session recorded`, 400),
+      });
+    }
+    if (storeTailDropped !== null) {
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "monitor",
+        action: "store_tail_repaired",
+        detail: headPoints(`${bracketSafeText(oneLine(sess.storePath))} held ${storeTailDropped} stray bytes after its leading object, which the session start's read dropped and queued the clean store for writing`, 400),
       });
     }
 
@@ -7979,16 +8004,34 @@ export const register: Register = async (on, options) => {
     // call naming the guards. Under live, a failure before the guard phase on
     // a call that never reached next(e) refuses it where any before guard
     // matches, since the replay would run the tool unjudged; a matcher that
-    // throws refuses it too, journaled under its guard's name. In any mode, a
-    // failure on a call that never reached next(e) refuses it where the hold
-    // on a routine's turn refuses the model's call, with the hold's own text.
-    // Any other failure, or any mode but live,
-    // journals the failure and replays next(e). The replay is safe whenever
-    // it falls: the engine's Caught contract makes this handler's next
-    // replay-safe, so where the handler had called next(e), the replay
-    // resolves to what that call settled to and nothing beneath runs again,
-    // and where it had not, the hooks beneath run once. Under off, a failure
-    // outside the guard phase writes no guard line.
+    // throws refuses it too, journaled under its guard's name. Where the
+    // handler fell before it called next(e), the redactor's refusal on the
+    // call's own input runs next, since that refusal is one the caller must
+    // read whatever else failed. After it, in any mode, a failure on a call
+    // that never reached next(e) refuses it where the hold on a routine's
+    // turn refuses the model's call, with the hold's own text. After that,
+    // in every guards mode, a tool this
+    // plugin registered, one whose name opens with `mcp__personas__`, whose
+    // handler threw or ran out its budget before it called next(e) is
+    // answered here: the engine's own handler answers nothing for such a
+    // tool, so a replay would leave the caller reading that no hook answered.
+    // A misreturned answer, one the engine refused, reaches the branch as a
+    // throw too and is answered as a failure. A timeout is answered that the
+    // tool did not answer within its budget and its change may still land,
+    // since a wait behind a store write on the chain can spend the budget
+    // while that write is still to land. The deny names the tool and the
+    // failure, one persona_tool_failed decision holds the failure in memory
+    // until the next store write that succeeds, one ui.log line names both,
+    // since the decision never lands while the store refuses writes, and the
+    // deny counts toward the turn's tool errors as the handler's own denies
+    // do. The branch writes nothing to the store, so a store that refuses
+    // writes cannot make this handler throw. Any failure the branches above
+    // leave unanswered journals the failure and replays next(e). The replay
+    // is safe whenever it falls: the engine's Caught contract makes this
+    // handler's next replay-safe, so where the handler had called next(e),
+    // the replay resolves to what that call settled to and nothing beneath
+    // runs again, and where it had not, the hooks beneath run once. Under
+    // off, a failure outside the guard phase writes no guard line.
     const failure = next.error;
     const callId = typeof e.tool_use_id === "string" ? e.tool_use_id : null;
     const guardNames = callId !== null ? guardPhaseCalls.get(callId) : undefined;
@@ -8033,6 +8076,28 @@ export const register: Register = async (on, options) => {
         try { noteRoutineWithheld(sess, routineHold); } catch { /* the state could not take the row; the call is refused all the same */ }
         return { deny: heldRoutineRefusal };
       }
+    }
+    // The tool's name and the failure's text reach the model and the
+    // decision window, which joins its lines with a newline, so each is
+    // folded to one line and made bracket-safe, and the failure is bounded
+    // as persistAnswering's answer is, after the scrub above.
+    if (!next.called && typeof e.tool === "string" && e.tool.startsWith("mcp__personas__")) {
+      const tool = bracketSafeText(oneLine(e.tool.slice("mcp__personas__".length)));
+      // A timeout's handler may still be running, its queued store write
+      // among what it may yet land, so its answer says the change may still
+      // land rather than that the tool failed.
+      const said = failure.kind === "timeout"
+        ? "did not answer within its budget, and its change may still land"
+        : `failed before it answered with ${boundedText(bracketSafeText(oneLine(reason)))}`;
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "monitor",
+        action: "persona_tool_failed",
+        detail: headPoints(`${tool}: the tool ${said}`, 400),
+      });
+      try { $.ui.log(`Agentic: the persona tool ${tool} ${said}`); } catch { /* non-fatal */ }
+      toolErrorsThisTurn += 1;
+      return { deny: `${tool}: the tool ${said}.` };
     }
     // The replay reaches the tool, so a live placeholder it carried down as
     // written earns its one notice here, as servedAnswer gives it.

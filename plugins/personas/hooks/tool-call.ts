@@ -556,7 +556,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // as a persona state is refused below, both before the session takes the
     // new name, resets its untracked-work line or releases its old claim. A
     // refused switch leaves the session on the persona it held.
-    const store = await readPersonaStore({ exists: fsExists, read: fsRead, sleep }, sess.storePath);
+    const store = await readPersonaStore({ exists: fsExists, read: fsRead, sleep, write: fsWrite }, sess.storePath, /* onEmpty */ undefined, /* onRepair */ (droppedBytes) => {
+      try { log(`Agentic: the persona store ${bracketSafeText(oneLine(sess.storePath))} held ${droppedBytes} stray bytes after its leading object; the identity read dropped them and queued the clean store for writing`); } catch { /* non-fatal */ }
+    });
     const previousPersona = sess.persona;
     // An absent or falsy slot stays absent and takes the default state
     // below. A slot that does not parse refuses the switch with a deny that

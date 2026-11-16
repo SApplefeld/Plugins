@@ -49,7 +49,7 @@ import { routineDue, scheduleWords } from "./routines";
 import { activeLeafHolderOf, hourLineHeld, hourLineOwed, hourLineSince, hourLineText, hourLineTurnShowsWork, hourPositionOf, isWorkerSession, releaseHourLineMark, runLineTitleOf, sendHourLine, sendStallLine, stallLineOwed, stallLineText, stallSince, stallSpanPassed, takeHourLineMark, threadLineAt, type HourLineMark } from "./run-lines";
 import { FINDING_COOLOFF_MS, FINDING_UNROUTABLE_AFTER_MS, buildSelfReviewInput, dedupeSelfReview, evictSelfReview, isClosureTimingLesson, isSelfScoringLesson, reviewOwnRecord, shouldSelfReview } from "./self-review";
 import type { SessionState } from "./session-state";
-import { readPersonaStore } from "./store-files";
+import { readPersonaStore, writePersonaStore } from "./store-files";
 import { safeErrorText } from "./text";
 import { AGENT_HOLD_REPORT_MS } from "./turn-state-text";
 import { openAskBy, ownAskStands } from "./worker-ask";
@@ -365,7 +365,10 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
   if (sess.isOwner) {
     let onDisk: { activeSessionId: string; epoch: number } | null = null;
     try {
-      const store = await readPersonaStore({ exists: ctx.fsExists, read: ctx.fsRead, sleep: ctx.sleep }, sess.storePath);
+      const store = await readPersonaStore({ exists: ctx.fsExists, read: ctx.fsRead, sleep: ctx.sleep, write: ctx.fsWrite }, sess.storePath, /* onEmpty */ undefined, /* onRepair */ (droppedBytes) => {
+        try { ctx.log(`Agentic: the persona store ${bracketSafeText(oneLine(sess.storePath))} held ${droppedBytes} stray bytes after its leading object; the ownership check's read dropped them and queued the clean store for writing`); } catch { /* non-fatal */ }
+        try { sess.state.decisions.push({ timestamp: Date.now(), loop: "monitor", action: "store_tail_repaired", detail: headPoints(`${bracketSafeText(oneLine(sess.storePath))} held ${droppedBytes} stray bytes after its leading object, which the ownership check's read dropped and queued the clean store for writing`, 400) }); } catch { /* non-fatal */ }
+      });
       const existing = store[sess.persona] as AgentState | undefined;
       if (existing) onDisk = existing;
     } catch { /* store read failed */ }
@@ -549,7 +552,9 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
             // a live owner whose own slot is missing would read it at its
             // next persist and yield to a session that owns nothing.
             try {
-              const store = await readPersonaStore({ exists: ctx.fsExists, read: ctx.fsRead, sleep: ctx.sleep }, sess.storePath);
+              const store = await readPersonaStore({ exists: ctx.fsExists, read: ctx.fsRead, sleep: ctx.sleep, write: ctx.fsWrite }, sess.storePath, /* onEmpty */ undefined, /* onRepair */ (droppedBytes) => {
+                try { ctx.log(`Agentic: the persona store ${bracketSafeText(oneLine(sess.storePath))} held ${droppedBytes} stray bytes after its leading object; the deferred promotion's read dropped them and queued the clean store for writing`); } catch { /* non-fatal */ }
+              });
               const existing = store[sess.persona] as AgentState | undefined;
               if (existing) {
                 const existingDecisions = existing.decisions ?? [];
@@ -562,7 +567,7 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
                 existing.decisions = existingDecisions;
                 existing.updatedAt = now;
                 store[sess.persona] = existing;
-                await ctx.fsWrite(sess.storePath, JSON.stringify(store, null, 2));
+                await writePersonaStore({ write: ctx.fsWrite }, sess.storePath, store);
               }
             } catch { /* non-fatal */ }
           }
@@ -576,7 +581,9 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
         // nothing is promoted.
         if (holderHb === null) return;
       }
-      const store = await readPersonaStore({ exists: ctx.fsExists, read: ctx.fsRead, sleep: ctx.sleep }, sess.storePath);
+      const store = await readPersonaStore({ exists: ctx.fsExists, read: ctx.fsRead, sleep: ctx.sleep, write: ctx.fsWrite }, sess.storePath, /* onEmpty */ undefined, /* onRepair */ (droppedBytes) => {
+        try { ctx.log(`Agentic: the persona store ${bracketSafeText(oneLine(sess.storePath))} held ${droppedBytes} stray bytes after its leading object; the promotion's read dropped them and queued the clean store for writing`); } catch { /* non-fatal */ }
+      });
       const existing = store[sess.persona] as AgentState | undefined;
       if (existing) {
         sess.state = parseState(JSON.stringify(existing));
