@@ -2406,8 +2406,41 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const children = (pid: string) =>
       sess.state.goals.filter((g) => g.parentId === pid)
         .sort((a, b) => (a.sortKey ?? a.createdAt) - (b.sortKey ?? b.createdAt));
+    // The print holds the root, every open entry and every ancestor of one.
+    // An entry is settled where its status is complete or abandoned, and open
+    // at any other status, one this reader does not know included, so no
+    // stored value hides an entry. Only settled: true prints every entry
+    // instead. Arguments can arrive stringified, so the string "true" counts.
+    // Any other value keeps the default print.
+    const rawSettled = (e as any).settled;
+    const whole = rawSettled === true || rawSettled === "true";
+    const shown = new Set<string>();
+    if (!whole) {
+      // Each open entry's walk to the root stops at the first id already
+      // taken, so the pass reads each entry once and ends on a parent loop.
+      const byId = new Map(sess.state.goals.map((g) => [g.id, g] as const));
+      for (const g of sess.state.goals) {
+        if (g.status === "complete" || g.status === "abandoned") continue;
+        for (let n: typeof g | undefined = g; n !== undefined && !shown.has(n.id); n = n.parentId === null ? undefined : byId.get(n.parentId)) {
+          shown.add(n.id);
+        }
+      }
+    }
+    // The direct children an entry's print leaves out are counted on one line
+    // under the entry, at its children's indent, complete and abandoned
+    // apart. One left out counts once whatever sits under it, and the line
+    // holds the two counts and the argument's name and no stored text.
+    const leftOutText = (left: { status: string }[]) => {
+      const complete = left.filter((c) => c.status === "complete").length;
+      const abandoned = left.length - complete;
+      const counts = [complete > 0 ? `${complete} complete` : "", abandoned > 0 ? `${abandoned} abandoned` : ""].filter((part) => part !== "");
+      return `(${counts.join(", ")} not shown; settled: true prints them)`;
+    };
     const render = (pid: string, indent: string) => {
-      for (const c of children(pid)) {
+      const all = children(pid);
+      const printed = whole ? all : all.filter((c) => shown.has(c.id));
+      if (printed.length < all.length) lines.push(indent + leftOutText(all.filter((c) => !shown.has(c.id))));
+      for (const c of printed) {
         lines.push(indent + statusOf(c.id));
         render(c.id, indent + "  ");
       }

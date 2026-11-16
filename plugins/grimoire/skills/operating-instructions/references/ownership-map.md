@@ -95,7 +95,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | A warranted-channel message inside a tool result | doctrine (A relay message delivered inside a tool result) |
 | A standing operational grant: the rail, its record, its exclusions, each grant's owning skill | `role` |
 | Authority over machine-shared state: the seat classes, the act class and the ask route | `role` |
-| The coordinator's runbook, the board and its bars | `coordinator` |
+| The coordinator's runbook, the board, a persona seat's record and their bars | `coordinator` |
 | The coordinator seat on a fleet under the persona plugin: dispatching a plan to a persona worker, tracking it and redirecting it | `coordinator` (Dispatch and Redirect Rule, its Persona Fleet passage); the plugin's priming, `plugins/personas/bin/supervise-holder.sh`, owns the record's label and what the record carries |
 | What a worker's act is on a delegated seat's steer: a push, a deploy or a commit-model change, and the settings edit the steer never covers | `role` (the delegation model) |
 | A seat running git in the memory store | `coordinator` (Ledger) |

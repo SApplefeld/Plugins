@@ -15,6 +15,7 @@ import {
   headPoints,
   oneLine,
   releaserOf,
+  ASKS_OPEN_MAX,
   FLEET_ENTRY_PROBLEMS_KEY,
   FLEET_HEALTH,
   FLEET_ROSTER_STATE_KEY,
@@ -768,12 +769,27 @@ const FLEET_STALL_KIND_UNKNOWN = "unknown";
 // moves on later writes.
 type FleetStall = { id: string; kind: string; status: "paused" | "blocked"; title: string; reason?: string; releasedBy?: string; ageMs?: number };
 
+// Where an open ask's id and node id, and its question, are cut. An ask's id
+// is its node's id between the word "ask" and a millisecond stamp, so the id
+// bound holds every id the plugin writes for a node id or persona name of up
+// to 42 characters. The count of asks one row lists is
+// ASKS_OPEN_MAX, the most the owner's ledger holds open, so that cut bounds
+// a store the plugin did not write and no count of the rest is carried.
+const FLEET_ASK_ID_MAX = 60;
+const FLEET_ASK_QUESTION_MAX = 120;
+
+// One open ask of a persona's ledger. `ageMs` is read from openedAt, and
+// `blocking` is true only where the store holds the boolean true.
+type FleetAsk = { id: string; nodeId: string; blocking: boolean; ageMs?: number; question: string };
+
 // What readFleetStalls adds to one row: the entries in the order the store's
 // goals array holds them, at most FLEET_STALLS_MAX of them, `stallsMore`
-// counting the rest where there are any, and `stallsNote` saying why a store
-// gave no reading. A persona whose store read whole and holds no stalled
-// entry carries an empty list and neither of the other two.
-type FleetStalls = { stalls: FleetStall[]; stallsMore?: number; stallsNote?: string };
+// counting the rest where there are any, `stallsNote` saying why a store
+// gave no reading, and `asks`, the persona's open asks. A persona whose store
+// read whole and holds no stalled entry and no open ask carries two empty
+// lists and neither of the other two. A row that carries `stallsNote`
+// carries both lists empty, so the note covers both.
+type FleetStalls = { stalls: FleetStall[]; stallsMore?: number; stallsNote?: string; asks: FleetAsk[] };
 
 // The two file calls and the wait readPersonaStore makes.
 type FleetStallsHost = Pick<PluginHost, "readFile" | "fileExists" | "sleep">;
@@ -823,6 +839,46 @@ async function readFleetStore(host: FleetStallsHost, storePath: string): Promise
   }
 }
 
+// The open asks of one persona's stored state: each item of its `asks` value
+// whose status is the text "open", oldest first by openedAt with an item
+// whose openedAt is no finite number last, at most ASKS_OPEN_MAX of them.
+// The ledger in the store is the owning session's own record of its asks.
+// The items are read as stored and each field is taken only in its shape:
+// text goes through stallText and is cut at its bound, and an age comes only
+// from a numeric stamp. A value that is no array, an item that is no object,
+// and an open object whose id is no non-empty text or whose node id or
+// question is no text, read as no ask, and nothing is thrown. Those three
+// fields are the ones the owner's load holds an entry to before it keeps it,
+// so the row lists no ask the owner neither holds nor can close. The row
+// still reads the stored list as written, with no load pass: a version 8
+// store, which has no `asks` key and one pendingAskId slot the owner's load
+// seeds as one open blocking ask, reads as no asks until that load rewrites
+// it, and whether an entry's close fields agree with its status is not read.
+function fleetAsksOf(slot: object, now: number): FleetAsk[] {
+  const stored = (slot as { asks?: unknown }).asks;
+  if (!Array.isArray(stored)) return [];
+  const open: { entry: Record<string, unknown>; openedAt: number | null }[] = [];
+  for (const candidate of stored) {
+    if (candidate === null || typeof candidate !== "object") continue;
+    const entry = candidate as Record<string, unknown>;
+    if (entry.status !== "open") continue;
+    if (typeof entry.id !== "string" || entry.id === "" || typeof entry.nodeId !== "string" || typeof entry.question !== "string") continue;
+    open.push({ entry, openedAt: typeof entry.openedAt === "number" && Number.isFinite(entry.openedAt) ? entry.openedAt : null });
+  }
+  // The sort is stable, so asks with one stamp, and those with none, keep
+  // the order the store holds them in.
+  open.sort((a, b) => (a.openedAt === null ? (b.openedAt === null ? 0 : 1) : b.openedAt === null ? -1 : a.openedAt - b.openedAt));
+  // The age is floored at zero, as the stall read floors its age, so a stamp
+  // ahead of the call's clock reads 0.
+  return open.slice(0, ASKS_OPEN_MAX).map(({ entry, openedAt }) => ({
+    id: headPoints(stallText(entry.id), FLEET_ASK_ID_MAX),
+    nodeId: headPoints(stallText(entry.nodeId), FLEET_ASK_ID_MAX),
+    blocking: entry.blocking === true,
+    ...(openedAt !== null ? { ageMs: Math.max(0, now - openedAt) } : {}),
+    question: headPoints(stallText(entry.question), FLEET_ASK_QUESTION_MAX),
+  }));
+}
+
 // One roster persona's stalled entries, read from the persona store in its
 // working directory, under the entry the roster name keys. The store is the
 // persona's own file: it is read and never written, every failure lands in
@@ -834,9 +890,10 @@ async function readFleetStore(host: FleetStallsHost, storePath: string): Promise
 // second persona in the same directory reads the file from.
 // The nodes are read as stored, with no load pass over them: parseState is
 // the owning session's loader and repairs the tree it returns, where this
-// row reports what the file holds.
+// row reports what the file holds. The persona's open asks come from the same
+// entry of the same reading, through fleetAsksOf.
 export const readFleetStalls = async (host: FleetStallsHost, workdir: string | null, persona: string, now: number, reads: FleetStoreReads): Promise<FleetStalls> => {
-  if (workdir === null) return { stalls: [], stallsNote: "the roster entry names no working directory, so this persona has no goal store to read" };
+  if (workdir === null) return { stalls: [], asks: [], stallsNote: "the roster entry names no working directory, so this persona has no goal store to read" };
   const storePath = `${workdir}/${PERSONA_STORE_FILENAME}`;
   let pending = reads.get(storePath);
   if (pending === undefined) {
@@ -844,13 +901,13 @@ export const readFleetStalls = async (host: FleetStallsHost, workdir: string | n
     reads.set(storePath, pending);
   }
   const reading = await pending;
-  if ("note" in reading) return { stalls: [], stallsNote: reading.note };
+  if ("note" in reading) return { stalls: [], asks: [], stallsNote: reading.note };
   // An own key alone: a roster name such as "constructor" would otherwise
   // read a member every object inherits as the persona's entry.
-  if (!Object.prototype.hasOwnProperty.call(reading.store, persona)) return { stalls: [], stallsNote: "the goal store holds no entry for this persona" };
+  if (!Object.prototype.hasOwnProperty.call(reading.store, persona)) return { stalls: [], asks: [], stallsNote: "the goal store holds no entry for this persona" };
   const slot = reading.store[persona];
   const goals = slot !== null && typeof slot === "object" ? (slot as { goals?: unknown }).goals : undefined;
-  if (!Array.isArray(goals)) return { stalls: [], stallsNote: "the goal store's entry for this persona does not parse as a goal tree" };
+  if (slot === null || typeof slot !== "object" || !Array.isArray(goals)) return { stalls: [], asks: [], stallsNote: "the goal store's entry for this persona does not parse as a goal tree" };
   const stalls: FleetStall[] = [];
   let more = 0;
   for (const candidate of goals) {
@@ -874,7 +931,7 @@ export const readFleetStalls = async (host: FleetStallsHost, workdir: string | n
       ...(typeof stamp === "number" && Number.isFinite(stamp) ? { ageMs: Math.max(0, now - stamp) } : {}),
     });
   }
-  return { stalls, ...(more > 0 ? { stallsMore: more } : {}) };
+  return { stalls, ...(more > 0 ? { stallsMore: more } : {}), asks: fleetAsksOf(slot, now) };
 };
 
 // One row's health class. The six classes and the value the watcher stores

@@ -1473,7 +1473,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // Section 6: the kit Coordinator seat's reconciliation pass, on that
   // seat's own four-hour cadence and never more often. The first tick of
   // the first session starts the cadence rather than firing it, because
-  // the seat is taken and its board read at priming; the prompt is for the
+  // the seat is taken and its tree read at priming; the prompt is for the
   // pass that follows. The stamp is persisted at that first tick, so a
   // steward relaunched more often than the cadence still reconciles rather
   // than restarting the wait every launch. It is written before the submit,
