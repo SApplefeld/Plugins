@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's branch-hygiene procedure: it tells a session how to sweep local branches and worktrees left over after Branch-and-PR efforts, and how to recover branches whose commits never reached the trunk. It owns three moments: deciding which local branches and Claude Code worktrees may be auto-deleted (the safe set and the protected set), running the reap-and-report procedure itself, and recovering a stranded post-merge branch onto a fresh recovery branch with a new PR before any delete. It also owns the optional remote-side companion setting. A session loads it as a `named-trigger`: the frontmatter says to use it when cleaning up leftover branches or worktrees, or when the SessionStart nudge flags reapable or stranded branches, with triggers listed for branch cleanup, reaping or pruning merged branches, recovering stranded post-merge commits, and worktree cleanup.
 
-Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redrafted on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `47e74f8f` with its fix round at `5288cfb5`, so every live entry's `passage:` line quotes the text at `5288cfb5` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C016's reason names the probe by its new file name. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 1 on 2026-10-06, which made the integration branch a branch's pull request base first: C007 and C012 quote the new text, and C036 to C039 are new. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 4 on 2026-10-06, which sent a merged pull request whose base had already landed when it merged to the fallback: C040 carries it, and C007's reason points at it. Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 4 on 2026-10-25, which stated that the skill reaches no tag: DB001 added under the plan's letters DB. Its round 1 fix named the git config that prunes tags on a plain `--prune` fetch: DB001 gains that passage. Amended by `docs/plans/claude-kit_merged-plan-reap_spec_v1.md` section 1 on 2026-11-01, which named the three hazards the fleet's checkouts showed on 2026-10-31: MR001 to MR003 added under the plan's letters MR. Its round 1 fix printed the Windows commands as run from Git Bash, bounded the unlinking and the detached nested case, and widened the live-seat check: MR003 now carries step 5's passage. Amended by `docs/archive/claude-kit_reap-compare-and-delete_spec_v1.md` section 1 on 2026-11-02, which made every delete a compare-and-delete on a tip read once: C014, C016, C030 and DB001 quote the new text. Amended by `docs/archive/claude-kit_quoted-host-and-link-operands_spec_v1.md` section 2 on 2026-11-09 (AU001 below, with MR001 rewritten in place). Its finishing pass on 2026-11-09 added the `find` listing report to the reparse-point bullet: MR001 and AU001 quote the new text. Amended by `docs/archive/claude-kit_quoted-branch-operands_spec_v1.md` section 1 on 2026-11-09, which writes every branch-name operand in this skill's commands as a single-quoted literal and reports and leaves a name holding a quote character: C041 added, renamed BQ001 on 2026-11-13 under the plan's letters BQ. Amended by `docs/plans/claude-kit_cleanup-at-finish_spec_v1.md` section 2 on 2026-11-10, which names finishing-work's step 10 as the clearing of a finished plan's worktree (BD001 below). Amended by `docs/plans/claude-kit_misread-branch-names-are-reported_spec_v1.md` section 1 on 2026-11-11, which reports a local branch whose name `gh` reads as a pull request number and leaves it unreaped (BF001 below). Amended by `docs/plans/claude-kit_work-folders-and-git-reads_spec_v1.md` section 2 on 2026-11-13, which has the Safe Set read the index bits before a worktree is reaped: BS001 added under the plan's letter BS, and BD001's reason reworded to the read.
+Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redrafted on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `47e74f8f` with its fix round at `5288cfb5`, so every live entry's `passage:` line quotes the text at `5288cfb5` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C016's reason names the probe by its new file name. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 1 on 2026-10-06, which made the integration branch a branch's pull request base first: C007 and C012 quote the new text, and C036 to C039 are new. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 4 on 2026-10-06, which sent a merged pull request whose base had already landed when it merged to the fallback: C040 carries it, and C007's reason points at it. Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 4 on 2026-10-25, which stated that the skill reaches no tag: DB001 added under the plan's letters DB. Its round 1 fix named the git config that prunes tags on a plain `--prune` fetch: DB001 gains that passage. Amended by `docs/plans/claude-kit_merged-plan-reap_spec_v1.md` section 1 on 2026-11-01, which named the three hazards the fleet's checkouts showed on 2026-10-31: MR001 to MR003 added under the plan's letters MR. Its round 1 fix printed the Windows commands as run from Git Bash, bounded the unlinking and the detached nested case, and widened the live-seat check: MR003 now carries step 5's passage. Amended by `docs/archive/claude-kit_reap-compare-and-delete_spec_v1.md` section 1 on 2026-11-02, which made every delete a compare-and-delete on a tip read once: C014, C016, C030 and DB001 quote the new text. Amended by `docs/archive/claude-kit_quoted-host-and-link-operands_spec_v1.md` section 2 on 2026-11-09 (AU001 below, with MR001 rewritten in place). Its finishing pass on 2026-11-09 added the `find` listing report to the reparse-point bullet: MR001 and AU001 quote the new text. Amended by `docs/archive/claude-kit_quoted-branch-operands_spec_v1.md` section 1 on 2026-11-09, which writes every branch-name operand in this skill's commands as a single-quoted literal and reports and leaves a name holding a quote character: C041 added, renamed BQ001 on 2026-11-13 under the plan's letters BQ. Amended by `docs/plans/claude-kit_cleanup-at-finish_spec_v1.md` section 2 on 2026-11-10, which names finishing-work's step 10 as the clearing of a finished plan's worktree (BD001 below). Amended by `docs/plans/claude-kit_misread-branch-names-are-reported_spec_v1.md` section 1 on 2026-11-11, which reports a local branch whose name `gh` reads as a pull request number and leaves it unreaped (BF001 below). Amended by `docs/plans/claude-kit_work-folders-and-git-reads_spec_v1.md` section 2 on 2026-11-13, which has the Safe Set read the index bits before a worktree is reaped: BS001 added under the plan's letter BS, and BD001's reason reworded to the read. Amended by `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1 on 2026-11-16, which says which checkout is a session's own and who sweeps it, and has step 4's registry read leave out an entry in another checkout of the repository and the sweeping seat's own earlier entry: CB001 to CB006 added under the plan's letter CB, and MR003 rewritten in place to its bullet as it now reads, its `source:` line re-pointed to line 36. The new section moved every later line of the source down ten. Its round 1 fix on the same day made the ownership read run once before any delete or remove, tied steps 4 and 5's ownership wording to the definition, kept a plan's own worktree and branch the session's own under finishing-work's per-worktree test, named step 5's recipient for the Worker seat, and made step 4's folder-name skip narrow with counting as the default: CB007 to CB009 added, and CB002, CB004, CB006 and MR003 rewritten in place. The same fix re-pointed the `source:` line of every live entry whose passage the section moved to the line where that passage now starts.
 
 ### C001
 - key: Sweep only branches and worktrees whose work has already landed, and leave everything else untouched.
@@ -75,7 +75,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C006
 - key: Auto-reap a local branch only if it is verified merged into the integration branch.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:24
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Chapter 1: the spec's "upstream gone OR ancestor" trigger was tightened at build to verified-merged only, since a gone-but-unmerged branch may be squash-merged elsewhere or abandoned.
 - verdict: rewrite
 - landed: 617317a section 43
@@ -87,7 +87,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C007
 - key: For a branch with no open or merged pull request, a remote with no such read, or a merged pull request whose base is gone after the fetch or already an ancestor of the fallback (`git merge-base --is-ancestor origin/<baseRefName> <fallback>`), take the integration branch as `origin/develop` if it exists, else `origin/main`, else `origin/master`.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:24
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Approach paragraph 3: in NEO a feature branch lands via PR into `develop` and `develop` reaches `main` later behind a full test run, so `develop` is the integration target where it exists. Amended by docs/archive/claude-kit_stacked-pr-base_spec_v1.md section 1, 2026-10-06: the order became the fallback for a branch with no pull request, C036 carrying the pull request base clause that now comes first. Amended by docs/archive/claude-kit_stacked-pr-base_spec_v1.md section 4, 2026-10-06: a merged pull request whose base had already landed when it merged takes the fallback too, in its own sentences, which C040 carries.
 - verdict: rewrite
 - landed: 617317a section 43
@@ -98,7 +98,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C008
 - key: Reap a worktree only if it lives under `.claude/worktrees/`, sits on a reapable branch, and has a clean working tree.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:26
 - provenance: 971042a 2026-06-23, the branch-hygiene plan: `.claude/worktrees/` is Claude Code's own convention observed in the NEO session, and worktrees elsewhere may be the operator's own.
 - verdict: keep
 - reason: The path bound keeps the reaper off hand-made worktrees and the clean bound keeps it off uncommitted work; the safe set owns these conditions and step 4 keeps the commands and the clean test after the rewrite, its worktree clause pointing here for the bounds (corrected in place at section 43's close).
@@ -107,7 +107,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C009
 - key: Never touch `develop`, `main`, `master`, the current branch, or the repo's default branch.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:16
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:28
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Approach and Section 1 (the protected set by name).
 - verdict: rewrite
 - landed: 617317a section 43
@@ -119,7 +119,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C010
 - key: Run `git fetch --prune` first so the integration ref and remote-tracking refs are current.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:20
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:32
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Chapter 4: a no-fetch pass stayed silent because the local `origin/develop` was stale while the merge had landed on the platform.
 - verdict: keep
 - reason: No finding. The merged set is only as true as the last fetch, and the recorded incident is exactly a stale ref hiding a landed merge.
@@ -129,7 +129,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C011
 - key: Stop and report, deleting nothing, if the fetch fails or no integration ref resolves.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:20
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:32
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Section 1 acceptance ("a non-repo or git failure is reported, not fatal") and Chapter 4's stale-ref incident.
 - verdict: keep
 - reason: A blast-radius gate: with stale or absent merge state the sweep cannot tell merged from unmerged, and the delete it would run is unrecoverable for an unmerged branch. No hook enforces it; the nudge hook fails open and never deletes.
@@ -138,7 +138,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C012
 - key: Resolve the sweep's integration ref as the safe set's fallback.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:23
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:33
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, installed with C007 in the same commit. Key amended by docs/archive/claude-kit_stacked-pr-base_spec_v1.md section 1, 2026-10-06.
 - verdict: rewrite
 - landed: 617317a section 43
@@ -148,7 +148,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C013
 - key: Compute the merged set with `git branch --merged <integration-ref>`, then drop the protected names and the current branch's `*` line.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:22
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:34
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Chapter 1 (the merged set as the only trigger) and Chapter 3 (the set verified to drop `develop` and `main` on a fixture).
 - verdict: keep
 - reason: No finding. This is the mechanical test the whole safe set rests on, and the nudge hook computes the same set (`branch --merged <integ>`).
@@ -157,7 +157,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C014
 - key: Read each merged branch's tip once with `git rev-parse --verify refs/heads/<name>`, and test its ancestry on that same read, before removing anything.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:25
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:35
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Approach: every removal reports its restore command because the commits are already on the integration branch. The coordinator persona's finding of 2026-11-01 on its record -254, and `docs/archive/claude-kit_merged-plan-reap_spec_v1.md` Chapter 2's Failed approaches, its round 2 and round 3 lessons: a tip read twice is two moments, and `git branch -D` compares nothing.
 - verdict: keep
 - reason: The one read is the value the ancestry test judges, the delete compares and the restore line names, so a commit landing after it makes the delete refuse rather than vanish under a restore line naming the older tip. Step 3's `--merged` read stays the trigger, and this read is what the delete rests on. A failed read is a report, so a branch whose ref cannot be read is never deleted on a stale value.
@@ -166,7 +166,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C015
 - key: Remove a merged branch's worktree with `git worktree remove <path>` and no `--force`.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:25
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:35
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Chapter 3 and Chapter 4 (the operator chose to auto-remove worktrees too; dirty ones are skipped and git refuses them without `--force`).
 - verdict: rewrite
 - landed: 617317a section 43
@@ -176,7 +176,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C016
 - key: Delete the branch with `git update-ref -d refs/heads/<name> <sha> --no-deref` on the tip step 4 read, after `git worktree list --porcelain` exits 0 and names no checkout of it, and where the delete exits 0 clear its config with `git config --remove-section branch.<name>`.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:25
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:35
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Chapter 1: the delete is safe only because the trigger was tightened to verified-merged membership. The coordinator persona's finding of 2026-11-01 on its record -254, and `docs/archive/claude-kit_merged-plan-reap_spec_v1.md` Chapter 2's Failed approaches, its round 2 and round 3 lessons: a tip read twice is two moments, and `git branch -D` compares nothing.
 - verdict: keep
 - reason: The doctrine's stop-for-a-yes does not bar this delete: the ownership map assigns what may be deleted without asking to this skill, the operator's Chapter 4 ruling licensed the auto-reap, the SHA from step 4 is the rollback, and test/probes/merged-plan-branch-delete-at-the-end-of-a-run.md resolves the moment to delete without asking. `update-ref -d` with the old value is git's one conditional delete, so a tip that moved since the read is refused rather than deleted. It keeps no refusal of a checked-out branch, so the porcelain read restores that refusal and counts only on exit 0. It follows a symbolic ref unless given `--no-deref`, so a merged branch that is a symbolic ref would delete the branch it names, `main` among them, where `git branch -D` removed only the symbolic ref; section 1's round 1 review found this, and a probe on git 2.55.0 showed both behaviors. git takes the flag after the operands. `update-ref -d` also leaves the `branch.<name>` section that `git branch -D` removed, shown on git 2.55.0 on 2026-11-08, so the removal follows each delete that exits 0 and a missing section's exit 128 is tolerated. Any other non-zero exit is a report, since a held `.git/config.lock` exits 255 and leaves the section, probed on git 2.55.0.windows.3 on 2026-11-09. The removal never precedes the delete, since a refused delete leaves a live branch that keeps its upstream. test/doctrine-parity.test.js pins the form and the removal's presence in step 4 and Hard rule 1, not its order.
@@ -185,7 +185,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C017
 - key: Report in two parts: what was reaped, and what was left for the operator with the reason.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:24
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:39
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Goal ("reporting what it removed with an undo and listing anything unmerged or dirty for Scott to decide").
 - verdict: keep
 - reason: The two-part report is the blast-radius gate's shape: the left-for-you half hands every non-verified delete to the operator, and no hook produces this report.
@@ -194,7 +194,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C018
 - key: In the Reaped part, list each branch and worktree removed with `restore: git branch <name> <sha>`.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:25
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:40
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Approach (`git branch <name> <sha>` brings a reaped branch back).
 - verdict: keep
 - reason: This is the report's owner of the restore line; Hard rule 4 (C033) retires as its third statement. The why, kept here: a reaped branch's commits are already on the integration branch, so recreating the ref at the recorded SHA restores it fully.
@@ -203,7 +203,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C019
 - key: In the Left-for-you part, list with reasons any branch whose upstream is gone but is unmerged, any likely-stranded branch ahead of the integration ref whose PR merged, any unmerged branch, any dirty worktree, and any reapable-looking worktree outside `.claude/worktrees/`.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:26
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:41
 - provenance: 971042a 2026-06-23 installed the list (Chapter 1's demotion of "upstream gone" to report-only); 9b562c0 2026-06-23 added the stranded case per the merge-strand-guard plan Section 2. `docs/plans/claude-kit_misread-branch-names-are-reported_spec_v1.md` section 1 added the reported number-shaped branch (BF001).
 - verdict: keep
 - reason: Each category is a class whose delete could lose commits (squash-merged elsewhere, abandoned, stranded, dirty, or the operator's own worktree), so each is reported and held; the gate is blast-radius and stays.
@@ -212,7 +212,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C020
 - key: List the left-for-you items and do not delete them.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:26
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:41
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Chapter 1 and Out of Scope ("Reaping unmerged or abandoned branches automatically... may hold unsalvaged work").
 - verdict: keep
 - reason: A blast-radius gate on an unrecoverable delete; it governs the report while C030 governs the delete license, so the two are not one rule twice.
@@ -221,7 +221,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C021
 - key: Show a suspected stranded branch's commits with `git log origin/<integration>..origin/<branch>` and recover them via a new doc PR before deleting.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:26
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:41
 - provenance: 9b562c0 2026-06-23, the merge-strand-guard plan Section 2 (flag an ahead-and-merged branch as a likely strand), written when the stranded remote branch still existed; c800e05 2026-06-26 then defined stranded at intake as remote-gone and added the recovery section.
 - verdict: rewrite
 - landed: 617317a section 43
@@ -234,7 +234,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C022
 - key: Recover a stranded branch's commits before deleting it.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:35
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:45
 - provenance: c800e05 2026-06-26 (the diff, not the message), as the manual recovery the merge-strand-guard plan left out of scope ("Auto-recovering stranded commits... Scott releases it").
 - verdict: keep
 - reason: Branch-hygiene owns recovering stranded commits per the ownership map; the lead-in is three words and the executable condition is step 5, so there is nothing to compress. The delete of a stranded branch is the one act in this skill that destroys commits held nowhere else.
@@ -243,7 +243,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C023
 - key: Confirm the stranded commits with `git log --oneline <integration-ref>..<branch>`.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:32
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:47
 - provenance: c800e05 2026-06-26; the nudge hook (plugins/grimoire/hooks/branch-reaper-nudge.js line 151) names the same command.
 - verdict: keep
 - reason: The local-pair form is the one that works whether or not the remote branch survives, which is why the report bullet (C021) now points here rather than carrying its own.
@@ -252,7 +252,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C024
 - key: Branch fresh from the current integration ref with `git switch <integration-ref> && git switch -c <branch>-recover`, or cherry-pick onto a new branch off it.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:33
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:48
 - provenance: c800e05 2026-06-26, applying the merge-strand-guard freeze rule (never reopen the merged branch) to recovery.
 - verdict: rewrite
 - landed: 617317a section 43
@@ -263,7 +263,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C025
 - key: Never reuse the merged branch, which is frozen.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:33
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:48
 - provenance: c800e05 2026-06-26, restating the freeze rule the merge-strand-guard plan (9b562c0 2026-06-23, Section 1) installed in the doctrine and finishing-work: after a fast merge every later push to the branch strands with no signal.
 - verdict: keep
 - reason: The whole rule lives in the doctrine and finishing-work, which bind a merged branch rather than one merely up for merge (ruling 27 of the corpus rewrite's rulings batch, docs/backlog.md 2026-09-13), so this eight-word warning names the same branch the owner freezes and stands unchanged; it is the pointer-sized form a non-owner keeps, and step 2 is not safely executable without it. The push guard (plugins/grimoire/hooks/merged-pr-push-guard.js) blocks the push but not the `git switch` back, so the prose still has work to do.
@@ -272,7 +272,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C026
 - key: Bring the commits over with `git cherry-pick <sha>...` per commit, or `git cherry-pick <integration-ref>..<branch>` for the range.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:34
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:49
 - provenance: c800e05 2026-06-26.
 - verdict: keep
 - reason: No finding. "Bring the commits over" is a parity-test anchor (test/doctrine-parity.test.js INTEGRATION_EXEMPT); the cherry-pick produces new SHAs, which is why the original never enters the merged set afterward and why the contested delete row exists.
@@ -281,7 +281,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C027
 - key: Push the recovery branch and open a new PR against the integration branch.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:35
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:50
 - provenance: c800e05 2026-06-26, applying the merge-strand-guard route (a separate doc PR against the current integration branch, the agent authors and the operator releases).
 - verdict: keep
 - reason: Branch-hygiene owns the recovery procedure; the push guard blocks the wrong push but performs none of this step, so no machinery supersedes it. "Push the recovery branch" is a parity-test anchor. Under the doctrine's stop rule the push is read this way: once the session is on the recovery branch, that branch is the working branch it lands the recovery on, so the push and the new pull request are on the never-gated channel list (a push to the working branch; opening a pull request in the working repository), and the sentence about a push to another remote does not reach it, since the recovery branch sits on the working remote. That reading is inferred from the list's members rather than ruled.
@@ -301,7 +301,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C029
 - key: Delete the stranded original only once its commits are safely on the recovery branch, ideally merged.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:36
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:51
 - provenance: c800e05 2026-06-26.
 - verdict: rewrite
 - landed: 5a3a6c2 section 2
@@ -311,7 +311,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C030
 - key: Auto-delete a branch only on membership in `git branch --merged <integration-ref>`, never delete one outside that set, and delete every branch by compare-and-delete on a tip read once.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:45
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:55
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Chapter 1: the spec's upstream-gone trigger was demoted to report-only at build because a gone-but-unmerged branch may be squash-merged elsewhere or abandoned.
 - verdict: rewrite
 - landed: 5a3a6c2 section 2
@@ -321,7 +321,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C031
 - key: Never run `git worktree remove --force`; report a dirty worktree instead of removing it.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:41
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:56
 - provenance: 971042a 2026-06-23, the branch-hygiene plan, Chapter 3 (dirty `git worktree remove` refused on the fixture).
 - verdict: keep
 - reason: Owner of the worktree half of the force-delete prohibition (C003 retires into it). Git refuses a dirty tree without `--force`, so this rule is what keeps a session from reaching for the flag that defeats that refusal.
@@ -330,7 +330,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C032
 - key: Never touch `develop`, `main`, `master`, the current branch, or a worktree outside `.claude/worktrees/`.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:42
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:57
 - provenance: 971042a 2026-06-23, the branch-hygiene plan.
 - verdict: rewrite
 - landed: 617317a section 43
@@ -374,7 +374,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C036
 - key: For a branch with an open or merged pull request, take the integration branch as that pull request's base as the host reports it, read at the act.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:24
 - provenance: docs/archive/claude-kit_stacked-pr-base_spec_v1.md section 1, 2026-10-06, on the operator's ruling of 2026-10-05 that queued plans stack and the architect's finding that the finishing skill resolved the integration branch to main for a stacked branch.
 - verdict: keep
 - reason: A stacked branch's base is its parent branch, so a strand-check against `origin/main` lists the parent's commits as stranded and a recovery would re-land work the parent already carries. The host's own record of the base is the only source that is right for a stacked branch, so it is read at the act with `gh pr view <branch> --json state,baseRefName` and the ref is `origin/<baseRefName>` after a fetch. A merged pull request's base is read the same way, since the strand-check runs after a merge. Where a branch has had more than one pull request the open one is the base, else the most recently merged. The read asks for the state because `gh pr view` also prints a closed pull request's base, exit 0, and `gh pr list --head <branch> --state all` shows each one's state and merge time where the single read prints CLOSED or MERGED, since that read cannot tell a session how many the branch has had. The nudge hook resolves only the C007 fallback with git and no host CLI, so the skill orders a re-read against the pull request base before any recovery of a branch the nudge flags. C007 holds the fallback, and C012 points the sweep at it (C037).
@@ -383,7 +383,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C037
 - key: Test every branch in the sweep against the fallback ref, by ancestry.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:16
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:26
 - provenance: docs/archive/claude-kit_stacked-pr-base_spec_v1.md section 1, 2026-10-06, from the section's review round 1.
 - verdict: keep
 - reason: The sweep runs one `git branch --merged` for every local branch, so it needs one ref, and a per-branch pull request base would test one branch against another branch's base. A branch whose work reached the trunk has landed whatever its base, so the fallback is a safe ref for every branch. A stacked branch whose work sits only in its parent waits until the parent lands, which delays a cleanup and never deletes unlanded work. C012 points step 2 here, and Hard rule 1 keeps its spelling. The test is ancestry, so it reads a merge-commit merge as landed. A squash or rebase merge leaves a landed branch reading unmerged, which keeps it, the safe direction, and the paragraph says so that a change of merge method knows what it touches.
@@ -392,7 +392,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C038
 - key: On a GitHub remote, treat a pull request base read that fails for any reason but no pull request as a stop, not a fallback.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:24
 - provenance: docs/archive/claude-kit_stacked-pr-base_spec_v1.md section 1, 2026-10-06, from the section's review round 1.
 - verdict: keep
 - reason: `gh pr view <branch>` fails both where the branch has no pull request, printing `no pull requests found for branch`, and where `gh` is missing, signed out or offline, without that message. Read as a fallback, the second case resolves a stacked branch to the trunk, which is the stranded-parent failure C036 exists to prevent. The stop is scoped to a GitHub remote, since on any other remote `gh` fails for want of a GitHub host, and stopping there would end recovery that the fallback serves (C007).
@@ -401,7 +401,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C039
 - key: Recover a stranded branch against its own integration ref.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:32
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:45
 - provenance: docs/archive/claude-kit_stacked-pr-base_spec_v1.md section 1, 2026-10-06, from the section's review round 1.
 - verdict: keep
 - reason: The sweep's ref is the fallback (C037), but recovery acts on one branch, so it takes that branch's own base from the safe set. A stacked branch recovered against the trunk would cherry-pick its parent's commits too.
@@ -410,7 +410,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C040
 - key: Take the fallback for a merged pull request whose base had already landed when it merged, unless the base is develop, main, master or the repo's default branch.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:24
 - provenance: docs/archive/claude-kit_stacked-pr-base_spec_v1.md section 4, 2026-10-06, on the architect persona's ruling from section 2's review round 4, narrowed by its consult ruling from section 4's review round 1.
 - verdict: keep
 - reason: A child merged into a parent after the parent landed, where the parent kept its branch, holds work that reached only the parent. The parent then carries the child's merge, so it is no ancestor of the trunk and the ancestor condition misses it, and a strand-check against the parent reads clean while the child's commits never reached the trunk. The `mergedAt` order is what separates that child from one merged before its parent landed, whose work rode the parent's landing, so the parent is its right ref: a squash-merged parent's child and a deeper stack's child both read clean against the parent. The order reads the governing pull request's own `mergedAt`, since `gh pr view` on a branch with several pull requests can pick one that never merged, and a null `mergedAt` would decide the condition. A base among the protected names is already an integration branch, so a fallback from it only swaps one integration branch for another and reads a hotfix stranded until a back-merge. `gh pr list` prints an empty list where the base has no pull request, so an empty list, like one holding no merged pull request, leaves the base governing, and a failed read takes the stop above. Residual: a long-lived branch other than the protected names, promoted to the trunk by pull request, reads as a landed parent between promotions, so work merged into it since its last promotion lists as stranded. No host or git fact tells the two apart. The list also matches by head name, so a base whose name an earlier, unrelated branch or a fork's head also used reads as landed too. Each error is a false stranded flag, which costs a re-read before recovery and reaps nothing, where the condition's absence was a false clean, which lets a reap lose work.
@@ -419,7 +419,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### DB001
 - key: Reach no tag: the reaper's fetch carries no `--prune-tags`, and a delete under `refs/heads/` reaches a branch and never a tag.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:48
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:58
 - provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 4 2026-10-25, the kit half of the standup program's rollout marks, which are annotated `rollout/*` tags that record each deploy.
 - verdict: keep
 - reason: A rollout tag marks a commit on a branch the reaper later deletes, and the tag is the only record of that deploy once the branch is gone. A `--prune-tags` fetch deletes every local tag the remote lacks, so one added for tidiness would erase marks silently. The rule is stated here and pinned by the reaper nudge test, whose fixture keeps a tag only the local clone holds through the hook's real fetch. The config sentence is there because git applies `fetch.pruneTags` or `remote.<name>.pruneTags` to a plain `--prune` fetch, so the bound holds only where neither is set, and the test inherits the machine's config and reds where one is. Amended 2026-11-02 by `docs/archive/claude-kit_reap-compare-and-delete_spec_v1.md` section 1: the delete is `update-ref -d` on a `refs/heads/` ref, so the bound is stated by the ref's prefix rather than by the verb. That plan answered the coordinator persona's finding of 2026-11-01 on its record -254, and took its compare-and-delete from `docs/archive/claude-kit_merged-plan-reap_spec_v1.md` Chapter 2's Failed approaches, its round 2 and round 3 lessons: a tip read twice is two moments, and `git branch -D` compares nothing.
@@ -429,7 +429,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### MR001
 - key: Before `git worktree remove`, list the worktree's reparse points and remove each untracked one as a link, shallowest first and never by a recursive delete.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:28
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:38
 - provenance: docs/plans/claude-kit_merged-plan-reap_spec_v1.md section 1, 2026-11-01, from the architect seat's junction measurement of 2026-10-31 on a Channels worktree, whose `node_modules` is a junction into the dependency store. Rewritten by `docs/archive/claude-kit_quoted-host-and-link-operands_spec_v1.md` section 2, 2026-11-09, which single-quoted the `cmd` strings and added the quoting and report sentences.
 - verdict: rewrite
 - landed: 88abd8360 section 2
@@ -440,7 +440,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### MR002
 - key: Take worktrees deepest path first, remove a nested worktree the safe set admits before its parent, and prune only where every prunable entry sits under the reaped worktree.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:27
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:37
 - provenance: docs/plans/claude-kit_merged-plan-reap_spec_v1.md section 1, 2026-11-01, from `git worktree list` in D:/Grimoire on 2026-10-31.
 - verdict: keep
 - reason: That listing showed worktrees at `.claude/worktrees/<plan>/.kit/scratch/<plan>/wt/<name>`, detached and marked prunable, cut by clean-worktree re-runs of the test gates inside a plan worktree. Git marks an entry prunable where its folder is gone from disk, so `git worktree prune` drops stale entries and deletes nothing present. It drops every prunable entry in the checkout at once, which is why it runs only where all of them sit under the reaped worktree. A nested worktree still on disk is taken first so that its own clean check runs before its parent's remove reaches its folder. A detached worktree sits on no branch, so the Safe Set's worktree sentence gains one case beside it, which takes the branch test as the ancestry of the tree's own HEAD. A clean check reads only uncommitted changes, so it passes a detached tree holding commits no branch reaches, and removing the tree leaves them reachable from no ref. `git merge-base --is-ancestor HEAD <integration-ref>`, run inside the tree, holds only where every such commit has landed. A nested worktree the Safe Set admits is still clean and under `.claude/worktrees/`, since the case replaces only the branch test. Any other nested worktree, dirty, on an unmerged branch, detached on unlanded commits or held for a live session, leaves its parent in place and in step 5's report (MR003's second passage). A parent left in place admits no child, so a tree left for the operator is left whole. A husk is a folder git no longer lists, the opposite object to a prunable entry, so this rule and MR001 meet on no object.
@@ -448,19 +448,20 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 - passage: A detached worktree nested in a reapable one takes the branch test as `git merge-base --is-ancestor HEAD <integration-ref>`, run inside it.
 
 ### MR003
-- key: Before removing any worktree, find every live session but the sweeping seat's own whose checkout holds it, tell each, and remove after every clear or where none is live.
+- key: Before removing any worktree, find every live session but the sweeping seat's own whose registry entry places it in the worktree's checkout, tell each, and remove after every clear or where none is live.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:26
-- provenance: docs/plans/claude-kit_merged-plan-reap_spec_v1.md section 1, 2026-11-01, carrying the operator-tier memory record `a-reap-is-a-resource-act-on-the-reaped-seat` into the skill, with the state of the fleet's checkouts on 2026-10-31.
-- verdict: keep
-- reason: Git's readings make a reap safe for the work and say nothing about the seat. A live session whose working directory is the removed worktree falls into the shared primary checkout, where its own isolation rules cannot be followed. Which seat cut a worktree says nothing about which session sits in it now, so the check runs for every worktree. A session's checkout holds the worktree where its registry entry's `Repo:` names the worktree's repository. That is the broad reading, since `Workdir:` takes the degraded form the role skill's `references/takeover.md` gates, and a primary checkout and its linked worktrees are one checkout. The broad reading can match several sessions, and any of them may sit in the tree, so the remove waits on a clear from each. The sweeping seat's own entry names the same repository, and a seat cannot wait on its own clear, so its entry is left out. The notice is a peer message under the peer-sessions skill, and a clear is that session's reply saying so. The plan's Approach sets the timing: the seat removes in the pass after a clear arrives, or in the same pass where no live session holds the checkout, and a notice with no reply leaves the tree reported for the next pass. So a tree stays in place while any live session has not cleared, and a seat that keeps a record records each notice and each clear where its next pass reads them, so a clear holds across later sweeps and no session is told twice. A bare liveness test would hold the tree forever, since the session that cleared can still be live in another worktree of the same repository. A clear rests on no notice time, since a clear says the session does not hold the worktree whenever it came. The record's place is the sweeping seat's own, the coordinator's a line on its board, which the plan's section 2 adds to the coordinator skill. A seat whose next pass reads no record of its own, such as a kit session sweeping alone whose report goes to the operator and whose next sweep is another session, cannot see a clear given in an earlier sweep and has no second timing that fits the pass-after rule, so it tells no one, since it could act on no reply, and removes no tree while any session it read by the `Repo:` match is live, reporting the tree in step 5 for the operator or a seat that keeps a record. So this skill names no carrier. Ruled 2026-11-01 by the architect persona, the coordinator persona cutting the notice-time qualifier from its text. A held tree keeps its branch, which `git branch -D` would refuse while the tree holds it, and goes in step 5's report (the second passage), so no wait is open-ended and no late remove needs a branch delete after it. A seat with no roster reads the registry alone, which "any roster" leaves open. A failed or partial registry or roster read matches no session and would read as none live, so it leaves the tree. An unknown heartbeat counts as live, as the coordinator's registry prune keeps such an entry, since this reading gates removing a tree under a session. The finishing security review of 2026-11-01 found both gaps, and the coordinator persona ruled the fix. The seat never runs `git switch` in a checkout it does not own, so a merged branch checked out in such a checkout is reported in step 5 and to that checkout's live session, and, since step 5's report goes to the operator, reaches the operator where that checkout has none, and `git branch -D` refuses it as the auto-delete rule (C030) reads. D:/Grimoire's primary checkout sat on a plan branch on 2026-10-31, so the case is live.
-- passage: - Read the machine's registry, and any roster, for each live session but the seat's own whose `Repo:` names the worktree's repository. A seat whose next pass reads a record of its own tells each live session that has not cleared, once, and keeps each notice and clear there, so a clear holds across later sweeps. A seat with no such record tells no one and removes no tree while any session it read above is live. A session counts as live unless its entry reads as exited, so one whose heartbeat reads unknown counts as live, and a registry or roster read that fails or reads in part leaves the tree. Leave the tree and its branch in place for step 5 while any live session has not cleared. Never `git switch` a checkout the seat does not own.
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:36
+- provenance: docs/plans/claude-kit_merged-plan-reap_spec_v1.md section 1, 2026-11-01, carrying the operator-tier memory record `a-reap-is-a-resource-act-on-the-reaped-seat` into the skill, with the state of the fleet's checkouts on 2026-10-31. Narrowed by `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1, 2026-11-16, which leaves two entries out of the read (CB006).
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1
+- reason: Git's readings make a reap safe for the work and say nothing about the seat. A live session whose working directory is the removed worktree falls into the shared primary checkout, where its own isolation rules cannot be followed. Which seat cut a worktree says nothing about which session sits in it now, so the check runs for every worktree. A session's checkout holds the worktree where its registry entry's `Repo:` names the worktree's repository and CB006 does not leave the entry out. Inside one clone that is the broad reading, since `Workdir:` takes the degraded form the role skill's `references/takeover.md` gates, and a primary checkout and its linked worktrees are one checkout. The broad reading can match several sessions, and any of them may sit in the tree, so the remove waits on a clear from each. The sweeping seat's own entry names the same repository, and a seat cannot wait on its own clear, so its entry is left out. The notice is a peer message under the peer-sessions skill, and a clear is that session's reply saying so. The plan's Approach sets the timing: the seat removes in the pass after a clear arrives, or in the same pass where no live session holds the checkout, and a notice with no reply leaves the tree reported for the next pass. So a tree stays in place while any live session has not cleared, and a seat that keeps a record records each notice and each clear where its next pass reads them, so a clear holds across later sweeps and no session is told twice. A bare liveness test would hold the tree forever, since the session that cleared can still be live in another worktree of the same repository. A clear rests on no notice time, since a clear says the session does not hold the worktree whenever it came. The record's place is the sweeping seat's own, the coordinator's a line on its board, which the plan's section 2 adds to the coordinator skill. A seat whose next pass reads no record of its own, such as a kit session sweeping alone whose report goes to the operator and whose next sweep is another session, cannot see a clear given in an earlier sweep and has no second timing that fits the pass-after rule, so it tells no one, since it could act on no reply, and removes no tree while any session it read by the `Repo:` match is live, reporting the tree in step 5 for the operator or a seat that keeps a record. So this skill names no carrier. Ruled 2026-11-01 by the architect persona, the coordinator persona cutting the notice-time qualifier from its text. A held tree keeps its branch, which `git branch -D` would refuse while the tree holds it, and goes in step 5's report (the second passage), so no wait is open-ended and no late remove needs a branch delete after it. A seat with no roster reads the registry alone, which "any roster" leaves open. A failed or partial registry or roster read matches no session and would read as none live, so it leaves the tree. An unknown heartbeat counts as live, as the coordinator's registry prune keeps such an entry, since this reading gates removing a tree under a session. The finishing security review of 2026-11-01 found both gaps, and the coordinator persona ruled the fix. The seat never runs `git switch` in a checkout it does not own, so a merged branch checked out in such a checkout is reported in step 5 and to that checkout's live session, and, since step 5's report goes to the operator, reaches the operator where that checkout has none, and `git branch -D` refuses it as the auto-delete rule (C030) reads. D:/Grimoire's primary checkout sat on a plan branch on 2026-10-31, so the case is live.
+- passage: - Read the machine's registry, and any roster, for each live session but the seat's own whose `Repo:` names the worktree's repository. Two entries are no such session. One has a `Workdir:` that names another checkout of that repository. Such a field opens with a bare folder name: a run of letters, digits, `.`, `_` and `-`, with nothing before it, ending at the field's end or at a `/`, `\`, space or comma, and not ending in `.`. That name is not `none` and differs from the swept checkout's folder name, which is the folder name of the clone's primary working tree and never a worktree's, and the field does not open with the swept folder name followed by the field's end or by a character outside that run's set, each compared without regard to letter case. The other has a `Name:` that is the roster name the seat itself carries as a fleet-launched session, which is its own earlier session. Every other `Workdir:`, an absolute path, `none` and an absent field among them, counts as in this one. A seat whose next pass reads a record of its own tells each live session that has not cleared, once, and keeps each notice and clear there, so a clear holds across later sweeps. A seat with no such record tells no one and removes no tree while any session it read above is live. A session counts as live unless its entry reads as exited, so one whose heartbeat reads unknown counts as live, and a registry or roster read that fails or reads in part leaves the tree. Leave the tree and its branch in place for step 5 while any live session has not cleared. Never `git switch` a checkout the seat does not own.
 - passage: Also any worktree, with its branch, step 4 leaves in place for a live session, nested worktree or reparse point, and a merged branch checked out in a checkout the seat does not own, reported here and to that checkout's live session.
 
 ### AU001
 - key: Write the worktree path and each link name as single-quoted literals in `find`, `git -C` and `rm`, single-quote the `cmd` string whole, and report and leave a path or link name holding one of `cmd`'s argument separators, a quote character or one of `cmd`'s own characters, and a `find` listing a newline in a link name has split.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:28
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:38
 - provenance: `docs/archive/claude-kit_quoted-host-and-link-operands_spec_v1.md` section 2, 2026-11-09, from STEWARD's proposal record ARCHITECT-d8dc8d0e-b843-444d-b6fc-80dbe160cb32-14 of 2026-11-09, relaying the section reviews of pull request 1108.
 - verdict: keep
 - landed: 88abd8360 section 2
@@ -481,7 +482,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### BF001
 - key: Report and leave unreaped a local branch whose name is all digits, after an optional leading `#` and then an optional `+`, running no `gh pr view` on it.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:24
 - provenance: `docs/plans/claude-kit_misread-branch-names-are-reported_spec_v1.md` section 1, 2026-11-11, from DEV-GRIMOIRE's findings on the reviews of pull request 1132, where a reviewer raised that a branch name of digits reaches `gh` as a pull request number.
 - verdict: keep
 - landed: e40102e4c section 1
@@ -491,7 +492,7 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### BQ001
 - key: Write every branch-name operand in this skill's commands, the integration ref's included, as a single-quoted literal, and report and leave a name holding a quote character.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:25
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:35
 - provenance: pull request 1101's finishing security review, a Minor finding, relayed by STEWARD's record ARCHITECT-d8dc8d0e-b843-444d-b6fc-80dbe160cb32-5 of 2026-11-09, landed by docs/archive/claude-kit_quoted-branch-operands_spec_v1.md section 1. First written as C041, and renamed under the letter BQ by `docs/archive/claude-kit_untrue-passages-corrected_spec_v1.md` section 3 on 2026-11-13.
 - verdict: keep
 - reason: The session writes these commands into a shell, which expands `$(...)`, a backtick and `;` in an unquoted word before git reads the line. In Git Bash on git 2.55.0.windows.3, `git rev-parse --verify refs/heads/a$(echo EXPANDED >&2)x` printed `EXPANDED` before git's refusal, and the same ref single-quoted printed git's refusal alone. Git does not refuse such a name: `git check-ref-format --branch 'a$(id)x;b'` exits 0, so a screen through it would screen nothing here. The names step 4 reads come from `git branch --merged` and the host's pull request list, so anyone who can push a branch chooses one. A single-quoted literal stops every expansion in Git Bash and PowerShell, but a quote inside the name ends the literal, and PowerShell also ends it on the typographic single quotes U+2018 to U+201B, which git admits in a branch name, so a name holding any quote character is reported and left rather than quoted. The rule sits at step 4 alone and reads over this skill's commands, so Hard rule 1's exception takes it without a second carrier.
@@ -500,9 +501,100 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### BS001
 - key: Read a worktree as clean only where it also carries no index bit that hides an edit, `git -C '<path>' ls-files -v | grep -c '^[a-zS] '; echo "${PIPESTATUS[0]}"` printing two lines that each read `0`, and leave a tree on any other output, reported as dirty.
 - class: mechanic
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:16
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:26
 - provenance: `docs/plans/claude-kit_work-folders-and-git-reads_spec_v1.md` section 2, 2026-11-13, from a `docs/backlog.md` item deferred from the security review of pull request 1165 and the architect seat's probes of 2026-11-11 on git 2.55.0.windows.3.
 - verdict: keep
 - landed: 64e798b86 section 2
 - reason: The probe found that `git worktree remove` with no flag exits 0 on a tree whose edited file carries the skip-worktree bit, while status prints nothing there and `git ls-files -v` prints `S a.txt`. So the clean-tree test (C008) and the unforced remove admit a tree whose only copy of an edit sits behind the bit. `plugins/grimoire/scripts/plan-cleanup.js` already leaves such a tree (BD001), and the reap after the merge then removed the tree step 10 left, so a rule one of two removers holds was not held. `ls-files -v` tags an assume-unchanged file with a lowercase letter and a skip-worktree file with `S`, so the pattern counts both. The pipeline's own exit code is `grep`'s, so the listing's exit code is read from `PIPESTATUS`, and a failed listing leaves the tree. The probe printed `0` and `0` on a clean tree, `1` and `0` with either bit set on one file, and `0` and `128` where the listing failed. Step 7 of `finishing-work` and the coordinator's merged-plan reap run this skill's steps by pointer, so both take the read with no edit of their own. The outcome is the Hard Rules line's: a dirty worktree is reported, never removed.
 - passage: A clean working tree also carries no index bit that hides an edit: `git -C '<path>' ls-files -v | grep -c '^[a-zS] '; echo "${PIPESTATUS[0]}"` prints two lines that each read `0`. The first line counts the tracked files carrying the assume-unchanged or skip-worktree bit, which neither status nor `git worktree remove` reads past, and the second is the listing's exit code. Any other output leaves the tree, reported as dirty.
+
+### CB001
+- key: Sweep the session's own checkout, whatever seat the session holds, without asking.
+- class: rule
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- provenance: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1, 2026-11-16, on the operator's words of that date quoted in the plan's `## Intent`, after three of four workers declined the weekly cleanup on their own clones and the coordinator reaped by hand.
+- verdict: keep
+- landed: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1
+- reason: The session that works in a checkout knows which of its branches have landed, and the ownership map gives this skill what may be deleted without asking (C039 under the map's heading in the operating-instructions ledger). So the sweep is the session's own upkeep and takes no ask. The sentence names every seat because the role skill bars a working-class session from a branch delete and a worktree remove only on a checkout that is not its own (AA001 under the role ledger's `SKILL.md` heading), and a worker that read that bar without a definition took its own clone for a barred one. The safe set and the hard rules bound this sweep as they bound any other.
+- passage: A session sweeps its own checkout, whatever its seat, without asking.
+
+### CB002
+- key: Read a checkout, with its worktrees, as the session's own only where the session was launched in it or in a worktree of it and step 4's registry read finds no other live session in it, a read not made, one that fails or one that reads in part finding one, with no other checkout its own and none for a dispatched agent.
+- class: rule
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- provenance: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1, 2026-11-16, whose `## Intent` ends its why chain on the constraint this definition answers.
+- verdict: keep
+- landed: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1
+- reason: Whether another session works in a checkout can be read only from registry text each session writes about itself, which nothing validates. So the definition rests on two things the sweeping session can read, its own launch folder and step 4's registry read (MR003, with CB006 for the entries the read leaves out), and it fails toward a checkout that is not the session's own: a read not made, one that fails or one that reads in part counts as finding a session, and CB007 says when the read is made. A clone and its worktrees are one checkout because a branch delete and a worktree remove act on the whole clone. A dispatched agent works in its orchestrator's checkout and has none, so the role skill's bar reaches it everywhere. A session the registry does not show is not seen by the read, and the safe set bounds what a sweep can then remove: only a branch verified merged, each with a restore line, and only a clean worktree under `.claude/worktrees/` on a merged branch. The section does not use the role skill's word for the checkout its other four git acts are barred on, so those acts keep their own reading (AA001 under the role ledger's `SKILL.md` heading). `test/doctrine-parity.test.js` pins the heading with the words `launched in it`.
+- passage: A checkout, with its worktrees, is a session's own where the session was launched in it, or in a worktree of it, and step 4's registry read finds no other live session in it.
+- passage: A read not made, or one that fails or reads in part, finds one. No other checkout is its own, and a dispatched agent has none.
+
+### CB003
+- key: As a working-class session, sweep no checkout that is not the session's own, reap nothing there, and report what the reads found to the live coordinator, or to the operator where none is seated.
+- class: rule
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:16
+- provenance: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1, 2026-11-16, holding the operator's ruling of 2026-10-18 that a working-class session gets no emergency carve-out, which `docs/archive/claude-kit_shared-state-authority_spec_v1.md` records.
+- verdict: keep
+- landed: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1
+- reason: The role skill bars a working-class session from a branch delete and a worktree remove on a checkout that is not its own (AA001 under the role ledger's `SKILL.md` heading), and this skill states the same bound where a session decides whether to sweep. The reads change nothing, so the session still runs them and reports what is reapable, and a seat that may act there decides. The report goes where the role skill sends a working-class session's ask: the live coordinator, or the operator where none is seated.
+- passage: A working-class session, as the `role` skill names the class, sweeps no checkout that is not its own, since that skill bars its branch delete and worktree remove there. It reaps nothing there and reports what its reads found to the live coordinator, or to the operator where none is seated.
+
+### CB004
+- key: As the Worker seat on its own checkout, send both parts of step 5's report to the live coordinator, or to the operator where none is seated, report a stranded branch first, run no step of Stranded Branch Recovery, then sweep, leaving the stranded branch in place.
+- class: rule
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:18
+- provenance: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1, 2026-11-16, on the coordinator persona's relayed design ask the plan's `## Intent` records, which keeps a stranded branch's report going up.
+- verdict: keep
+- landed: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1
+- reason: The relayed ask has a Worker report a stranded branch and not recover it, and the plan refuses a Worker recovering stranded commits itself. So for that seat the report stands where C004 puts recovery, before the sweep, and no recovery step runs. The sweep cannot remove the stranded branch, which is outside the merged set that Hard rule 1 (C030) makes the only delete trigger. The recipient is CB003's, the live coordinator or the operator where none is seated, since the coordinator orders the fleet's work and holds the reaps a worker cannot make. Every other session keeps the recovery C022 states.
+- passage: On its own checkout the Worker seat sends both parts of step 5's report to the live coordinator, or to the operator where none is seated. It reports a stranded branch first, runs no step of Stranded Branch Recovery, then sweeps. The sweep leaves that branch, which is outside the merged set. Any other session recovers as this skill states.
+
+### CB005
+- key: Treat another seat's reminder to sweep as a prompt for the session's own upkeep and never as direction, and sweep on this skill's terms.
+- class: rule
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:20
+- provenance: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1, 2026-11-16, from the second of the three causes the plan's Approach names.
+- verdict: keep
+- landed: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1
+- reason: One worker held the weekly cleanup for the operator's yes because it read a coordinator's reminder as direction to delete outside a plan's scope, which the role skill's delegation exclusions name. The sweep is not delegated work. This skill owns what may be deleted without asking (C039 under the map's heading in the operating-instructions ledger), so the reminder prompts an act the session may already run, and the skill's own bounds govern it whoever sent the reminder.
+- passage: Another seat's reminder to sweep prompts the session's own upkeep and directs nothing, so the session sweeps on this skill's terms.
+
+### CB006
+- key: Leave out of step 4's read an entry whose `Workdir:` opens with a bare folder name, a run of letters, digits, `.`, `_` and `-` ended by the field's end or a `/`, `\`, space or comma and not ending in `.`, that is not `none` and differs from the folder name of the swept clone's primary working tree, where the field does not open with that folder name followed by the field's end or a character outside that set, each compared without regard to letter case, and an entry under the roster name the sweeping seat itself carries as a fleet-launched session, and count every other `Workdir:` as in this checkout.
+- class: rule
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:36
+- provenance: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1, 2026-11-16, from the third of the three causes the plan's Approach names, read from the fleet's registry on 2026-11-16.
+- verdict: keep
+- landed: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1
+- reason: Two workers on one fleet each hold a full clone of one repository, so a read keyed on `Repo:` alone has each find the other live in its own checkout for good, and neither removes a worktree. The folder name tells the clones apart, since the role skill's `references/takeover.md` has `Workdir:` open with the folder name of the clone the session works in (c1.C052 under that file's heading in the role ledger). A restarted fleet session would also read its own earlier entry as another live session until that entry's stamp reads exited. The role skill's takeover ritual has a fleet-launched session keep its roster name on its entry's `Name:` line, and the persona plugin denies a claim on a persona a live session holds (`plugins/personas/README.md`, "When a session attempts to claim a persona held by a live session"). So two live sessions never share a roster name, and another entry under the seat's own is its earlier session. A self-named session's name carries no such guarantee, so the clause reaches a fleet-launched session alone. The skip is narrow and the count is the default, so a `Workdir:` that does not open with a plain folder name fails toward leaving the tree. An absolute `Workdir:`, which `references/takeover.md` allows under the coordinator skill's precondition, opens with a drive or root, so it is no bare folder name and counts. An entry reading `none`, or with no `Workdir:` at all, cannot be placed in another clone, so it counts too. The name is read whole up to a delimiter, so `Grimoire-old` is not read as `Grimoire`, and the comparison ignores letter case, since Windows does. Only a plain run of letters, digits, `.`, `_` and `-` ended by the field's end or one of four delimiters is read as a folder name, and a field opening with the swept folder's own name followed by any other character counts, so a quote, a colon, a semicolon, a trailing period or a folder name holding a space or comma fails toward leaving the tree, and `references/takeover.md` names the space or comma a worktree name follows. Both comparisons ignore letter case. A clone whose folder name is another's followed by a space or comma, `Grimoire 2` beside `Grimoire`, counts as in the shorter-named checkout, so that worker sweeps nothing while the other is live, which fails toward leaving the tree. A `Workdir:` of `none` is never skipped, whatever its case. A placeholder other than `none` that is or opens with a plain run, such as `n/a` or `unknown`, and a field opening with a repo-relative path, are off the field's form and read as naming another folder: they are the wrong-folder entries this entry's reason already bounds by the safe set, since the plan tests the folder name and builds no guard. The swept checkout's folder name is its primary working tree's, so a session launched in a worktree compares against the clone's folder and not its own worktree's. A `\` ends the name as a `/` does, so a name written with Windows separators is never read whole and skipped. An entry that names the wrong folder is misread, and the safe set bounds that as CB002 states. The reverse case holds for a while too. An entry written before this build, from a clone whose folder name differs from the repository name, opens with the repository's name, so a sweep of that clone reads it as another checkout and skips it. The window lasts until that session restarts onto the build, and the safe set bounds what a sweep then removes. `test/doctrine-parity.test.js` pins the words `names another checkout` and `its own earlier session` in the bullet.
+- passage: Two entries are no such session. One has a `Workdir:` that names another checkout of that repository. Such a field opens with a bare folder name: a run of letters, digits, `.`, `_` and `-`, with nothing before it, ending at the field's end or at a `/`, `\`, space or comma, and not ending in `.`. That name is not `none` and differs from the swept checkout's folder name, which is the folder name of the clone's primary working tree and never a worktree's, and the field does not open with the swept folder name followed by the field's end or by a character outside that run's set, each compared without regard to letter case. The other has a `Name:` that is the roster name the seat itself carries as a fleet-launched session, which is its own earlier session. Every other `Workdir:`, an absolute path, `none` and an absent field among them, counts as in this one.
+
+### CB007
+- key: Make step 4's registry read for the checkout once, before the sweep's first delete or remove.
+- class: rule
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- provenance: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1, round 1 fix of 2026-11-16, from the section's review, which found that the definition rested on a read step 4 makes only for a worktree.
+- verdict: keep
+- landed: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1
+- reason: Step 4 reads the registry in a sub-bullet reached only where the safe set admits a worktree, so a merged branch with no worktree goes to its delete with no read made. The definition (CB002) rests on that read, so a sweep of branches alone would have treated a checkout as its own unread. Making the read once for the checkout, before any delete or remove, puts it ahead of every act the role skill bars on a checkout that is not the session's own (AA001 under the role ledger's `SKILL.md` heading). CB002's passage counts a read not made as finding a session, so a sweep that skips it deletes nothing. Step 4 still makes its own read for each worktree (MR003).
+- passage: The session makes that read for the checkout once, before the sweep's first delete or remove.
+
+### CB008
+- key: Read steps 4 and 5's "a checkout the seat does not own" under this section's definition.
+- class: pointer
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- provenance: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1, round 1 fix of 2026-11-16, whose section text says those two places keep their words and read under this definition.
+- verdict: keep
+- landed: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1
+- reason: Step 4's bar on `git switch` and step 5's report of a merged branch checked out elsewhere name a checkout the seat does not own, and before this section no text said which that was. The clause ties both to CB002, so one definition answers every place the skill names ownership, and the two passages (MR003) keep their words.
+- passage: Steps 4 and 5 read a checkout the seat does not own under this definition.
+
+### CB009
+- key: Read a plan's own worktree and branch, which `finishing-work` clears, as the session's own under that skill's per-worktree test, whoever else works in the clone.
+- class: rule
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:14
+- provenance: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1, round 1 fix of 2026-11-16, from the section's review, whose spec's Out of Scope keeps finishing-work's steps 7 and 10 reading true.
+- verdict: keep
+- landed: `docs/plans/claude-kit_worker-reaps-own-checkout_spec_v1.md` section 1
+- reason: CB002 defines ownership over the whole clone, and the role skill's bar on a branch delete and a worktree remove points at that definition (AA001 under the role ledger's `SKILL.md` heading). Finishing-work's step 10 tests ownership per worktree instead: clearing the plan's own worktree takes no ask, and it is the session's own unless the registry shows another live session in that worktree. Its step 7 reaps the plan's own branch on the same footing. Without this sentence a session in a plan's worktree, with another live session registered elsewhere in the clone, would read the bar as forbidding the clearing finishing-work tells it to make. The sentence keeps both skills true and edits neither finishing-work nor the role skill.
+- passage: A plan's own worktree and branch, which `finishing-work` clears, are the session's own under that skill's per-worktree test, whoever else works in the clone.
