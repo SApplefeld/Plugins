@@ -3,9 +3,11 @@
 //
 // An entry is a file under `docs/changelog/` at any depth whose path ends in a lower-case `.md`,
 // less the one file `docs/changelog/README.md`. Its first line is `# Change: <title>`. Header lines
-// follow, `<key>: <value>`, and then the parts, one per line as `**<label>.** <text>`, under the
-// part rule a plan brief takes. A listed file that does not open `# Change: ` is kept as a row with
-// no entry, so a malformed entry is seen rather than missing.
+// follow, `<key>: <value>`, and then the parts, under the part rule a plan brief takes, which
+// `brief.ts` states: a part runs from its part line, `**<label>.**` bare or behind a bullet marker,
+// to the next one. The header lines end at the first part line, so a line shaped like a header after
+// it is text of a part. A listed file that does not open `# Change: ` is kept as a row with no
+// entry, so a malformed entry is seen rather than missing.
 //
 // An entry's landing commit is the oldest commit on the default branch's first-parent history whose
 // diff against its first parent adds the file, so an entry that arrives through a merge lands at
@@ -19,7 +21,7 @@
 // limit on git's output. No ref name and no path is ever joined into a revision, and the one pathspec is
 // the literal `docs/changelog/`.
 import { bounded } from "../board/plans.ts";
-import { MAX_BRIEF_FILE_BYTES, parseParts } from "./brief.ts";
+import { MAX_BRIEF_FILE_BYTES, isPartLine, parseParts } from "./brief.ts";
 import type { BriefPart } from "./brief.ts";
 import { LOCAL_READ } from "./git.ts";
 import type { GitRunner } from "./git.ts";
@@ -102,9 +104,9 @@ export type HeldEntries = ReadonlyMap<string, ChangelogEntry | null>;
 
 /**
  * The entry in `text`, or null where its first line, after a byte-order mark is dropped, does not
- * open `# Change: `. Header lines are read between the first line and the first line that is a
- * part: a blank line or a line carrying none of the four keys is skipped, and the first line
- * carrying a key wins over a later one. An entry with no parts is still an entry.
+ * open `# Change: `. Header lines are read between the first line and the first part line: a blank
+ * line or a line carrying none of the four keys is skipped, and the first line carrying a key wins
+ * over a later one. An entry with no parts is still an entry.
  */
 export function parseEntry(text: string): ChangelogEntry | null {
   const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
@@ -114,8 +116,9 @@ export function parseEntry(text: string): ChangelogEntry | null {
   let at = 1;
   for (; at < lines.length; at += 1) {
     const line = lines[at] ?? "";
-    // The part rule itself decides where the headers end, so a line it drops is still a header line.
-    if (parseParts([line]).length > 0) break;
+    // The part rule itself decides where the headers end: at its first part line in either form,
+    // whether or not that part is kept.
+    if (isPartLine(line)) break;
     const match = HEADER.exec(line);
     if (match === null) continue;
     const key = match[1] as string;

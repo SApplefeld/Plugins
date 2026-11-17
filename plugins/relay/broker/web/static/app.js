@@ -1543,28 +1543,33 @@
     return m;
   }
 
-  /** The brief part the page draws in amber and opens below a rule, as the kit names it. */
+  /** The brief part the page draws in amber and opens below a rule, as the kit names it, found in any letter case. */
   const ASSUMES_LABEL = "It assumes";
 
-  /** One grid of label and text rows; the assumptions label draws in the page's amber. */
+  /** Whether a part carries the label, its letter case ignored, so `It Assumes` and `It assumes` are one label. */
+  function labelIs(part, label) {
+    return txt(part.label).toLowerCase() === label.toLowerCase();
+  }
+
+  /** One grid of label and text rows; the assumptions label draws in the page's amber, as its file wrote it. */
   function briefGrid(parts) {
     const grid = h("div", "brief-grid");
     for (const part of parts) {
-      grid.append(h("div", "brief-label" + (part.label === ASSUMES_LABEL ? " assumes" : ""), part.label), md("div", "brief-text", part.text));
+      grid.append(h("div", "brief-label" + (labelIs(part, ASSUMES_LABEL) ? " assumes" : ""), part.label), md("div", "brief-text", part.text));
     }
     return grid;
   }
 
   /**
    * The brief card, or null where the view carries no usable brief. Parts keep file order, and the
-   * ones from `It assumes` on draw below a rule, as the mockup does. Every value is set as text.
+   * ones from `It assumes`, in any letter case, on draw below a rule, as the mockup does. Every value is set as text.
    */
   function briefCard(brief) {
     const parts = brief && typeof brief === "object" ? list(brief.parts).filter((part) => part && txt(part.label) !== "" && txt(part.text) !== "") : [];
     if (parts.length === 0) return null;
     const card = h("section", "card pad section brief");
     card.setAttribute("aria-label", "Brief");
-    const split = parts.findIndex((part) => part.label === ASSUMES_LABEL);
+    const split = parts.findIndex((part) => labelIs(part, ASSUMES_LABEL));
     if (split <= 0) card.append(briefGrid(parts));
     else card.append(briefGrid(parts.slice(0, split)), h("div", "brief-rule"), briefGrid(parts.slice(split)));
     return card;
@@ -2079,7 +2084,7 @@
   const CHANGELOG_STEP = 30;
   const CHANGELOG_MAX = 300;
 
-  /** The parts an entry draws closed; the rest open with its Corrects and Corrected by lines on a tap. */
+  /** The parts an entry draws closed, found in any letter case; the rest open with its Corrects and Corrected by lines on a tap. */
   const CHANGELOG_SHOWN = ["What changed", "Why"];
 
   /**
@@ -2150,7 +2155,7 @@
   }
 
   /**
-   * One entry: its title, kind, product and repository, then What changed and Why, and a toggle that
+   * One entry: its title, kind, product and repository, then What changed and Why in any letter case, and a toggle that
    * opens the other parts and the Corrects and Corrected by lines. An unreadable row draws its path and
    * that the file is not a changelog entry. Every value is set as text, a part's through `briefGrid`.
    */
@@ -2173,8 +2178,8 @@
     title.id = titleId;
     card.append(title, meta);
     const parts = list(entry.parts).filter((part) => part && txt(part.label) !== "" && txt(part.text) !== "");
-    const shown = parts.filter((part) => CHANGELOG_SHOWN.includes(part.label));
-    const rest = parts.filter((part) => !CHANGELOG_SHOWN.includes(part.label));
+    const shown = parts.filter((part) => CHANGELOG_SHOWN.some((label) => labelIs(part, label)));
+    const rest = parts.filter((part) => !CHANGELOG_SHOWN.some((label) => labelIs(part, label)));
     const corrects = txt(entry.corrects);
     const correctedBy = txt(entry.correctedBy);
     if (shown.length > 0) card.append(briefGrid(shown));
