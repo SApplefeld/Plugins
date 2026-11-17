@@ -6,7 +6,9 @@
 // qa and implementers must not write there: their reports and scratch belong
 // in .kit/ (gitignored), and the durable record is the plan's Chapter. The
 // docs-curator's own Write, Edit and MultiEdit are bounded the other way: a
-// file outside docs/ and .kit/ of the project tree refuses.
+// file outside the docs/ and .kit/ folders at a checkout root in the session's
+// tree refuses, and so does a file whose path below the session's root holds a
+// .git segment.
 //
 // Covers Write, Edit and MultiEdit exactly, by the file they name. A shell
 // command is read deny-by-default: every simple command in it that names a
@@ -120,7 +122,7 @@
 // as rm $(cat <<'EOF' ...) must.
 //
 // The tree the guard protects is the session project's own: a target is
-// resolved and judged by containment against the git root above the
+// resolved and judged by containment against the git root at or above the
 // session's working directory, so a docs/ segment outside the project is out
 // of scope. A target that cannot be resolved before the shell runs is judged
 // by its shape alone, and so is every target in a command line that changes
@@ -128,6 +130,21 @@
 // word of any command (a subshell, a brace group, after if, builtin or
 // command, or in PowerShell's & { }), or a git -C, --git-dir or --work-tree.
 // A curator's file write is the exception: an unresolved target refuses.
+//
+// A curator's file write is read against each checkout root that holds its
+// target inside the session's tree. A checkout root is the git root at or
+// above the session's working directory, or that directory where there is
+// none, or a directory below it, at or above the target's folder, that holds
+// a .git entry, a file or a folder. So a curator in a session launched above a
+// worktree, a submodule or a clone writes that checkout's docs/ and .kit/ as a
+// session launched inside it would. The guard reads the entry's presence and
+// not its contents, so the three are admitted alike. A target outside the
+// session's tree refuses whatever it holds. A target whose path below the
+// session's root holds a .git segment refuses too, inside docs/ and .kit/ as
+// anywhere, so a curator writes no path that resolves to one holding a .git
+// segment, a stream suffix on it included. The containment and the bound
+// read the path's spelling and follow no link, so a linked folder is
+// followed by the existence check and by the write.
 //
 // Nothing here reads `$` (runner.ts says why). The .git walk and the path
 // arithmetic go through the LexHost hooks/index.ts builds, as the readonly
@@ -152,7 +169,8 @@ const DOCS_WRITE_TOOLS: ReadonlySet<string> = new Set(["Write", "Edit", "MultiEd
 
 // docs-curator is the one subagent allowed to curate docs/, matched by suffix
 // so a plugin-namespaced id ("grimoire:docs-curator") still resolves. Its
-// file writes are bounded to docs/ and .kit/ of the project tree.
+// file writes are bounded to the docs/ and .kit/ folders at a checkout root in
+// the session's tree, and a path holding a .git segment is refused there too.
 function isCurator(t: string): boolean {
   return /(^|[:/])docs-curator$/i.test(t);
 }
@@ -172,11 +190,24 @@ export function targetsDocs(s: unknown): boolean {
   return /(^|[\\/])docs[\\/]/i.test(String(s || ""));
 }
 
-// The docs-curator's bound, read on a path relative to the project root: it
-// opens with docs/ or .kit/. A docs or .kit folder further down is outside,
-// since an allow shape stays narrow where a refuse shape may be wide.
+// The docs-curator's bound, read on a path relative to a checkout root: it
+// opens with docs/ or .kit/. A docs or .kit folder further down from that
+// root is outside, since an allow shape stays narrow where a refuse shape may
+// be wide.
 function opensCuratorBound(rel: unknown): boolean {
   return /^(?:docs|\.kit)[\\/]/i.test(String(rel || ""));
+}
+
+// True when a path relative to the session's root holds a segment that is
+// .git in any letter case, with or without trailing dots and spaces, which
+// Windows may drop when it opens a name, so .GIT. and ".git " can open
+// .git, and with or without a stream suffix that a colon opens. The last
+// segment counts: a file named .git points git at a folder elsewhere. The
+// test reads the spelling alone and asks the host nothing: a name with a
+// stream suffix is in the spelling and is refused, and a short name (git~1)
+// is not and is not caught.
+function holdsGitSegment(rel: string): boolean {
+  return /(?:^|[\\/])\.git[. ]*(?:[:\\/]|$)/i.test(rel);
 }
 
 // A target resolved against the directory the write runs in, with the
@@ -203,14 +234,21 @@ type DocsJudge = (raw: unknown) => Promise<boolean>;
 
 // The judge for one call: true when a target is a docs/ write in the project
 // tree this guard protects. With a cwd to place it against, a path resolving
-// outside the git root above that cwd is out of scope whatever segments it
-// contains, and the shape test runs on the root-relative remainder. Without a
+// outside the git root at or above that cwd is out of scope whatever
+// segments it contains, and the shape test runs on the root-relative
+// remainder. Without a
 // cwd, or for an unresolvable target, the shape alone decides. The git root is
 // found once per call, at the first target that needs it. `shape` is the
 // shape test: docs/ by default, and the curator's bound for a curator's call,
 // whose judge reads true for a target inside that bound in the project tree.
-function guardedDocsJudge(cwd: string | null, host: LexHost, shape: (s: unknown) => boolean = targetsDocs): DocsJudge {
-  let root: Promise<string> | null = null;
+// `nested` is set by the curator's file write alone. With it, a target inside
+// the git root that the shape refuses there is read again against each nested
+// checkout root that holds it, by `opensAtNestedRoot`. Without it the judge
+// reads the one root, and a target the shape admits at the git root takes no
+// further check either way. `found` is the git root where the caller has
+// already walked to it, so the judge does not walk again.
+function guardedDocsJudge(cwd: string | null, host: LexHost, shape: (s: unknown) => boolean = targetsDocs, nested = false, found: Promise<string> | null = null): DocsJudge {
+  let root: Promise<string> | null = found;
   return async (raw) => {
     if (!cwd) return shape(raw);
     const resolved = resolveTarget(raw, cwd, host);
@@ -218,8 +256,33 @@ function guardedDocsJudge(cwd: string | null, host: LexHost, shape: (s: unknown)
     root ??= repoRoot(cwd, host);
     const rel = host.path.relative(await root, resolved);
     if (host.path.isAbsolute(rel) || /^\.\.(?:[\\/]|$)/.test(rel)) return false;
-    return shape(rel);
+    return shape(rel) || (nested && (await opensAtNestedRoot(await root, resolved, host, shape)));
   };
+}
+
+// True when `resolved`, a path inside `root`, passes `shape` read relative to
+// a nested checkout root that holds it: a directory below `root`, at or above
+// the target's parent folder, that holds a .git entry, a file or a folder
+// alike. Every such directory is read and not the nearest alone, so a docs/
+// folder that is itself a checkout does not hide the checkout root above it.
+// The walk goes from the target's parent folder upward, stops below `root`,
+// and looks at no more than 64 folders, the bound `repoRoot` walks to, so a
+// target deeper than that below a nested root reads false. An existence check
+// that fails counts as no .git entry in that folder.
+async function opensAtNestedRoot(root: string, resolved: string, host: LexHost, shape: (s: unknown) => boolean): Promise<boolean> {
+  const path = host.path;
+  let cur = path.dirname(resolved);
+  for (let i = 0; i < 64; i++) {
+    const below = path.relative(root, cur);
+    if (below === "" || path.isAbsolute(below) || /^\.\.(?:[\\/]|$)/.test(below)) break;
+    let holds = false;
+    try { holds = await host.exists(path.join(cur, ".git")); } catch { holds = false; }
+    if (holds && shape(path.relative(cur, resolved))) return true;
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return false;
 }
 
 // The judge for every target in a command line that changes directory: the
@@ -863,9 +926,14 @@ export type DocsWriteDeps = { lexHost(): Promise<LexHost>; quote(text: string): 
  * than as a read, with the hook's refusal as the reason. A call from the main loop matches
  * nothing, since the hook allowed every call that carried no agent type; the
  * bare "claude" type allows. The docs-curator's file writes are bounded: a
- * Write, Edit or MultiEdit it makes outside the docs/ and .kit/ folders at the
- * project root, or whose target the guard cannot place, is denied with that
- * bound as the reason, and any other call of its allows.
+ * Write, Edit or MultiEdit it makes outside the docs/ and .kit/ folders at a
+ * checkout root that holds the file inside the session's tree, or whose target
+ * the guard cannot place, is denied with that bound as the reason, and any
+ * other call of its allows. A checkout root is the git root at or above the
+ * session's working directory, or that directory where there is none, or a
+ * directory below it that holds a .git entry. A file write of its whose path
+ * below the session's root holds a .git segment is denied with a reason of its
+ * own, inside docs/ and .kit/ too.
  */
 export function docsWriteGuard(deps: DocsWriteDeps): BeforeGuard {
   return {
@@ -880,17 +948,37 @@ export function docsWriteGuard(deps: DocsWriteDeps): BeforeGuard {
       const cwd = typeof ctx.cwd === "string" && ctx.cwd.trim() ? ctx.cwd.trim() : null;
       const host = await deps.lexHost();
       // The curator's file write runs only inside the docs/ and .kit/ folders
-      // at the project root. Its call naming no file runs, since its charter
-      // grants no shell. A target the guard cannot place under that root, with
-      // no cwd, a quote at either end or one resolveTarget declines, refuses,
-      // since the raw text says nothing of where the file lands, and
-      // resolveTarget strips a quote the Write tool keeps as part of the name.
-      // The refusal quotes no path, so no caller text reaches the model
-      // through it.
+      // at a checkout root that holds the file: the git root at or above the
+      // session's directory, or that directory where there is none, read
+      // first, or a directory below that root holding a .git entry. Its call
+      // naming no file runs, since its charter grants no shell. A target the
+      // guard cannot place under the git root, with no cwd, a quote at either
+      // end or one resolveTarget declines, refuses, since the raw text says
+      // nothing of where the file lands, and resolveTarget strips a quote the
+      // Write tool keeps as part of the name. A placed target inside the git
+      // root whose path below it holds a .git segment refuses before the
+      // bound is read against any checkout root, so the docs/ and .kit/
+      // folders of the session's root and of every nested root admit no path
+      // that resolves to one holding a .git segment. The git root is walked to
+      // once and handed to the judge. Neither refusal quotes a path, so no
+      // caller text reaches the model through it.
       if (isCurator(t)) {
-        const quoted = /^["']|["']$/.test(String(fp || "").trim());
-        const placed = cwd !== null && !quoted && resolveTarget(fp, cwd, host) !== null;
-        if (!fp || (placed && (await guardedDocsJudge(cwd, host, opensCuratorBound)(fp)))) return {};
+        if (!fp) return {};
+        const quoted = /^["']|["']$/.test(String(fp).trim());
+        const resolved = cwd !== null && !quoted ? resolveTarget(fp, cwd, host) : null;
+        if (cwd !== null && resolved !== null) {
+          const root = repoRoot(cwd, host);
+          const rel = host.path.relative(await root, resolved);
+          const inside = !host.path.isAbsolute(rel) && !/^\.\.(?:[\\/]|$)/.test(rel);
+          if (inside && holdsGitSegment(rel)) {
+            return {
+              deny:
+                `Blocked: the ${t} subagent writes nothing inside a .git folder and no file named .git, and this file's path holds a .git segment. ` +
+                `Return the content in your final message for the orchestrator to land.\n`,
+            };
+          }
+          if (await guardedDocsJudge(cwd, host, opensCuratorBound, true, root)(fp)) return {};
+        }
         return {
           deny:
             `Blocked: the ${t} subagent writes only under the docs/ and .kit/ folders at the root of the project tree, and this file is outside both. ` +
