@@ -8,22 +8,24 @@
 # bin/installed-plugin-functions.ps1, which this script dot-sources for the record lookup and the
 # snapshot, so the task's action names one path that no plugin update moves.
 #
-# The launcher is a loop, and it ends only when a fleet supervisor ends for good. Each pass reads
+# The launcher is a loop, and it ends only on a refusal, which the last paragraph states, or at the
+# suite's -RestartLimit: a fleet supervisor that ends is followed by another start. Each pass reads
 # the installed plugin's record from installed_plugins.json, takes that version's snapshot under
-# <LauncherRoot>\runtime\<version> through Install-PluginSnapshot, the function the persona launcher
-# takes its snapshot through, and writes one START line to <LauncherRoot>\fleet-launcher.log. It
-# then starts the snapshot's bin\Start-Fleet.ps1 as a process of its own, under the engine this
-# script runs under, with -Roster, -EnvFile and -KeeperLauncher naming
-# <LauncherRoot>\Start-InstalledPersona.ps1. It waits for that one process, never for a keeper the
-# process started, and reads its exit code. Exit 7 is the fleet supervisor's word that the plugin
-# list names another build whose snapshot it has taken, and the launcher starts the next pass. Any
-# other code ends the launcher at that code. A fleet supervisor that exits 7 was given a version as
-# -RunningVersion. Where the next pass reads the version it was given from the list, compared
-# ignoring case, the two reads of the list disagree and a start that gives the version again would
-# end the same way. That holds whether or not the pass can take that version's snapshot. The
-# launcher then writes one NO-MOVE line naming the version and starts that fleet supervisor's
-# snapshot again with none of the four values the next paragraph names. That fleet supervisor
-# never exits 7, so no move happens until the task next starts.
+# <LauncherRoot>\runtime\<version> through Install-PluginSnapshot, the function the persona
+# launcher takes its snapshot through, and writes one START line to
+# <LauncherRoot>\fleet-launcher.log. It then starts the snapshot's bin\Start-Fleet.ps1 as a process
+# of its own, under the engine this script runs under, with -Roster, -EnvFile and -KeeperLauncher
+# naming <LauncherRoot>\Start-InstalledPersona.ps1. It waits for that one process, never for a
+# keeper the process started, and reads its exit code. Exit 7 is the fleet supervisor's word that
+# the plugin list names another build whose snapshot it has taken, and the launcher starts the next
+# pass. On any other code the launcher starts the same fleet supervisor again, as the restart
+# paragraph below states, unless the pass is a failed move. A fleet supervisor that exits 7 was
+# given a version as -RunningVersion. Where the next pass reads the version it was given from the
+# list, compared ignoring case, the two reads of the list disagree and a start that gives the
+# version again would end the same way. That holds whether or not the pass can take that version's
+# snapshot. The launcher then writes one NO-MOVE line naming the version and starts that fleet
+# supervisor's snapshot again with none of the four values the next paragraph names. That fleet
+# supervisor never exits 7, so no move happens until the task next starts.
 #
 # A fleet supervisor whose parameter block declares -PluginList, -PluginId, -RunningVersion and
 # -RuntimeRoot is given those four as well: the list's path, the plugin's id, the version the pass
@@ -36,9 +38,25 @@
 # the pass. The launcher then writes one FALLBACK line and starts the snapshot that ran before,
 # with the failed version as -RunningVersion, so the older build stays until the list names yet
 # another version. Where the failed pass read no version, the fall-back is given none of the four
-# values. A fall-back that ends on any code but 7 ends the launcher at that code. A start the
-# NO-MOVE rule made is not a move, so its end ends the launcher at that code. -FailedMoveSeconds is
-# 60 by default and no task passes it.
+# values. A fall-back that ends on any code but 7 is never a failed move, and neither is a start
+# the NO-MOVE rule made, so each is restarted. -FailedMoveSeconds is 60 by default and no task
+# passes it.
+#
+# A restart is what the launcher does with a fleet supervisor that ended on any code but 7, 0 among
+# them, where the pass is no failed move. A fleet supervisor ends at 0 only where it found its
+# launcher gone, so a 0 this loop reads is a wrong reading or a start that failed, and each leaves
+# the machine with no fleet supervisor. The launcher writes one RESTART line naming the version,
+# the code, the run time and the delay, waits the delay, writes the START line again and starts the
+# same snapshot's fleet supervisor with the arguments the ended one had: the four values where it
+# was given them, with the failed version as -RunningVersion on a fall-back, and none of the four
+# on a start the NO-MOVE rule made. A restart reads no record and takes no snapshot. It is not a
+# move, so the failed-move window never judges a start the restart rule made. The first restart
+# waits 60 seconds. Each restart doubles the delay the next one waits, to at most 1800 seconds, and
+# a fleet supervisor that ran 3600 seconds or more puts the delay back at 60. The delay is the
+# launcher's for its whole life, across an exit 7 and a fall-back. Those are the numbers the fleet
+# supervisor uses for a keeper that ends quickly. Stopping the task is the way to stop the chain:
+# it ends the launcher, and the fleet supervisor then ends itself. -RestartLimit and
+# -RestartDelayScale exist for the suite and no task passes either.
 #
 # Each keeper is started through the persona launcher rather than from this snapshot, so each keeper
 # start takes its own snapshot and a plugin update reaches a persona at its keeper's next start. An
@@ -67,7 +85,19 @@ param(
     # failed move where it ends on any code but 7. Exists so the suite can read both sides of the
     # window; a task never passes it.
     [ValidateRange(0, 3600)]
-    [int]$FailedMoveSeconds = 60
+    [int]$FailedMoveSeconds = 60,
+    # The most restarts the launcher makes of a fleet supervisor that ended, over the launcher's
+    # whole life. The default, -1, is no limit. With 0 or more, the launcher ends at the fleet
+    # supervisor's exit code once it has made that many. Exists so the suite can read the
+    # launcher's end; a task never passes it.
+    [int]$RestartLimit = -1,
+    # Multiplies the wait before a restart and the run time that puts the delay back at its base.
+    # The RESTART line still names the unscaled delay. Exists so the suite can walk the delay
+    # ladder in seconds; a task never passes it. It is held from 0 to 1 as a binding error: a
+    # negative scale would make Start-Sleep throw, and at 1 the longest wait, in milliseconds, still
+    # fits the integer Start-Sleep takes.
+    [ValidateRange(0.0, 1.0)]
+    [double]$RestartDelayScale = 1.0
 )
 
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
@@ -84,14 +114,26 @@ $script:PowerShellExe = (Get-Process -Id $PID).Path
 # The parameters a fleet supervisor declares where it takes the launcher's four values.
 $script:FleetValueParameters = @('PluginList', 'PluginId', 'RunningVersion', 'RuntimeRoot')
 
+# The restart delay, in seconds. The first restart of a fleet supervisor that ended waits the base,
+# each restart doubles the delay the next one waits up to the maximum, and a fleet supervisor that
+# ran the reset uptime or longer puts the delay back at the base. They are the values
+# keeper-functions.ps1 holds for a keeper that ends quickly, stated here because the launcher loads
+# no file from a snapshot.
+$script:RestartBaseDelaySeconds = 60
+$script:RestartMaxDelaySeconds = 1800
+$script:RestartResetUptimeSeconds = 3600
+
 <#
 .SYNOPSIS
 Appends one timestamped line to fleet-launcher.log as UTF-8 without a byte-order mark.
 
 .DESCRIPTION
 A failed append goes to stderr, the only other channel the launcher has. The log is not rotated: it
-takes one line for each fleet supervisor the launcher starts, one for each fall-back and one for
-each move that goes nowhere, so it grows by a few lines per boot and per plugin update.
+takes one START line for each fleet supervisor the launcher starts, one FALLBACK line for each
+fall-back, one NO-MOVE line for each move that goes nowhere and one RESTART line for each restart
+of a fleet supervisor that ended, so it grows by a few lines per boot and per plugin update. Where
+a fleet supervisor ends at once on every start, it grows by one RESTART line and one START line
+each thirty minutes, about 100 lines a day.
 #>
 function Write-LauncherLog {
     param([Parameter(Mandatory)][string]$Text)
@@ -218,10 +260,14 @@ $keeperLauncher = Join-Path $PSScriptRoot 'Start-InstalledPersona.ps1'
 # fall-back, so one move falls back at most once. $given is the -RunningVersion the fleet
 # supervisor last started was given, or $null where it was started with none of the four values.
 # $noMove is true for the pass the NO-MOVE rule started, which the failed-move window never judges.
+# $restartDelay is the seconds the next restart waits and $restarts the count of restarts made, and
+# both are the launcher's for its whole life, so no pass sets either again.
 $previous = $null
 $failed = $null
 $given = $null
 $noMove = $false
+$restartDelay = $script:RestartBaseDelaySeconds
+$restarts = 0
 while ($true) {
     $noMove = $false
     if ($null -ne $failed) {
@@ -256,31 +302,54 @@ while ($true) {
         $arguments += @('-PluginList', $script:ListPath, '-PluginId', $script:PluginId, '-RunningVersion', $runningVersion, '-RuntimeRoot', $script:RuntimeRoot)
         $given = $runningVersion
     }
-    Write-LauncherLog "START $($script:PluginId) $($pass.Version) scope=$($pass.Scope) $($pass.Snapshot) keeper=$keeperLauncher"
 
-    # The call operator on an executable waits for that one process and for no process it started,
-    # so a keeper that outlives the fleet supervisor does not hold the loop. That holds only while
-    # the call's output stays uncaptured: piped or assigned, the call would wait until every keeper
-    # holding the child's output closed it. It quotes each argument that holds a space. Windows
-    # PowerShell 5.1 drops an empty argument and misquotes a spaced one that ends in a backslash,
-    # and no argument here takes either form. The code is set to 0 first, so a start that fails
-    # never reads as a 7 an earlier fleet supervisor left.
-    $global:LASTEXITCODE = 0
-    $clock = [System.Diagnostics.Stopwatch]::StartNew()
-    & $script:PowerShellExe @arguments
-    $code = $LASTEXITCODE
-    $seconds = $clock.Elapsed.TotalSeconds
+    # The pass's fleet supervisor is started here, and started again with the same arguments each
+    # time it ends on a code the restart rule takes. The inner loop reads no record, takes no
+    # snapshot and leaves $previous, $failed and $given as the pass set them. It ends at an exit 7
+    # or at a failed move, each of which the outer loop takes from there. $restarted is true once
+    # the restart rule has made a start in this pass, and the failed-move window judges only the
+    # start before that.
+    $restarted = $false
+    $failedMove = $false
+    while ($true) {
+        Write-LauncherLog "START $($script:PluginId) $($pass.Version) scope=$($pass.Scope) $($pass.Snapshot) keeper=$keeperLauncher"
 
-    if ($code -eq 7) {
-        if ($null -eq $failed) { $previous = $pass }
-        $failed = $null
-        continue
-    }
-    if ($null -eq $failed -and -not $noMove -and $null -ne $previous -and $seconds -lt $FailedMoveSeconds) {
+        # The call operator on an executable waits for that one process and for no process it
+        # started, so a keeper that outlives the fleet supervisor does not hold the loop. That
+        # holds only while the call's output stays uncaptured: piped or assigned, the call would
+        # wait until every keeper holding the child's output closed it. It quotes each argument
+        # that holds a space. Windows PowerShell 5.1 drops an empty argument and misquotes a spaced
+        # one that ends in a backslash, and no argument here takes either form. The code is set to
+        # 0 first, so a start that fails never reads as a 7 an earlier fleet supervisor left.
+        $global:LASTEXITCODE = 0
+        $clock = [System.Diagnostics.Stopwatch]::StartNew()
+        & $script:PowerShellExe @arguments
+        $code = $LASTEXITCODE
+        $seconds = $clock.Elapsed.TotalSeconds
         $ran = $seconds.ToString('0.0', [System.Globalization.CultureInfo]::InvariantCulture)
+
+        # A run of the reset uptime puts the delay back at the base, whatever code it ended on.
+        if ($seconds -ge ($script:RestartResetUptimeSeconds * $RestartDelayScale)) { $restartDelay = $script:RestartBaseDelaySeconds }
+
+        if ($code -eq 7) { break }
+        if (-not $restarted -and $null -eq $failed -and -not $noMove -and $null -ne $previous -and $seconds -lt $FailedMoveSeconds) {
+            $failedMove = $true
+            break
+        }
+        if ($RestartLimit -ge 0 -and $restarts -ge $RestartLimit) { exit $code }
+
+        Write-LauncherLog "RESTART $($script:PluginId) $($pass.Version) exit $code after $ran s; starting it again in $restartDelay s"
+        Start-Sleep -Milliseconds ([int][Math]::Round($restartDelay * 1000 * $RestartDelayScale))
+        $restartDelay = [Math]::Min($restartDelay * 2, $script:RestartMaxDelaySeconds)
+        $restarts++
+        $restarted = $true
+    }
+
+    if ($failedMove) {
         Write-LauncherFallback -Failed $pass -Previous $previous -Cause "exit $code after $ran s, inside the $FailedMoveSeconds s window"
         $failed = $pass
         continue
     }
-    exit $code
+    if ($null -eq $failed) { $previous = $pass }
+    $failed = $null
 }

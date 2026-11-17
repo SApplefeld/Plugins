@@ -1526,7 +1526,9 @@ function Invoke-FleetTick {
 
 # A keeper launcher that is not there makes every start exit at once, which the ticks read as quick
 # exits and back off from without naming the file, so its absence ends the run at exit 1 with one
-# ERROR line, and the fleet supervisor stays down until the task next starts.
+# ERROR line. On the installed route the launcher, Start-InstalledFleet.ps1, starts the fleet
+# supervisor again after its restart delay, so the ERROR line repeats at that delay. On the checkout
+# route no launcher runs, and the fleet supervisor stays down until the task next starts.
 if (-not (Test-Path -LiteralPath $KeeperLauncher -PathType Leaf)) {
     Write-FleetLog "ERROR keeper launcher '$KeeperLauncher' does not exist"
     exit 1

@@ -1493,9 +1493,17 @@ snapshot_process_tree() {
 # only), never plain `log`, because this function's own stdout is what a
 # caller parses as the survivor list; a `log` call here would ride into
 # that parsed result as a phantom entry.
-# Usage: check_snapshot_survivors <snapshot, "pid,ticks" per line>
+#
+# With `strict` as the second argument, a pid is reported only where its
+# live `StartTime.Ticks` was read and equals the recorded ticks: a pid whose
+# `StartTime` throws prints nothing, and an entry whose ticks are not a digit
+# string is not checked at all. The empty, unparseable and unverified
+# returns are the same in both modes. The gate's boot branch calls it this
+# way, since there a bare-existence match would hold the gate on a recycled
+# pid.
+# Usage: check_snapshot_survivors <snapshot, "pid,ticks" per line> [strict]
 check_snapshot_survivors() {
-  local snapshot="$1"
+  local snapshot="$1" catch_arm="if (\$proc) { Write-Output \$e.Id }"
   if [ -z "$snapshot" ]; then
     return 0
   fi
@@ -1518,6 +1526,10 @@ check_snapshot_survivors() {
     log_diag "STOP: check_snapshot_survivors got a non-empty snapshot with no parseable pid entries - treating as unverified"
     return 1
   fi
+  if [ "${2:-}" = strict ]; then
+    catch_arm=""
+    unreadable=""
+  fi
   # `StartTime` can throw at read time - a transient race, not just at
   # snapshot time. Under `-Command`, an unguarded throw would abort only
   # that one loop iteration; the loop would continue, the sentinel would
@@ -1531,7 +1543,7 @@ check_snapshot_survivors() {
         \$proc = Get-Process -Id \$e.Id -ErrorAction SilentlyContinue
         try {
           if (\$proc -and \$proc.StartTime.Ticks -eq \$e.Ticks) { Write-Output \$e.Id }
-        } catch { if (\$proc) { Write-Output \$e.Id } }
+        } catch { $catch_arm }
       }
       foreach (\$u in @($unreadable)) {
         \$proc = Get-Process -Id \$u -ErrorAction SilentlyContinue
@@ -4184,6 +4196,11 @@ kill_holder() {
 SELF_WINPID=""
 SELF_TICKS=""
 SELF_TICKS_DONE=""
+# The machine's current boot, as Unix milliseconds and ticks, read by the
+# gate's handle read through read_boot_epoch. Empty until a read yields both,
+# so a value in the inherited environment is never taken as the reading.
+BOOT_EPOCH_MS=""
+BOOT_EPOCH_TICKS=""
 # Whether the last handle write carried the pair, set by write_handle.
 HANDLE_HAS_SELF_PAIR=""
 ensure_self_ticks() {
@@ -4389,7 +4406,10 @@ clear_handle() {
 # Two readings and nothing else: whether the writing supervisor is still
 # running, and the instrument's verdict for the session the handle names. A
 # handle that cannot be read falls to today's wait. Prints ADOPT, WAIT or
-# SWEEP_LAUNCH.
+# SWEEP_LAUNCH. The gate's boot branch routes through the gone row here: a
+# handle written before the machine's current boot, where none of its whole
+# holder, supervisor and child pairs names a live process, is handed in as
+# readable, with a dead writer and a gone verdict.
 # Usage: handle_gate_route <readable:0|1> <writer_running:0|1> <verdict>
 handle_gate_route() {
   local readable="$1" writer="$2" verdict="$3"
@@ -4452,6 +4472,76 @@ handle_child_identity() {
   out=$(check_snapshot_survivors "$1,$2"); rc=$?
   if [ "$rc" -ne 0 ]; then echo unverified; return 0; fi
   if [ -n "$out" ]; then echo live; else echo gone; fi
+}
+
+# --- Helper: was a handle written before the machine's current boot ---
+# No process survives a reboot, so a handle whose launch precedes the boot
+# names only dead processes. The launch time decides where the handle records
+# one, against the boot's Unix milliseconds. Where it records none, the
+# writing supervisor's start ticks decide, against the boot's ticks: the
+# writer started after the boot it ran under, and both are local-kind .NET
+# ticks. Prints 1 where the deciding value is less than the boot's, and 0
+# otherwise: a value equal to the boot's or after it, a deciding value or its
+# boot value that is absent or not a digit string, and no launch time beside
+# no ticks. The comparison is the shell's own integer arithmetic, which holds
+# an 18-digit tick value whole. Pure: reads nothing but its arguments.
+# Two limits hold. Windows Fast Startup does not reset LastBootUpTime on a
+# shutdown and power-on, so a handle written before such a shutdown reads as
+# written after the boot, and the gate routes it as it would with no boot
+# reading: it may hold, and it never sweeps on that reading. The ticks
+# comparison is between local-kind ticks, so a time-zone or daylight-saving
+# change between the writer's start and the boot shifts it by the offset; the
+# gate's check of the handle's pairs against live processes backs it.
+# Usage: handle_predates_boot <launchedAt> <supervisorTicks> <bootMs> <bootTicks>
+handle_predates_boot() {
+  local launched="$1" ticks="$2" boot_ms="$3" boot_ticks="$4"
+  case "$launched" in
+    ''|*[!0-9]*) ;;
+    *)
+      case "$boot_ms" in ''|*[!0-9]*) echo 0; return 0 ;; esac
+      if [ "$launched" -lt "$boot_ms" ]; then echo 1; else echo 0; fi
+      return 0
+      ;;
+  esac
+  case "$ticks" in ''|*[!0-9]*) echo 0; return 0 ;; esac
+  case "$boot_ticks" in ''|*[!0-9]*) echo 0; return 0 ;; esac
+  if [ "$ticks" -lt "$boot_ticks" ]; then echo 1; else echo 0; fi
+}
+
+# --- Helper: the machine's current boot, as Unix milliseconds and ticks ---
+# One bounded read of Win32_OperatingSystem's LastBootUpTime. Prints two
+# lines: the boot's Unix milliseconds, the base a handle's launchedAt is
+# written in, then its ticks with no conversion, since the value is a
+# local-kind DateTime as the StartTime resolve_windows_start_ticks prints is,
+# so the two compare. Both values are computed before either is written, so a
+# read that fails part way prints neither. Prints nothing and returns 1 where
+# the call did not complete or did not yield both values. Sets nothing: the
+# gate's handle read captures the two lines into BOOT_EPOCH_MS and
+# BOOT_EPOCH_TICKS, which hold for the rest of the run.
+# Usage: read_boot_epoch
+read_boot_epoch() {
+  local raw line ms="" ticks=""
+  raw=$(run_bounded_powershell_capture "$SUPERVISOR_PS_BOUND_S" "
+    \$os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+    if (\$os -and \$os.LastBootUpTime) {
+      try {
+        \$ms = [DateTimeOffset]::new(\$os.LastBootUpTime).ToUnixTimeMilliseconds()
+        \$ticks = [int64]\$os.LastBootUpTime.Ticks
+        Write-Output \$ms
+        Write-Output \$ticks
+      } catch {}
+    }
+    Write-Output '$STOP_PS_SENTINEL'
+  ")
+  ps_output_has_line "$raw" "$STOP_PS_SENTINEL" || return 1
+  # The first two lines that are digits and nothing else are the milliseconds
+  # and the ticks, found with builtins so the read starts no process.
+  while IFS= read -r line; do
+    case "$line" in ''|*[!0-9]*) continue ;; esac
+    if [ -z "$ms" ]; then ms="$line"; elif [ -z "$ticks" ]; then ticks="$line"; fi
+  done <<< "$raw"
+  if [ -z "$ms" ] || [ -z "$ticks" ]; then return 1; fi
+  printf '%s\n%s\n' "$ms" "$ticks"
 }
 
 # --- Helper: the next child index this supervisor may allocate ---
@@ -4694,6 +4784,18 @@ gate_drop_child_globals() {
 # name not child-<n>     | none           | none                  | today's gate (WAIT)
 # unreadable             | none           | none                  | today's gate (WAIT); the
 #   (read prints nothing)|                |                       | index allocation skips it
+# pre-boot, no live pair | none           | GATE_SWEEP_PAIRS,     | SWEEP_LAUNCH: kill the pairs,
+#                        |                | GATE_SWEEP_HANDLE,    | clear the handle, today's gate;
+#                        |                | CHILD_INDEX raised to | the launch allocates past the
+#                        |                | the swept index       | swept directory
+#   (the launch time, or the writer's start ticks where the handle records no
+#   launch time, precedes the boot, and none of the holder's, the
+#   supervisor's and the child's whole recorded pairs names a live process;
+#   a pair with a half missing is not checked)
+# pre-boot, live pair    | none           | none                  | HOLD: the hold re-reads
+#   (a whole recorded holder, supervisor or child pair still names a live
+#   process with matching start ticks, or the check of those pairs did not
+#   complete)
 # writer running         | none           | none                  | HOLD: the hold re-reads
 #   (pair absent, non-numeric, unverifiable, or a live process; an own pair
 #   from an earlier pass of this supervisor is not a running writer)
@@ -4724,8 +4826,27 @@ gate_drop_child_globals() {
 #                        |                | rest dropped          |
 # verdict not recognized | the claim      | none (dropped)        | HOLD
 #
-# The child's recorded Windows pid and start ticks must match a live process
-# before anything else: a pair that cannot be checked holds the gate, and a
+# The boot branch runs first on every readable handle, before the own-claim
+# test and the writer check, since an absent supervisor pair reads as a
+# running writer forever. The boot is read once per run through
+# read_boot_epoch, on the first readable handle, into BOOT_EPOCH_MS and
+# BOOT_EPOCH_TICKS; a read that yields anything but two digit lines leaves
+# both empty, every row below routes as it does with no boot reading, and the
+# next pass reads again. Where handle_predates_boot says the handle was
+# written before the boot, every process it names is dead, so it reads gone
+# without an identity check and the sweep is handed the holder's and the
+# child's pairs. The holder's, the supervisor's and the child's pairs are
+# first checked against live processes, each only where both halves were
+# read, and under check_snapshot_survivors' strict mode, so a pair counts as
+# live only where a process holds its pid with equal start ticks. A pair
+# with a half missing is skipped and cannot hold the gate, since a pid with
+# no ticks could only be checked by bare existence and a recycled pid would
+# hold it. A match means the clock moved across the boot, and that or a
+# check that did not complete holds the gate.
+#
+# On a handle the boot branch does not take, the child's recorded Windows pid
+# and start ticks must match a live process before anything else:
+# a pair that cannot be checked holds the gate, and a
 # mismatch reads as gone with the sweep that follows killing only
 # ticks-matched pids. A handle with no MSYS child pid is routed on that same
 # identity, since the pair is what names a process: live holds, gone sweeps
@@ -4744,6 +4865,7 @@ gate_drop_child_globals() {
 # Usage: gate_read_handle <child directory name>
 gate_read_handle() {
   local name="$1" idx h key val ident route saved_index f_lines=0
+  local boot_raw boot_ms boot_ticks boot_pairs boot_live boot_rc boot_pair boot_live_pairs
   local f_session="" f_holderPid="" f_holderWinPid="" f_holderTicks="" f_childPid="" f_childWinPid="" f_childTicks="" f_launchedAt="" f_supWinPid="" f_supTicks=""
   GATE_ROUTE="WAIT"
   VERDICT=""
@@ -4782,6 +4904,64 @@ gate_read_handle() {
   done < <(read_handle_fields "$h")
   if [ "$f_lines" -eq 0 ]; then
     log "HANDLE: $name's handle cannot be read, so it names no child this supervisor owns; the gate falls to today's wait"
+    return 0
+  fi
+  # The boot reading, taken once per run on the first readable handle. Only
+  # two lines that are each a digit string are kept, and anything else leaves
+  # both globals empty for the next pass to read again.
+  if [ -z "${BOOT_EPOCH_MS:-}" ] || [ -z "${BOOT_EPOCH_TICKS:-}" ]; then
+    BOOT_EPOCH_MS=""; BOOT_EPOCH_TICKS=""
+    boot_raw=$(read_boot_epoch)
+    boot_ms="${boot_raw%%$'\n'*}"; boot_ticks="${boot_raw#*$'\n'}"
+    if [ "$boot_raw" = "$boot_ms"$'\n'"$boot_ticks" ]; then
+      case "$boot_ms" in
+        ''|*[!0-9]*) ;;
+        *)
+          case "$boot_ticks" in
+            ''|*[!0-9]*) ;;
+            *) BOOT_EPOCH_MS="$boot_ms"; BOOT_EPOCH_TICKS="$boot_ticks" ;;
+          esac
+          ;;
+      esac
+    fi
+  fi
+  # The boot branch: a handle written before the current boot names only dead
+  # processes, unless a pair it records still matches a live one.
+  if [ "$(handle_predates_boot "$f_launchedAt" "$f_supTicks" "$BOOT_EPOCH_MS" "$BOOT_EPOCH_TICKS")" = "1" ]; then
+    # The supervisor's, the holder's and the child's pairs are checked, each
+    # only where both halves were read, and strictly, so a pair is live only
+    # where a process holds its pid with equal start ticks. A half-recorded
+    # pair cannot match a live process and does not hold the gate.
+    boot_pairs=$(gate_sweep_pairs "$f_holderWinPid" "$f_holderTicks" "$f_childWinPid" "$f_childTicks" "")
+    if [ -n "$f_supWinPid" ] && [ -n "$f_supTicks" ]; then
+      boot_pairs="$f_supWinPid,$f_supTicks${boot_pairs:+$'\n'$boot_pairs}"
+    fi
+    boot_live=""; boot_rc=0
+    if [ -n "$boot_pairs" ]; then
+      boot_live=$(check_snapshot_survivors "$boot_pairs" strict); boot_rc=$?
+    fi
+    if [ "$boot_rc" -ne 0 ]; then
+      log "HANDLE: $name reads as written before the boot (launched at ${f_launchedAt:-none} ms, supervisor start ticks ${f_supTicks:-none}; boot at $BOOT_EPOCH_MS ms, ticks $BOOT_EPOCH_TICKS), but its recorded pairs (${boot_pairs//$'\n'/ }) could not be checked against live processes, so the gate holds rather than sweeping on a reading it cannot confirm"
+      GATE_ROUTE="HOLD"
+      return 0
+    fi
+    if [ -n "$boot_live" ]; then
+      boot_live_pairs=""
+      while IFS= read -r boot_pair; do
+        case $'\n'"$boot_live"$'\n' in
+          *$'\n'"${boot_pair%%,*}"$'\n'*) boot_live_pairs="${boot_live_pairs:+$boot_live_pairs }$boot_pair" ;;
+        esac
+      done <<< "$boot_pairs"
+      log "HANDLE: $name reads as written before the boot (launched at ${f_launchedAt:-none} ms, supervisor start ticks ${f_supTicks:-none}; boot at $BOOT_EPOCH_MS ms, ticks $BOOT_EPOCH_TICKS), but its recorded pair ${boot_live_pairs:-with Windows pid ${boot_live//$'\n'/ }} still names a live process with the same start ticks, which no process from before a boot can, so the clock moved across the boot and the gate holds rather than launching beside it"
+      GATE_ROUTE="HOLD"
+      return 0
+    fi
+    log "HANDLE: $name predates the boot (launched at ${f_launchedAt:-none} ms, supervisor start ticks ${f_supTicks:-none}; boot at $BOOT_EPOCH_MS ms, ticks $BOOT_EPOCH_TICKS) and none of its whole holder, supervisor and child pairs names a live process with the same start ticks, so every process it names is gone; the child reads gone with no identity check"
+    VERDICT="gone"
+    GATE_SWEEP_PAIRS=$(gate_sweep_pairs "$f_holderWinPid" "$f_holderTicks" "$f_childWinPid" "$f_childTicks" "")
+    GATE_SWEEP_HANDLE="$h"
+    gate_keep_swept_index "$idx"
+    GATE_ROUTE=$(handle_gate_route 1 0 "$VERDICT")
     return 0
   fi
   # A handle carrying this supervisor's own pair is its claim from an earlier

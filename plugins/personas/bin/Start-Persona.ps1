@@ -9,7 +9,18 @@
 # Get-KeeperDecision (bin/keeper-functions.ps1) over the supervisor's exit code: relaunch after a
 # delay, hold, park, hand off, or exit. Exit -1 is a termination with no signal (Stop-Process and
 # Process.Kill leave it where taskkill /F leaves 1): it relaunches after the base delay with the
-# ladder untouched. Exit 7 is a requested restart. A supervisor this wrapper launches ends its run
+# ladder untouched. The wrapper leaves that code itself: while it waits on a supervisor, launched or
+# adopted, it reads the last write time of the run directory's supervisor.log, and once it has seen
+# that time unchanged for more than -SilenceBoundSeconds, 900 by default, with the supervisor still
+# alive, it ends the interpreter running the supervisor script, then the supervisor it waits on,
+# then the stuck processes of the supervisor's family (SILENCE in keeper.log). It spares the child
+# and the stdin holder the newest handle.json names, the run then reads as exit -1, and the DECIDE
+# reason names the silence. An attempt that cannot read the family, that cannot tell whether a
+# process under the supervisor is the interpreter, or that leaves the interpreter running, ends
+# nothing more and leaves the supervisor running, and the next attempt comes once the log has been
+# silent for the bound again. So an interpreter that can never be ended or told, or a process list
+# that never reads, leaves the supervisor silent until a person acts.
+# Exit 7 is a requested restart. A supervisor this wrapper launches ends its run
 # on one, because the wrapper sets SUPERVISOR_RESTART_EXITS=1 for it, and the wrapper then hands the
 # persona off: it exits and writes no marker, so the fleet supervisor's next tick starts the persona
 # again through its launcher, with the roster and the env file read afresh. It hands off only where
@@ -60,6 +71,12 @@ param(
     # a binding error instead.
     [ValidateRange(0, [double]::MaxValue)]
     [double]$DelayScale = 1.0,
+    # How many seconds a live supervisor's log may go without a write before the wrapper ends the
+    # supervisor and launches it again. It carries no default here: the default is a constant of
+    # keeper-functions.ps1, which exists only once that file is dot-sourced below, so the body sets
+    # it there. Exists so the unit test can reach the bound in seconds; a task never passes it.
+    [ValidateRange(1, [int]::MaxValue)]
+    [int]$SilenceBoundSeconds,
     # The four facts a hand-off is decided from. read, the default, reads the first from the
     # machine's process list and the second from the roster. It reads the third from the boot time
     # this keeper read at its start, and checks for keeper.boot only where that read failed. It reads
@@ -78,6 +95,8 @@ param(
 
 . (Join-Path $PSScriptRoot 'keeper-functions.ps1')
 
+if (-not $PSBoundParameters.ContainsKey('SilenceBoundSeconds')) { $SilenceBoundSeconds = $script:KeeperSilenceBoundSeconds }
+
 $script:LogCapBytes = 5MB
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:LogPath = $null
@@ -87,9 +106,16 @@ $script:LogPath = $null
 # running longer than this never ends the wait.
 $script:ExitWaitMilliseconds = 1000
 
-# How far apart two reads of a live supervisor's process record may place its start time while
-# still naming the same process. Both reads convert the same kernel value the same way, so a gap
-# past this means the id now belongs to another process.
+# The most one wait step adds to a supervisor's quiet count, however long the step took. An ordinary
+# step takes ExitWaitMilliseconds, so a step far longer is time the machine spent suspended or
+# paused, which is not taken as the supervisor's silence (Add-KeeperQuietSeconds in
+# bin/keeper-functions.ps1).
+$script:QuietStepCapSeconds = 5
+
+# How far apart two reads of one process's Win32_Process record may place its start time while
+# still naming the same process: a live supervisor the keeper adopts or watches, and each process of
+# a silent supervisor's family the keeper is about to end. Both reads convert the same kernel value
+# the same way, so a gap past this means the id now belongs to another process.
 $script:AdoptStartToleranceSeconds = 2
 
 # How often the process record of a live supervisor whose handle could not be opened is read again,
@@ -324,6 +350,12 @@ outlives the supervisor keeps writing into the file handle it inherited, and a n
 and no other wrapper reuses is what keeps that writing out of the next launch's capture and makes
 the file it holds open safe to leave until a later launch can remove it. A launch that cannot start
 is a wrapper fault and ends the run.
+
+The wait is Wait-KeeperWatchedSupervisor's, which ends a supervisor whose log at LogPath has been
+silent for more than SilenceBoundSeconds. SilenceSeconds in the returned hashtable is how long the
+log had been silent where that happened, and 0 otherwise. ExitCode is then -1, the code such an end
+leaves, whatever the process reports: a launcher that exited by itself once its interpreter was
+ended reports a code of its own.
 #>
 function Invoke-Supervisor {
     param(
@@ -331,7 +363,9 @@ function Invoke-Supervisor {
         [Parameter(Mandatory)][string[]]$Arguments,
         [Parameter(Mandatory)][string]$WorkingDirectory,
         [Parameter(Mandatory)][string]$OutputPath,
-        [Parameter(Mandatory)][int]$Launch
+        [Parameter(Mandatory)][int]$Launch,
+        [Parameter(Mandatory)][string]$LogPath,
+        [Parameter(Mandatory)][int]$SilenceBoundSeconds
     )
     Remove-KeeperCaptureLeftovers -OutputPath $OutputPath
     $stdoutPath = "$OutputPath.$script:CaptureId.$Launch.stdout"
@@ -347,9 +381,10 @@ function Invoke-Supervisor {
     } catch {
         Stop-KeeperWithError "launch failed: '$BashExe' $($Arguments -join ' '): $($_.Exception.Message)"
     }
-    while (-not $process.WaitForExit($script:ExitWaitMilliseconds)) { }
+    $silence = Wait-KeeperWatchedSupervisor -Process $process -Arguments $Arguments -LogPath $LogPath -SilenceBoundSeconds $SilenceBoundSeconds
     $stopwatch.Stop()
     $exitCode = $process.ExitCode
+    if ($silence -gt 0) { $exitCode = -1 }
     $process.Dispose()
 
     $lastError = ''
@@ -375,6 +410,364 @@ function Invoke-Supervisor {
         ExitCode = $exitCode
         UptimeSeconds = [int][Math]::Floor($stopwatch.Elapsed.TotalSeconds)
         LastErrorLine = $lastError
+        SilenceSeconds = $silence
+    }
+}
+
+<#
+.SYNOPSIS
+Waits for a supervisor to exit, and ends it with the stuck processes of its family once its log has been silent past the bound.
+
+.DESCRIPTION
+The wait is on Process alone and is renewed every ExitWaitMilliseconds, as a supervisor may run for
+days. A supervisor can stay alive and stop working, and its exit is then never seen, so each renewal
+reads the last write time of the supervisor's log at LogPath. A healthy supervisor writes there
+about once a minute. The wrapper counts how long the log has been quiet. The count starts at 0 with
+the wait and goes back to 0 whenever the write time reads differently from the read before, so it
+measures from the last change of that time the wrapper saw, or from the wait's start where it saw
+none. A log not yet created reads as one fixed time until it is. Each renewal adds the time it took,
+measured on a Stopwatch and capped at QuietStepCapSeconds by Add-KeeperQuietSeconds
+(bin/keeper-functions.ps1), so a wall clock set forward adds nothing and a suspended machine adds
+one capped renewal. Test-KeeperSupervisorSilent judges the count in whole seconds against
+SilenceBoundSeconds, and that whole count is the one the SILENCE line and SilenceSeconds carry. A
+read of the log's time that fails gives no verdict for that renewal, since ending a supervisor on a
+time nobody read could end a healthy one.
+
+On silence Stop-KeeperSilentSupervisor runs. Where it ended the supervisor, the wait goes on with no
+further watch until the process has exited. Where it did not, one of two things holds. The
+supervisor had exited by itself with no interpreter ended, and the wait then ends on that exit with
+no silence to return. Or the attempt left the supervisor running, since the wait on Process is the
+only thing that brings a later attempt. With the supervisor left running, the watch goes on with
+the quiet count back at 0 and counts from the end of the attempt, so the next attempt comes only
+once the log has been silent for the whole bound again, and a log that moved in between cancels it,
+as for any supervisor. Nothing but the bound paces the attempts. So an interpreter that can never
+be ended or told, or a process list that never reads, leaves the supervisor silent, with one
+attempt's lines in keeper.log per bound, until a person acts.
+
+Returns the seconds the log had been silent where this wrapper ended the supervisor, and 0 where the
+process exited with no such end.
+#>
+function Wait-KeeperWatchedSupervisor {
+    param(
+        [Parameter(Mandatory)][System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$LogPath,
+        [Parameter(Mandatory)][int]$SilenceBoundSeconds
+    )
+    $silence = 0
+    $watching = $true
+    $count = 0.0
+    $lastWrite = $null
+    $step = [System.Diagnostics.Stopwatch]::StartNew()
+    while (-not $Process.WaitForExit($script:ExitWaitMilliseconds)) {
+        if (-not $watching) { continue }
+        $count = Add-KeeperQuietSeconds -QuietSeconds $count -StepSeconds $step.Elapsed.TotalSeconds -StepCapSeconds $script:QuietStepCapSeconds
+        $step.Restart()
+        try {
+            $write = [System.IO.File]::GetLastWriteTimeUtc($LogPath)
+        } catch {
+            continue
+        }
+        if ($null -ne $lastWrite -and $write -ne $lastWrite) { $count = 0.0 }
+        $lastWrite = $write
+        $quiet = [int][Math]::Floor($count)
+        if (-not (Test-KeeperSupervisorSilent -QuietSeconds $quiet -BoundSeconds $SilenceBoundSeconds)) { continue }
+        if (Stop-KeeperSilentSupervisor -Process $Process -Arguments $Arguments -LogPath $LogPath -QuietSeconds $quiet -SilenceBoundSeconds $SilenceBoundSeconds) {
+            $watching = $false
+            $silence = $quiet
+        } else {
+            $count = 0.0
+            $step.Restart()
+        }
+    }
+    return $silence
+}
+
+<#
+.SYNOPSIS
+Ends a silent supervisor's interpreter, then the supervisor, then the stuck forks of its family, and says whether the supervisor was ended.
+
+.DESCRIPTION
+The supervisor is ended after its interpreter, and an attempt that cannot finish ends nothing more and leaves it
+running. The caller waits on Process, the launcher, and on nothing else, so a launcher ended above a
+running interpreter would leave that interpreter with no later attempt, and the supervisor launched
+next would hold at its pre-launch gate for as long as the interpreter lived.
+
+One SILENCE line names the process, the log, how long it has been quiet and the bound. The newest
+child handle under the log's directory and the machine's process list are then read once, before
+anything is ended, so the records are one moment of the family. Select-KeeperSupervisorFamily
+(bin/keeper-functions.ps1) picks from the records: the interpreter running the supervisor script,
+which is the family record under the launcher, and the forks with nothing under them. It leaves out
+the persona's child and its stdin holder, which the handle names, and everything under them, so the
+supervisor launched next finds the child alive and adopts it. Only the handle's child id and start
+ticks tell the child's pipeline stage from a stuck fork, and only a handle the interpreter wrote
+names this supervisor's child. So the start ticks of the processes the handle names as the child and
+as its writer are read now, by Read-KeeperProcessStartTicks, beside the list and before anything is
+ended. Where no handle is read, the child it names is not in the family with the start it records,
+or its writer is not the interpreter with the start it records, the interpreter alone is picked. A
+run directory that holds no handle is a supervisor with no child recorded, and the interpreter is
+then picked alone too. A fork whose parent chain in the list does not reach the interpreter, such as
+a stage an earlier supervisor of the persona left, is never picked. No handle value picks a record.
+
+Where a read fails, the attempt ends there with one SILENCE scan failed line and nothing ended, the
+launcher included: a run directory whose handles cannot be listed, a process list that cannot be
+read, a list holding no record with a start time for the launcher, without which no interpreter can
+be told, and a selection that fails. So does a record of the same list whose parent is the
+launcher and which carries no command line or no start time. The selection matches on both, so it
+picks no such record, and the record may be the interpreter. A doubt counts as still running: each
+such record is one SILENCE left line, and the attempt ends with nothing ended. A record under the
+launcher that carries both, such as a console host, is no doubt. Neither is a record whose start
+time is earlier than the launcher's, whatever else it lacks: its parent link names a process that
+has gone, whose id the launcher now holds, so it is not under the launcher, as
+Select-KeeperSupervisorFamily reads the same link.
+
+The picked records are then ended in this order:
+
+  interpreter  each picked record under the launcher, by Stop-KeeperFamilyMember. One it leaves is
+               read by id with Test-KeeperProcessRunning. Where that read finds a running process,
+               or cannot tell, the attempt ends there with nothing more ended. One that has gone is
+               passed over.
+  launcher     Process, through the handle the wrapper already holds, which is what keeps its id
+               from naming another process. One that has already exited is not asked to end, since
+               whether ending an exited process is refused depends on the engine. One whose end is
+               refused may be on its way out, so it is waited on for two seconds. One still running
+               then ends the attempt there. One that has exited, before the end or within that
+               wait, counts as ended only where this attempt ended an interpreter, since Git's
+               launcher may exit by itself once its interpreter is gone. With no interpreter ended,
+               the supervisor exited by itself, as on a requested restart: the attempt ends there,
+               and the run keeps the supervisor's own exit code.
+  forks        every other picked record, by Stop-KeeperFamilyMember, each ended or left by itself.
+
+Each process ended is one SILENCE killed line. Each one not ended is one SILENCE left line with the
+reason, which says so where the attempt ends there. In an attempt that finishes, a stuck fork the
+selection leaves is one SILENCE left line giving the reason the selection returns for it: it is not
+under this supervisor's interpreter, the child is not known, or the handle is not this supervisor's.
+It is not ended, since the child's pipeline stage has a stuck fork's shape. An attempt that ends
+early writes no line for such a fork. A family record the selection neither picks nor leaves gets no
+line: a record the handle's holder or child id names, and every record under one, and a record with
+something under it that is not the interpreter. Nothing here throws.
+
+Returns $true where the launcher was ended, or had exited after this attempt ended an interpreter,
+which is the supervisor ended by this wrapper. Returns $false where the attempt ended early: the
+launcher is left running, for the caller to try again, or exited by itself.
+#>
+function Stop-KeeperSilentSupervisor {
+    param(
+        [Parameter(Mandatory)][System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$LogPath,
+        [Parameter(Mandatory)][int]$QuietSeconds,
+        [Parameter(Mandatory)][int]$SilenceBoundSeconds
+    )
+    $launcherId = $Process.Id
+    $again = 'tries again once the log has been silent for the bound again'
+    Write-KeeperLog "SILENCE pid=$launcherId log='$LogPath' quiet=$QuietSeconds bound=${SilenceBoundSeconds}: the supervisor is alive and its log has not moved, so the keeper ends it and the stuck processes of its family"
+    $named = @{ HolderId = ''; ChildId = ''; ChildTicks = ''; ChildLiveTicks = ''; SupervisorId = ''; SupervisorTicks = ''; SupervisorLiveTicks = '' }
+    $family = $null
+    try {
+        $handle = Read-KeeperNewestHandle -RunDirectory (Split-Path -Parent $LogPath)
+        if ($null -ne $handle) {
+            $named.HolderId = [string]$handle.holderWinPid
+            $named.ChildId = [string]$handle.childWinPid
+            $named.ChildTicks = [string]$handle.childTicks
+            $named.SupervisorId = [string]$handle.supervisorWinPid
+            $named.SupervisorTicks = [string]$handle.supervisorTicks
+            $named.ChildLiveTicks = Read-KeeperProcessStartTicks -ProcessId $named.ChildId
+            $named.SupervisorLiveTicks = Read-KeeperProcessStartTicks -ProcessId $named.SupervisorId
+        }
+        $processes = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CommandLine, CreationDate, Name -OperationTimeoutSec 30 -ErrorAction Stop)
+        $launcherStarted = $null
+        foreach ($record in $processes) {
+            if ($null -eq $record -or [string]$record.ProcessId -ne [string]$launcherId) { continue }
+            $launcherStarted = $record.CreationDate
+            break
+        }
+        if ($null -eq $launcherStarted) { throw 'the process list holds no record with a start time for the supervisor' }
+        $family = Select-KeeperSupervisorFamily -Processes $processes -Arguments $Arguments -LauncherId $launcherId @named
+    } catch {
+        Write-KeeperLog "SILENCE scan failed: $($_.Exception.Message), so the keeper ends no process, the supervisor pid=$launcherId included, and $again"
+        return $false
+    }
+
+    # A picked record under the launcher is an interpreter and every other one is a stuck fork: the
+    # selection picks a fork only where its parent chain reaches an interpreter, and a record whose
+    # parent is the launcher has no interpreter above it.
+    $interpreters = @($family.Selected | Where-Object { [string]$_.ParentProcessId -eq [string]$launcherId })
+    $forks = @($family.Selected | Where-Object { [string]$_.ParentProcessId -ne [string]$launcherId })
+
+    # A record under the launcher with no command line or no start time may be the interpreter. The
+    # selection picks a record only where it carries both. Such a record is a read the keeper cannot
+    # trust, so it is checked before anything is ended, and the attempt then ends nothing. A record
+    # that started before the launcher is not under it and is passed over, as the selection passes
+    # it over: its parent link names a process that has gone, whose id the launcher now holds.
+    $untold = $false
+    $launcherUtc = ([DateTime]$launcherStarted).ToUniversalTime()
+    foreach ($record in $processes) {
+        if ($null -eq $record -or [string]$record.ParentProcessId -ne [string]$launcherId) { continue }
+        if ($null -ne $record.CreationDate -and ([DateTime]$record.CreationDate).ToUniversalTime() -lt $launcherUtc) { continue }
+        if (-not [string]::IsNullOrWhiteSpace([string]$record.CommandLine) -and $null -ne $record.CreationDate) { continue }
+        Write-KeeperLog "SILENCE left pid=$($record.ProcessId) name=$($record.Name): its process record carries no command line or no start time, so the keeper could not tell whether it is the interpreter, ends nothing, leaves the supervisor pid=$launcherId running and $again"
+        $untold = $true
+    }
+    if ($untold) { return $false }
+
+    $endedInterpreter = $false
+    foreach ($record in $interpreters) {
+        $reason = Stop-KeeperFamilyMember -Record $record
+        if ($null -eq $reason) {
+            Write-KeeperLog "SILENCE killed pid=$($record.ProcessId) name=$($record.Name), of the supervisor's family"
+            $endedInterpreter = $true
+            continue
+        }
+        if (Test-KeeperProcessRunning -ProcessId $record.ProcessId) {
+            Write-KeeperLog "SILENCE left pid=$($record.ProcessId) name=$($record.Name): $reason, so the keeper ends nothing more, leaves the supervisor pid=$launcherId running and $again"
+            return $false
+        }
+        Write-KeeperLog "SILENCE left pid=$($record.ProcessId) name=$($record.Name): $reason"
+    }
+
+    # The launcher's exit is read before its end is asked for: Windows PowerShell refuses the end of
+    # an exited process and PowerShell 7 does not, so an exit before this read reads the same under
+    # both. Under PowerShell 7 an exit in the moment between this read and the end still reads as an
+    # end.
+    $exited = $false
+    try { $exited = $Process.HasExited } catch { $exited = $false }
+    if (-not $exited) {
+        try {
+            $Process.Kill()
+            Write-KeeperLog "SILENCE killed pid=$launcherId, the supervisor this keeper waited on"
+        } catch {
+            $reason = $_.Exception.Message
+            try {
+                $exited = $Process.HasExited
+                if (-not $exited) {
+                    $null = $Process.WaitForExit(2000)
+                    $exited = $Process.HasExited
+                }
+            } catch {
+                $exited = $false
+            }
+            if (-not $exited) {
+                Write-KeeperLog "SILENCE left pid=${launcherId}: $reason, so the keeper ends nothing more and $again"
+                return $false
+            }
+        }
+    }
+    if ($exited) {
+        if (-not $endedInterpreter) {
+            Write-KeeperLog "SILENCE left pid=${launcherId}: the supervisor this keeper waited on had exited by itself with no interpreter ended, so the keeper ends nothing more and the run keeps the supervisor's own exit code"
+            return $false
+        }
+        Write-KeeperLog "SILENCE left pid=${launcherId}: the supervisor this keeper waited on had exited by itself"
+    }
+
+    foreach ($record in $forks) {
+        $reason = Stop-KeeperFamilyMember -Record $record
+        if ($null -eq $reason) {
+            Write-KeeperLog "SILENCE killed pid=$($record.ProcessId) name=$($record.Name), of the supervisor's family"
+        } else {
+            Write-KeeperLog "SILENCE left pid=$($record.ProcessId) name=$($record.Name): $reason"
+        }
+    }
+    foreach ($entry in @($family.Left)) {
+        Write-KeeperLog "SILENCE left pid=$($entry.ProcessId) name=$($entry.Name): $($entry.Reason), so the keeper does not end it"
+    }
+    return $true
+}
+
+<#
+.SYNOPSIS
+Says whether a process id names a running process now, counting a read that cannot tell as running.
+
+.DESCRIPTION
+ProcessId is the id of a process record the keeper could not end. GetProcessById refuses an id no
+process holds with an ArgumentException, which is the one answer read as not running, with a process
+that reports it has exited. Every other failure, an id that is no number among them, is a doubt and
+reads as running, since the caller ends a supervisor's launcher only once its interpreter is gone.
+The id is not checked against a start time, so another process that has taken the id reads as
+running too. Nothing here throws.
+
+Returns $true or $false.
+#>
+function Test-KeeperProcessRunning {
+    param([Parameter(Mandatory)][AllowNull()][object]$ProcessId)
+    $read = $null
+    try {
+        $read = [System.Diagnostics.Process]::GetProcessById([int]$ProcessId)
+        return (-not $read.HasExited)
+    } catch [System.ArgumentException] {
+        return $false
+    } catch {
+        return $true
+    } finally {
+        if ($null -ne $read) { $read.Dispose() }
+    }
+}
+
+<#
+.SYNOPSIS
+Reads the start ticks of the process an id names now, as the supervisor reads them, or returns empty.
+
+.DESCRIPTION
+ProcessId is a Windows process id as a child handle records it. It is read only where it is ASCII
+digits within the range of an id, so a value the handle file carries reaches Get-Process as a
+number and nothing else. The process is read with Get-Process and its StartTime.Ticks returned as
+decimal digits, the read and the value the supervisor records in the handle (bin/supervise.sh,
+resolve_windows_start_ticks), so the two compare by equality with no time conversion between them.
+Get-Process asks the system for a process it names by id and waits on no other process, so the read
+has no timeout of its own. A process gone, or one whose start cannot be read, gives empty. Nothing
+here throws.
+
+Returns the ticks as a digit string, or an empty string.
+#>
+function Read-KeeperProcessStartTicks {
+    param([AllowEmptyString()][string]$ProcessId = '')
+    $id = 0
+    if (-not [int]::TryParse($ProcessId, [System.Globalization.NumberStyles]::None, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$id)) { return '' }
+    $read = $null
+    try {
+        $read = Get-Process -Id $id -ErrorAction Stop
+        return ([int64]$read.StartTime.Ticks).ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    } catch {
+        return ''
+    } finally {
+        if ($null -ne $read) { $read.Dispose() }
+    }
+}
+
+<#
+.SYNOPSIS
+Ends one process a list read named, where it is still the process that read saw, and returns why not otherwise.
+
+.DESCRIPTION
+Windows hands a process id out again once its process is gone, so the id in a record read earlier
+may name another process by now. A handle to the id is opened first, which keeps the id from being
+handed out again, and the id's record is then read once more through Test-KeeperSupervisorRecord.
+Only a record still carrying the start time the list gave, within AdoptStartToleranceSeconds, is
+the same process, and it is ended through the open handle. A record with no start time cannot be
+checked and is left. So is a process that has gone, one whose handle cannot be opened, one whose
+second read fails and one whose end is refused. Nothing here throws.
+
+Returns $null where the process was ended, and otherwise one line of text saying why it was left.
+#>
+function Stop-KeeperFamilyMember {
+    param([Parameter(Mandatory)][object]$Record)
+    if ($null -eq $Record.CreationDate) { return 'its process record carries no start time' }
+    $member = $null
+    try {
+        $id = [int]$Record.ProcessId
+        $startedUtc = ([DateTime]$Record.CreationDate).ToUniversalTime()
+        $member = [System.Diagnostics.Process]::GetProcessById($id)
+        $null = $member.Handle
+        if (-not (Test-KeeperSupervisorRecord -ProcessId $id -StartedUtc $startedUtc)) {
+            return "its process record is gone or carries another start time than $($startedUtc.ToString('o')), so the id names another process"
+        }
+        $member.Kill()
+        return $null
+    } catch {
+        return [string]$_.Exception.Message
+    } finally {
+        if ($null -ne $member) { $member.Dispose() }
     }
 }
 
@@ -524,9 +917,10 @@ Reads one process id's record again and says whether it still names the process 
 .DESCRIPTION
 The record is read with a filtered Get-CimInstance Win32_Process query, the same source as the scan,
 so its start time is converted the same way as the one StartedUtc came from. A record present with
-a start time within AdoptStartToleranceSeconds of StartedUtc is the same process. A record gone, or
-carrying no start time or another one, is not. A read that fails throws, so each caller decides what
-an unreadable record means.
+a start time within AdoptStartToleranceSeconds of StartedUtc, compared by Test-KeeperStartWithin
+(bin/keeper-functions.ps1), is the same process. A record gone, or carrying no start time or
+another one, is not. A read that fails, or that has no answer within 30 seconds, throws, so each
+caller decides what an unreadable record means.
 
 Returns $true for the same process, $false otherwise.
 #>
@@ -535,9 +929,9 @@ function Test-KeeperSupervisorRecord {
         [Parameter(Mandatory)][int]$ProcessId,
         [Parameter(Mandatory)][DateTime]$StartedUtc
     )
-    $record = @(Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -Property ProcessId, CreationDate -ErrorAction Stop) | Select-Object -First 1
+    $record = @(Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -Property ProcessId, CreationDate -OperationTimeoutSec 30 -ErrorAction Stop) | Select-Object -First 1
     return ($null -ne $record -and $null -ne $record.CreationDate -and
-        [Math]::Abs((([DateTime]$record.CreationDate).ToUniversalTime() - $StartedUtc).TotalSeconds) -le $script:AdoptStartToleranceSeconds)
+        (Test-KeeperStartWithin -RecordedUtc ([DateTime]$record.CreationDate).ToUniversalTime() -StartedUtc $StartedUtc -ToleranceSeconds $script:AdoptStartToleranceSeconds))
 }
 
 <#
@@ -550,19 +944,28 @@ as it hands a launched one. The uptime runs from the process's own start time. T
 start this process and holds neither of its output streams, so there is no last stderr line. An
 exit code that cannot be read comes back as $null, which the loop treats as the wrapper fault it is
 for a launched supervisor.
+
+The wait is Wait-KeeperWatchedSupervisor's, as for a launched supervisor: Arguments is the argument
+array the family is matched on, and an adopted supervisor whose log at LogPath has been silent for
+more than SilenceBoundSeconds is ended the same way, with SilenceSeconds saying for how long and
+ExitCode then -1 whatever the process reports.
 #>
 function Wait-KeeperAdoptedSupervisor {
     param(
         [Parameter(Mandatory)][System.Diagnostics.Process]$Process,
-        [Parameter(Mandatory)][DateTime]$StartedUtc
+        [Parameter(Mandatory)][DateTime]$StartedUtc,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$LogPath,
+        [Parameter(Mandatory)][int]$SilenceBoundSeconds
     )
-    while (-not $Process.WaitForExit($script:ExitWaitMilliseconds)) { }
+    $silence = Wait-KeeperWatchedSupervisor -Process $Process -Arguments $Arguments -LogPath $LogPath -SilenceBoundSeconds $SilenceBoundSeconds
     $uptime = [int][Math]::Floor(([DateTime]::UtcNow - $StartedUtc).TotalSeconds)
     if ($uptime -lt 0) { $uptime = 0 }
     $exitCode = $null
     try { $exitCode = $Process.ExitCode } catch { $exitCode = $null }
+    if ($silence -gt 0) { $exitCode = -1 }
     $Process.Dispose()
-    return @{ ExitCode = $exitCode; UptimeSeconds = $uptime; LastErrorLine = '' }
+    return @{ ExitCode = $exitCode; UptimeSeconds = $uptime; LastErrorLine = ''; SilenceSeconds = $silence }
 }
 
 <#
@@ -659,6 +1062,8 @@ $parkPath = Join-Path $runDir 'keeper.park'
 $bootPath = Join-Path $runDir 'keeper.boot'
 $statePath = Join-Path $runDir 'keeper.json'
 $outputPath = Join-Path $runDir 'supervisor.out'
+# The supervisor's own log, which the wrapper reads for its last write and never writes.
+$supervisorLogPath = Join-Path $runDir 'supervisor.log'
 
 if ($Release) {
     # The hold marker first, then the park marker, then the boot marker, one RELEASE line for each
@@ -800,12 +1205,12 @@ while ($true) {
     if ($null -ne $adopted) {
         $started = $adopted.StartedUtc
         Write-KeeperLog "ADOPT pid=$($adopted.ProcessId)"
-        $run = Wait-KeeperAdoptedSupervisor -Process $adopted.Process -StartedUtc $started
+        $run = Wait-KeeperAdoptedSupervisor -Process $adopted.Process -StartedUtc $started -Arguments $arguments -LogPath $supervisorLogPath -SilenceBoundSeconds $SilenceBoundSeconds
     } else {
         $launchCount++
         $started = [DateTime]::UtcNow
         Write-KeeperLog "LAUNCH $launchCount $bashExe $($arguments -join ' ')"
-        $run = Invoke-Supervisor -BashExe $bashExe -Arguments $arguments -WorkingDirectory $repoRoot -OutputPath $outputPath -Launch $launchCount
+        $run = Invoke-Supervisor -BashExe $bashExe -Arguments $arguments -WorkingDirectory $repoRoot -OutputPath $outputPath -Launch $launchCount -LogPath $supervisorLogPath -SilenceBoundSeconds $SilenceBoundSeconds
     }
     $ended = [DateTime]::UtcNow
     if ($null -ne $adopted) {
@@ -824,7 +1229,7 @@ while ($true) {
         Stop-KeeperWithError "supervisor '$bashExe' reported no exit code after launch $launchCount"
     }
 
-    $decision = Get-KeeperDecision -ExitCode $run.ExitCode -UptimeSeconds $run.UptimeSeconds -PreviousDelaySeconds $delay -ConsecutiveExit1Count $exit1Count
+    $decision = Get-KeeperDecision -ExitCode $run.ExitCode -UptimeSeconds $run.UptimeSeconds -PreviousDelaySeconds $delay -ConsecutiveExit1Count $exit1Count -SilenceSeconds $run.SilenceSeconds
     # A park records its reason in the same field a hold does, so a reader of keeper.json finds why
     # the persona is down in one place whichever marker the decision writes.
     $holdReason = $null

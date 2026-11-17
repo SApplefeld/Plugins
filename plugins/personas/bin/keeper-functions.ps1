@@ -2,9 +2,10 @@
 # wrapper the fleet supervisor starts per enabled entry), bin/Start-Fleet.ps1 (the fleet supervisor
 # the scheduled task runs) and bin/keeper-probe.ps1 (the recorder that measures what a task
 # delivers), so the allowlist, the env file reader, the roster readers, the supervisor invocation
-# builder, the native argument quoting, the live supervisor and live keeper matches, the repo URL
-# check, the exit-code policy, the hand-off decision with its fleet supervisor match and the fleet
-# decision each exist once.
+# builder, the native argument quoting, the live supervisor and live keeper matches, the silence
+# verdict, the child handle reader, the supervisor family selection, the repo URL check, the
+# exit-code policy, the hand-off decision with its fleet supervisor match and the fleet decision
+# each exist once.
 #
 #   . (Join-Path $PSScriptRoot 'keeper-functions.ps1')
 #
@@ -41,6 +42,20 @@ $script:KeeperResetUptimeSeconds = 3600
 $script:KeeperExit1HoldCount = 3
 $script:KeeperExit1ShortUptimeSeconds = 60
 
+# How long a live supervisor's log may go without a write before the keeper ends the supervisor and
+# launches it again. The bound holds only while three settings the supervisor reads from its
+# environment stay near their defaults, and the keeper reads none of them. A healthy supervisor
+# writes a WAITING line every sixth poll, once a minute at the default supervisorPollMs of 10000, so
+# a supervisorPollMs above 150000 puts more than the bound between two lines. A stop logs that its
+# child's input closed and then nothing while it waits out supervisorStopGraceMs, so a grace above
+# 900000 is more than the bound by itself. At the defaults the longest silence is a restart's
+# patient wait, which logs one line once the stop grace has run and then nothing until the child's
+# turn ends or supervisorStopBusyCapMs has passed since the child's input closed. That is about ten
+# minutes at the default cap of 660000 and the default grace of 60000, and more than the bound once
+# the cap is above about 960000. A supervisor whose environment raises any of the three past those
+# values is ended by the keeper while it is healthy.
+$script:KeeperSilenceBoundSeconds = 900
+
 # The fleet supervisor's constants. A keeper that ends inside the quick-exit uptime on a route no
 # marker explains waits the ladder's value before its next start, and the ladder doubles from the
 # base to the cap on each such exit; a clone of an entry's repository that fails waits and doubles
@@ -64,9 +79,12 @@ and holds once the consecutive short exit-1 count reaches the hold count; exit 2
 the base delay with the ladder untouched; exit -1, the code Stop-Process and Process.Kill leave
 where taskkill /F leaves 1, is a termination from outside with no signal and relaunches after the
 base delay with the ladder untouched; 130 and 143 exit without relaunching; every other code
-relaunches after the current delay and doubles it up to the cap. A run that lasted the reset uptime
-or longer puts the ladder back at the base before the row is applied, so a persona that ran for an
-hour and then crashed waits the base delay, not whatever the ladder had climbed to.
+relaunches after the current delay and doubles it up to the cap. SilenceSeconds is how long the
+supervisor's log had been silent when the keeper itself ended the supervisor, and 0 where it did
+not. A positive value changes the reason of the exit -1 row alone, so the log tells the keeper's
+own kill from one made outside it, and changes no other row and no other field. A run that lasted
+the reset uptime or longer puts the ladder back at the base before the row is applied, so a persona
+that ran for an hour and then crashed waits the base delay, not whatever the ladder had climbed to.
 
 Returns a hashtable: Action is 'hold', 'park', 'handoff', 'relaunch' or 'exit'; DelaySeconds is how
 long to wait before the next launch (0 when not relaunching); NextDelaySeconds is the ladder value
@@ -83,7 +101,8 @@ function Get-KeeperDecision {
         [Parameter(Mandatory)][int]$ExitCode,
         [Parameter(Mandatory)][int]$UptimeSeconds,
         [Parameter(Mandatory)][int]$PreviousDelaySeconds,
-        [Parameter(Mandatory)][int]$ConsecutiveExit1Count
+        [Parameter(Mandatory)][int]$ConsecutiveExit1Count,
+        [int]$SilenceSeconds = 0
     )
     $delay = $PreviousDelaySeconds
     if ($delay -lt $script:KeeperBaseDelaySeconds) { $delay = $script:KeeperBaseDelaySeconds }
@@ -129,9 +148,11 @@ function Get-KeeperDecision {
             }
         }
         -1 {
+            $reason = 'supervisor exited -1: ended from outside with no signal'
+            if ($SilenceSeconds -gt 0) { $reason = "supervisor exited -1: ended by the keeper after $SilenceSeconds seconds of log silence" }
             return @{
                 Action = 'relaunch'; DelaySeconds = $script:KeeperBaseDelaySeconds; NextDelaySeconds = $delay; NextExit1Count = 0
-                Reason = 'supervisor exited -1: ended from outside with no signal'
+                Reason = $reason
             }
         }
         { $_ -eq 130 -or $_ -eq 143 } {
@@ -612,6 +633,313 @@ function Find-KeeperLiveSupervisor {
         if ($matchedIds -notcontains [string]$record.ParentProcessId) { return $record }
     }
     return $null
+}
+
+<#
+.SYNOPSIS
+Adds one wait step's elapsed time to the count of seconds a live supervisor's log has been quiet.
+
+.DESCRIPTION
+QuietSeconds is the count so far, which the caller sets to 0 at the start of its wait and whenever
+the log's last write time reads differently from the read before. StepSeconds is how long one wait
+step took, measured on a Stopwatch, which a change of the wall clock does not move. StepCapSeconds
+is the most one step adds. A machine suspended or a virtual machine paused inside one step can make
+that step read far longer than an ordinary one, and the cap counts such a step as no more than a
+few ordinary steps, so time the machine did not run is not taken as the supervisor's silence.
+
+Returns the new count. Nothing here reads a file or a clock.
+#>
+function Add-KeeperQuietSeconds {
+    param(
+        [Parameter(Mandatory)][double]$QuietSeconds,
+        [Parameter(Mandatory)][double]$StepSeconds,
+        [Parameter(Mandatory)][double]$StepCapSeconds
+    )
+    return ($QuietSeconds + [Math]::Min($StepSeconds, $StepCapSeconds))
+}
+
+<#
+.SYNOPSIS
+Says whether a live supervisor's log has been silent past the bound.
+
+.DESCRIPTION
+QuietSeconds is how long the supervisor's log has gone without a write, the caller's count from
+Add-KeeperQuietSeconds in whole seconds, and BoundSeconds the silence allowed. The supervisor is
+silent only once the count is more than the bound, so a count exactly at the bound is not yet
+silence.
+
+Returns $true or $false. Nothing here reads a file or the clock.
+#>
+function Test-KeeperSupervisorSilent {
+    param(
+        [Parameter(Mandatory)][int]$QuietSeconds,
+        [Parameter(Mandatory)][int]$BoundSeconds
+    )
+    return ($QuietSeconds -gt $BoundSeconds)
+}
+
+<#
+.SYNOPSIS
+Returns the newest child handle a supervisor wrote under a run directory, or nothing.
+
+.DESCRIPTION
+A supervisor records the child it launched or adopted in <run directory>/child-<n>/handle.json.
+Child directories are reused across supervisor runs, so the newest handle is the one with the
+greatest launchedAt inside it, as the supervisor's own reader picks it, and never the newest file.
+A handle that cannot be read or parsed, or that carries no numeric launchedAt, is passed over. A run
+directory that cannot be listed throws.
+
+Returns the parsed handle, whose process ids are the digit strings the supervisor wrote or $null,
+or $null where the run directory holds no readable handle.
+#>
+function Read-KeeperNewestHandle {
+    param([Parameter(Mandatory)][string]$RunDirectory)
+    $best = $null
+    $bestAt = [double]::NegativeInfinity
+    foreach ($directory in @(Get-ChildItem -LiteralPath $RunDirectory -Directory -ErrorAction Stop)) {
+        if ($directory.Name -notmatch '\Achild-[0-9]+\z') { continue }
+        try {
+            $path = Join-Path $directory.FullName 'handle.json'
+            $handle = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json -ErrorAction Stop
+            if ($null -eq $handle -or $null -eq $handle.launchedAt) { continue }
+            $at = [double]$handle.launchedAt
+        } catch {
+            continue
+        }
+        if ($at -gt $bestAt) { $bestAt = $at; $best = $handle }
+    }
+    return $best
+}
+
+<#
+.SYNOPSIS
+Says whether two reads of one process id's start time name the same process.
+
+.DESCRIPTION
+RecordedUtc and StartedUtc are two start times read for one process id, each in UTC. Windows hands
+an id out again once its process is gone, so a start more than ToleranceSeconds from the other
+belongs to another process under the same id. The tolerance covers the precision each source keeps.
+
+Returns $true for the same process, $false otherwise. Nothing here reads a process or the clock.
+#>
+function Test-KeeperStartWithin {
+    param(
+        [Parameter(Mandatory)][DateTime]$RecordedUtc,
+        [Parameter(Mandatory)][DateTime]$StartedUtc,
+        [Parameter(Mandatory)][double]$ToleranceSeconds
+    )
+    return ([Math]::Abs(($RecordedUtc - $StartedUtc).TotalSeconds) -le $ToleranceSeconds)
+}
+
+<#
+.SYNOPSIS
+Says whether start ticks a handle records match the ticks read for the process now.
+
+.DESCRIPTION
+Recorded is the start ticks a child handle carries, and Live the start ticks the caller read for the
+same process id now, each Get-Process's StartTime.Ticks as a decimal digit string, or empty where
+nothing was read. The supervisor compares its own pairs the same way, by equality of the one value
+both reads take from Get-Process, so no time conversion stands between them. A Recorded that is not
+ASCII digits within the Int64 range is no reading, and matches nothing.
+
+Returns $true where both name one start, $false otherwise. Nothing here reads a process or throws.
+#>
+function Test-KeeperSameTicks {
+    param(
+        [AllowEmptyString()][string]$Recorded = '',
+        [AllowEmptyString()][string]$Live = ''
+    )
+    $parsed = [int64]0
+    if (-not [int64]::TryParse($Recorded, [System.Globalization.NumberStyles]::None, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsed)) { return $false }
+    return [string]::Equals($Recorded, $Live, [System.StringComparison]::Ordinal)
+}
+
+<#
+.SYNOPSIS
+Selects the processes of one supervisor's family that the keeper ends beside the launcher it waited on.
+
+.DESCRIPTION
+Processes is a list of records carrying ProcessId, ParentProcessId, CommandLine and CreationDate,
+read in one pass over the machine's process list. Arguments is the wrapper's full argument array, as
+Find-KeeperLiveSupervisor takes it. LauncherId is the process the keeper waits on and ends through
+its own handle. HolderId, ChildId, ChildTicks, SupervisorId and SupervisorTicks are what the newest
+child handle records: the Windows process ids of the child's stdin holder, of the child and of the
+supervisor that wrote the handle, and the child's and that supervisor's start ticks, each the digit
+string the handle carries, or empty where no handle is readable or it records none. ChildLiveTicks
+and SupervisorLiveTicks are the start ticks the caller read for the processes ChildId and
+SupervisorId name now, as Get-Process gives them, or empty where the process is gone or its start
+could not be read.
+
+A record is in the family when the three tokens after its executable equal the first three elements
+of Arguments, compared as Find-KeeperLiveSupervisor compares them. The executable is not compared,
+since the interpreter and its forks run under another spelling of bash than the launcher. A record
+with no command line is never in the family. From the family these are left out, in this order:
+
+  launcher     the record whose id is LauncherId, which the keeper ends through its own handle;
+  handle       a record HolderId or ChildId names, and every descendant of such a record.
+
+Of the records left, the interpreter is each one whose parent is LauncherId and whose start time is
+no earlier than the launcher record's. Windows keeps the parent link on a child after its parent has
+exited and hands the parent's id out again, so a process an earlier supervisor left, such as its
+child's pipeline stage, can name as its parent an id the launcher now holds. That process started
+before the launcher, and the start time keeps it out. Where the list holds no record for LauncherId,
+or either start time is missing, no interpreter is selected. The interpreter is the process a
+relaunched supervisor would otherwise find still holding the handle, so it is selected whatever is
+under it. The handle's supervisor id never selects or spares a record.
+
+Every other record left that no record names as its parent is a stuck fork. A stuck fork is
+selected only where it passes three tests, checked in this order:
+
+  interpreter  its parent chain, followed from parent to parent through the records of the list,
+               reaches a selected interpreter. A link is followed only where both start times are
+               present and the parent started no later than the record under it, since a parent
+               that started after its child holds a reused id and names no ancestor. The walk
+               stops at an id it has already passed, and after 64 links, and reaches nothing then.
+  child        the child is known: ChildId names a record of the family and ChildLiveTicks matches
+               ChildTicks.
+  handle       the handle is this supervisor's: SupervisorId is the id of a selected interpreter
+               and SupervisorLiveTicks matches SupervisorTicks.
+
+Both ticks pairs are compared by Test-KeeperSameTicks. A stuck fork that fails a test is returned as
+left, for the caller to log and leave, with the name of the first test it fails and that test's
+reason: interpreter, it is not under this supervisor's interpreter; child, the child is not known;
+handle, the handle is not this supervisor's.
+
+The child's pipeline stage is a bash under the interpreter carrying the interpreter's own command
+line, and on this platform it has no child record of its own, since the engine runs under a process
+whose parent is gone from the list. So only the child's id and start tell the stage from a stuck
+fork. The supervisor starts its child's stage before it writes that child's handle, so until the
+write the newest handle can be an older one whose child is still alive, and the fresh stage would
+read as a stuck fork. Only a handle the interpreter wrote names the stage of this supervisor's
+child. Where the child or the handle test fails, as with no handle, no ticks, an id naming no record
+of the family, an id a stuck fork now holds after the child's process is gone, or a handle another
+process wrote, no fork is selected. A stage an earlier supervisor of the same persona left has the
+family's command line and nothing under it too, and no handle this supervisor wrote names it. Its
+parent is that supervisor's interpreter, which is gone from the list or whose id a process started
+after the stage now holds, so the interpreter test leaves it. The holder id and the child id spare
+by the id alone, which can only spare too much: the holder runs another script, so it is never in
+the family, and its id keeps out anything of the family under it.
+
+Each parent link is read as the list gives it. The caller checks each selected record against the
+live process before it ends it.
+
+Returns an object whose Selected holds the records to end, the interpreter first, and whose Left
+holds one object per stuck fork left, carrying its ProcessId, its Name, the Test it failed first as
+one of the tokens interpreter, child or handle, and the Reason, the sentence the caller logs for
+that test. Either may be empty. Nothing here throws on a value the handle or a read carries.
+#>
+function Select-KeeperSupervisorFamily {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Processes,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][int]$LauncherId,
+        [AllowEmptyString()][string]$HolderId = '',
+        [AllowEmptyString()][string]$ChildId = '',
+        [AllowEmptyString()][string]$ChildTicks = '',
+        [AllowEmptyString()][string]$ChildLiveTicks = '',
+        [AllowEmptyString()][string]$SupervisorId = '',
+        [AllowEmptyString()][string]$SupervisorTicks = '',
+        [AllowEmptyString()][string]$SupervisorLiveTicks = ''
+    )
+    $ignoreCase = [System.StringComparison]::OrdinalIgnoreCase
+    $launcher = [string]$LauncherId
+    $childrenOf = @{}
+    $byId = @{}
+    $family = New-Object System.Collections.Generic.List[object]
+    foreach ($record in $Processes) {
+        if ($null -eq $record) { continue }
+        $id = [string]$record.ProcessId
+        $parent = [string]$record.ParentProcessId
+        $byId[$id] = $record
+        if ($parent.Length -gt 0 -and $parent -ne $id) {
+            if (-not $childrenOf.ContainsKey($parent)) { $childrenOf[$parent] = New-Object System.Collections.Generic.List[string] }
+            $childrenOf[$parent].Add($id)
+        }
+        $line = [string]$record.CommandLine
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        if ($line.IndexOf($Arguments[0], $ignoreCase) -lt 0) { continue }
+        $tokens = Split-KeeperCommandLine -CommandLine $line
+        if ($tokens.Count -lt 4) { continue }
+        $same = $true
+        for ($k = 0; $k -lt 3; $k++) {
+            if (-not [string]::Equals($tokens[$k + 1], $Arguments[$k], $ignoreCase)) { $same = $false; break }
+        }
+        if ($same) { $family.Add($record) }
+    }
+
+    # Every id the handle clause leaves out: the two the handle names, then all under them. The
+    # set also stops the walk at an id it has already taken, so a list whose parent links loop ends.
+    $spared = New-Object 'System.Collections.Generic.HashSet[string]'
+    $queue = New-Object 'System.Collections.Generic.Queue[string]'
+    foreach ($named in @($HolderId, $ChildId)) {
+        if ($named.Length -gt 0 -and $spared.Add($named)) { $queue.Enqueue($named) }
+    }
+    while ($queue.Count -gt 0) {
+        $node = $queue.Dequeue()
+        if (-not $childrenOf.ContainsKey($node)) { continue }
+        foreach ($child in $childrenOf[$node]) {
+            if ($spared.Add($child)) { $queue.Enqueue($child) }
+        }
+    }
+
+    # The child is known only where the record the child id names started at the ticks the handle says.
+    $childKnown = $false
+    if ($ChildId.Length -gt 0 -and (Test-KeeperSameTicks -Recorded $ChildTicks -Live $ChildLiveTicks)) {
+        foreach ($record in $family) { if ([string]$record.ProcessId -eq $ChildId) { $childKnown = $true; break } }
+    }
+    $launcherUtc = $null
+    foreach ($record in $Processes) {
+        if ($null -eq $record -or [string]$record.ProcessId -ne $launcher) { continue }
+        if ($null -ne $record.CreationDate) { $launcherUtc = ([DateTime]$record.CreationDate).ToUniversalTime() }
+        break
+    }
+    $interpreters = New-Object System.Collections.Generic.List[object]
+    $stuck = New-Object System.Collections.Generic.List[object]
+    foreach ($record in $family) {
+        $id = [string]$record.ProcessId
+        if ($id -eq $launcher -or $spared.Contains($id)) { continue }
+        $underLauncher = [string]$record.ParentProcessId -eq $launcher -and $null -ne $launcherUtc -and
+            $null -ne $record.CreationDate -and ([DateTime]$record.CreationDate).ToUniversalTime() -ge $launcherUtc
+        if ($underLauncher) { $interpreters.Add($record) }
+        elseif (-not $childrenOf.ContainsKey($id)) { $stuck.Add($record) }
+    }
+
+    # The handle is this supervisor's only where its writer is a selected interpreter that started at
+    # the ticks the handle says. The id gates the forks and selects nothing.
+    $chosen = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($record in $interpreters) { [void]$chosen.Add([string]$record.ProcessId) }
+    $handleOwn = $false
+    if ($SupervisorId.Length -gt 0 -and (Test-KeeperSameTicks -Recorded $SupervisorTicks -Live $SupervisorLiveTicks)) {
+        $handleOwn = $chosen.Contains($SupervisorId)
+    }
+
+    $forks = New-Object System.Collections.Generic.List[object]
+    $left = New-Object System.Collections.Generic.List[object]
+    foreach ($record in $stuck) {
+        # The walk up the parent links to a selected interpreter. A link to a parent missing from the
+        # list, started after the record under it, or with either start time missing is not followed,
+        # and the ids passed and the link count end a list whose links loop or run long.
+        $underInterpreter = $false
+        $node = $record
+        $passed = New-Object 'System.Collections.Generic.HashSet[string]'
+        for ($links = 0; $links -lt 64; $links++) {
+            $aboveId = [string]$node.ParentProcessId
+            if ($aboveId.Length -eq 0 -or -not $passed.Add($aboveId) -or -not $byId.ContainsKey($aboveId)) { break }
+            $above = $byId[$aboveId]
+            if ($null -eq $node.CreationDate -or $null -eq $above.CreationDate) { break }
+            if (([DateTime]$above.CreationDate).ToUniversalTime() -gt ([DateTime]$node.CreationDate).ToUniversalTime()) { break }
+            if ($chosen.Contains($aboveId)) { $underInterpreter = $true; break }
+            $node = $above
+        }
+        $test = $null
+        $reason = $null
+        if (-not $underInterpreter) { $test = 'interpreter'; $reason = "it is not under this supervisor's interpreter" }
+        elseif (-not $childKnown) { $test = 'child'; $reason = 'the child is not known' }
+        elseif (-not $handleOwn) { $test = 'handle'; $reason = "the handle is not this supervisor's" }
+        if ($null -eq $test) { $forks.Add($record) }
+        else { $left.Add([pscustomobject]@{ ProcessId = $record.ProcessId; Name = $record.Name; Test = $test; Reason = $reason }) }
+    }
+    return [pscustomobject]@{ Selected = @($interpreters.ToArray() + $forks.ToArray()); Left = @($left.ToArray()) }
 }
 
 # The two scripts a fleet supervisor's command line can name as the script it runs, the checkout's
