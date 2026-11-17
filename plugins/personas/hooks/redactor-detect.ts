@@ -2888,6 +2888,31 @@ function layOver(text: string, out: string): Hide[] | null {
   return out.length - q === text.length - p && text.startsWith(out.slice(q), p) ? hides : null
 }
 
+// What the session's record says of a hide's value: `seeded` where keepSecret
+// was handed it, `named` where a detector hid it on evidence beyond its
+// shape, `shape` where one hid it for its shape alone, and `joined` for a
+// hide with none of those marks, which is text around or across a value the
+// vault already held.
+type HideClass = 'seeded' | 'named' | 'shape' | 'joined'
+
+// Lays a scan's output over the text the scan was handed, as layOver states,
+// and gives each hide's start, its end and the class of its value, in order,
+// or null where the output cannot be laid. A hide's value is the whole text
+// the hide covers, which is what the vault holds under the hide's
+// placeholder. The class is the first that holds of: the value is in
+// `seeded`; it is in `namedHide`; it is in `shapeOnly`; any other hide. The
+// sets and the vault are read and nothing is written, and the answer carries
+// no value and no placeholder. Called outside a scan it reads no clock, so a
+// caller with a deadline reads its own clock first.
+export function hideClasses(text: string, out: string): { at: number; end: number; class: HideClass }[] | null {
+  const hides = layOver(text, out)
+  if (hides === null) return null
+  return hides.map(({ at, end }) => {
+    const value = text.slice(at, end)
+    return { at, end, class: seeded.has(value) ? 'seeded' : namedHide.has(value) ? 'named' : shapeOnly.has(value) ? 'shape' : 'joined' }
+  })
+}
+
 // The scan's output from its two readings' hides, or null where a joined
 // range cannot be written as one placeholder that restores to its text. Two
 // hides that share one or more characters join into one range, and hides

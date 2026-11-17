@@ -33,7 +33,13 @@
 // discussion body, or a GitHub Actions variable, gets no restore, so a
 // placeholder in it reaches the shell as the placeholder text, and where it
 // carries a raw secret, one the vault knows or one the detector would hide,
-// it is refused with the fixed sentence refusalFor builds. A use line is
+// it is refused before it runs with the match sentence matchRefusal builds,
+// which counts the hidden spans and names the first five by holder, line,
+// column and class, or with unplacedMatchRefusal's sentence where the
+// redactor cannot work out where the text sits. A store line too large to
+// scan in the hook's time is refused with notScannedRefusal's sentence, and
+// one holding a part the walk cannot read with unreadPartRefusal's, and
+// neither claims a secret. A use line is
 // never refused: the model's call is in the transcript whether or not the
 // tool runs, so refusing it keeps nothing out of the transcript and only
 // blocks the use.
@@ -145,6 +151,7 @@ import { headPoints } from "./agent-state";
 import {
   collect,
   escapeLiteralTags,
+  hideClasses,
   keepSecret,
   makeConfig,
   MAX_DEPTH,
@@ -318,9 +325,75 @@ export function storeSurfaceOf(tool: string): string {
   return `a ${tool} command that writes a store`;
 }
 
-// The fixed refusal, one shape for every surface, with the surface filled in.
-export function refusalFor(surface: string): string {
-  return `redactor: this call would store a real secret through ${surface}. Use its placeholder.`;
+// The four refusals a store surface answers before a call runs, one for each
+// cause, with the surface filled in. Each names its cause in its first
+// sentence. None holds a character of a hidden span, the text beside one or
+// a placeholder: index.ts returns a refusal as built, so the one text a
+// builder copies from the call is an argument's name, and only under
+// holderOf's shape rule.
+
+// What a place says of its span, by the class hideClasses reads from the
+// session's record of the span's text.
+const CLASS_PHRASES = {
+  seeded: "a credential this session loaded at its start",
+  named: "hidden on evidence beyond its shape",
+  shape: "hidden for its shape alone",
+  joined: "joined to a value the redactor already holds",
+} as const;
+
+// Where one hidden span starts: the tool argument or the body file that
+// holds it, the line and column of its first character, each counted from 1
+// in the string that holds it, and its class. An argument is named by the
+// input's top-level key the string sits under, at any depth, and a body file
+// by its order among the line's `--body-file` words, counted from 1. A place
+// carries no length and no text of the span.
+export type Place = { holder: { argument: string } | { bodyFile: number }; line: number; column: number; class: keyof typeof CLASS_PHRASES };
+
+// A place's holder as a refusal writes it. An argument's name is written
+// only where it is shorter than the detector's length floor, under which the
+// detector hides no token for its shape, and holds nothing but letters,
+// digits, underscores and hyphens; any other name reads `an argument`. The
+// name is never handed to a scan, since a scan records what it hides for the
+// rest of the session. A body file is written by its order, never its path.
+function holderOf(holder: Place["holder"]): string {
+  if ("bodyFile" in holder) return `body file ${holder.bodyFile}`;
+  return holder.argument.length < cfg.minLength && /^[A-Za-z0-9_-]+$/.test(holder.argument) ? `argument ${holder.argument}` : "an argument";
+}
+
+// How many places a match sentence writes out; the rest are counted.
+const PLACES_SHOWN = 5;
+
+const MATCH_CAUSE = "redactor: this call holds text the redactor hides and was refused before it ran.";
+const MATCH_ADVICE = "write the placeholder a tool result showed for it. Where it is not, send the call without that text.";
+
+// The refusal of a call holding hidden text, where each span's place is
+// known: the count of every span, then the first PLACES_SHOWN places in the
+// order the scan met them, each `<holder>, line <l>, column <c>, <class>`,
+// and the count of the rest.
+export function matchRefusal(surface: string, places: readonly Place[]): string {
+  const shown = places.slice(0, PLACES_SHOWN).map((p) => `${holderOf(p.holder)}, line ${p.line}, column ${p.column}, ${CLASS_PHRASES[p.class]}`);
+  const more = places.length > PLACES_SHOWN ? `, and ${places.length - PLACES_SHOWN} more` : "";
+  return `${MATCH_CAUSE} It would go through ${surface} with ${places.length} hidden span(s): ${shown.join("; ")}${more}. Each class is the redactor's record of that text, made in this call or earlier in this session. Where a span is a secret, ${MATCH_ADVICE}`;
+}
+
+// The refusal of a call holding hidden text whose places the redactor could
+// not read. It names no argument and no file.
+export function unplacedMatchRefusal(surface: string): string {
+  return `${MATCH_CAUSE} It would go through ${surface}, and the redactor could not work out where the text sits. Where the text is a secret, ${MATCH_ADVICE}`;
+}
+
+// The refusal of a call the scan budget cannot cover: its strings pass
+// SCAN_CAP, or the hook's time ran out before or during the scan. It claims
+// no secret.
+export function notScannedRefusal(surface: string): string {
+  return `redactor: this call is too large to scan in the time the redactor has and was refused before it ran. Unscanned, it may carry a secret through ${surface}. Send less in one call.`;
+}
+
+// The refusal of a call in which the scan hid nothing and the walk met a
+// part it cannot read, one nested past MAX_DEPTH or not plain data. It
+// claims no secret.
+export function unreadPartRefusal(surface: string): string {
+  return `redactor: this call holds a part the redactor cannot read and was refused before it ran. The part is nested past ${MAX_DEPTH} levels or is not plain data, and unread it may carry a secret through ${surface}. Send it as plain text.`;
 }
 
 // The scan's pace, taken at 1,000 characters a millisecond, is the charge's
@@ -405,8 +478,8 @@ export function setScanClock(now: () => number): void {
 // a string not yet scanned at that moment, that string's first tick throws
 // and the whole call is withheld, as when a first reading passes the
 // deadline. A budget told no bound takes no second reading: its
-// caller reads only whether a scan changed its text, which the first reading
-// settles.
+// caller reads whether a scan changed its text and where that scan hid each
+// span, and the first reading settles both.
 // `tick` is the same check for a caller that decodes a media value itself
 // through `walk`, handed in the walk's state. An `Infinity` budget has an
 // infinite deadline and a tick that never throws, so of the three tests only
@@ -525,30 +598,80 @@ function storingShell(e: ToolCallInput): boolean {
   return stores;
 }
 
-// Whether a tool's arguments carry a raw secret: a value the vault knows, or
-// one the detector would hide. The arguments are scanned as the result would
-// be and the rewrite is discarded; the envelope's own fields are left out of
-// the scan. A placeholder is not a raw secret: the scan leaves it as it
-// stands, so the test is whether the scan changed any string. The tags the
-// scan collects are not the test, since the detector records a placeholder
-// it meets in a credential context even where it rewrites nothing. Each
-// string is charged to `budget` before its scan and scrubbed through it, so
-// the clock bounds the refusal's scan as it bounds every other. An input the
-// walk cannot read whole counts as holding one.
-function holdsRawSecret(e: object, budget: Budget): boolean {
+// A string a refusal's scan changed: the argument or body file that holds
+// it, the text as scanned and the scan's output.
+type Changed = { holder: Place["holder"]; text: string; out: string };
+
+// The strings of a tool's arguments that carry a raw secret, a value the
+// vault knows or one the detector would hide, in the order the scan met
+// them, and whether the walk met a part it cannot read. The arguments are
+// scanned as the result would be and the rewrite goes nowhere but the
+// answer; the envelope's own fields are left out of the scan. A placeholder
+// is not a raw secret: the scan leaves it as it stands, so the test is
+// whether the scan changed a string. The tags the scan collects are not the
+// test, since the detector records a placeholder it meets in a credential
+// context even where it rewrites nothing. Each top-level entry is walked on
+// its own, at the depth and under the key a walk of the whole input gives
+// it, so each changed string is known by its top-level key and the input
+// reads as incomplete exactly where the whole walk would read it so. The
+// key itself is never scanned. Each string is charged to `budget` before
+// its scan and scrubbed through it, so the clock bounds the refusal's scan
+// as it bounds every other.
+function scanArguments(e: object, budget: Budget): { changed: Changed[]; incomplete: boolean } {
   const args: Record<string, unknown> = { ...(e as Record<string, unknown>) };
   delete args.tool;
   delete args.tool_use_id;
   delete args.agentId;
-  let changed = false;
+  const changed: Changed[] = [];
   const st: WalkState = { incomplete: false, tick: budget.tick };
-  walk(args, (s) => {
-    budget.charge(s);
-    const out = budget.scrub(s);
-    if (out !== s) changed = true;
-    return out;
-  }, st);
-  return changed || st.incomplete;
+  for (const [key, value] of Object.entries(args)) {
+    walk(value, (s) => {
+      budget.charge(s);
+      const out = budget.scrub(s);
+      if (out !== s) changed.push({ holder: { argument: key }, text: s, out });
+      return out;
+    }, st, 1, key);
+  }
+  return { changed, incomplete: st.incomplete };
+}
+
+// The match refusal for the strings a scan changed, naming each hidden
+// span's place. The places are read once the scan has ended, under the same
+// budget: its clock is read before each string, and each string takes one
+// lay-over and one pass from its start to its last span, both linear in its
+// length. A line ends at a line feed and a column counts code points, so the
+// second half of a surrogate pair adds nothing. Reading a place scans
+// nothing and records nothing in the vault. Where a scan's output cannot be
+// laid over its text, or the deadline passes while the places are read, the
+// answer is the places-unknown sentence, so the call is refused either way.
+function matchRefusalOf(surface: string, changed: readonly Changed[], budget: Budget): string {
+  const places: Place[] = [];
+  try {
+    for (const { holder, text, out } of changed) {
+      budget.tick();
+      const hides = hideClasses(text, out);
+      if (hides === null) return unplacedMatchRefusal(surface);
+      let i = 0;
+      let line = 1;
+      let column = 1;
+      for (const hide of hides) {
+        for (; i < hide.at; i++) {
+          const c = text.charCodeAt(i);
+          if (c === 10) {
+            line++;
+            column = 1;
+          } else if (c < 0xdc00 || c > 0xdfff || i === 0 || (text.charCodeAt(i - 1) & 0xfc00) !== 0xd800) {
+            column++;
+          }
+        }
+        places.push({ holder, line, column, class: hide.class });
+      }
+    }
+  } catch (err) {
+    if (err instanceof ScanBudgetError) return unplacedMatchRefusal(surface);
+    throw err;
+  }
+  return matchRefusal(surface, places);
 }
 
 // Counts the values hidden, not the placeholders that stand for quoted text.
@@ -558,14 +681,19 @@ function countHidden(tags: Set<string>): number {
 
 // ------------------------------------------------------------ tool.call
 
-// The fixed refusal where this call is a store surface, a shell store line
-// or a tool in REFUSED_TOOLS, carrying a raw secret; null where the call may
-// go on, a use line whatever it carries included. index.ts runs it first,
-// before any guard answers, and a non-null answer is the call's deny. An
-// input too large to scan inside `remainingMs` is refused the same way:
-// unscanned, it may carry a secret. Before either test, a file writer whose
-// input holds a placeholder the vault cannot restore is refused with the
-// sentence cannotRestoreRefusal builds, so the tag never lands in a file.
+// The refusal where this call is a store surface, a shell store line or a
+// tool in REFUSED_TOOLS, that may not go on; null where it may, a use line
+// whatever it carries included. index.ts runs it first, before any guard
+// answers, and a non-null answer is the call's deny. The sentence is the
+// one for the call's cause. An input too large to scan inside `remainingMs`
+// takes the not-scanned sentence, even where an earlier string of it had
+// changed: unscanned, it may carry a secret. An input the scan changed a
+// string of takes the match sentence, whether or not the walk also met a
+// part it cannot read. An input in which nothing changed and the walk met
+// such a part takes the unread-part sentence. Before any of the three, a
+// file writer whose input holds a placeholder the vault cannot restore is
+// refused with the sentence cannotRestoreRefusal builds, so the tag never
+// lands in a file.
 export function toolCallRefusal(e: ToolCallInput, remainingMs: number): string | null {
   if (FILE_WRITERS.has(e.tool)) {
     const unknown = unknownPlaceholders(e);
@@ -574,12 +702,16 @@ export function toolCallRefusal(e: ToolCallInput, remainingMs: number): string |
   const stores = storingShell(e);
   if (!stores && !REFUSED_TOOLS.has(e.tool)) return null;
   const surface = stores ? (storesMemq((e as { command: string }).command) ? MEMQ_SURFACE : storeSurfaceOf(e.tool)) : e.tool;
+  const budget = scanBudget(remainingMs);
+  let scan: { changed: Changed[]; incomplete: boolean };
   try {
-    return holdsRawSecret(e, scanBudget(remainingMs)) ? refusalFor(surface) : null;
+    scan = scanArguments(e, budget);
   } catch (err) {
-    if (err instanceof ScanBudgetError) return refusalFor(surface);
+    if (err instanceof ScanBudgetError) return notScannedRefusal(surface);
     throw err;
   }
+  if (scan.changed.length > 0) return matchRefusalOf(surface, scan.changed, budget);
+  return scan.incomplete ? unreadPartRefusal(surface) : null;
 }
 
 // The command of a Bash or PowerShell call that names memq, or null for any
@@ -667,23 +799,26 @@ function commandWords(command: string, powerShell: boolean): string[] {
   return words;
 }
 
-// The fixed memq refusal where the file a Bash or PowerShell memq command's
-// `--body-file` names holds a raw secret, null where it holds none or the call
-// is not a memq command naming one. The file is the one place a memq body the
+// The refusal where a file a Bash or PowerShell memq command's `--body-file`
+// names holds a raw secret or cannot be scanned, null where the files hold
+// none or the call is not a memq command naming one. The file is the one place a memq body the
 // model composed from a placeholder holds the real value, since Write restores
 // it. A line whose text holds `--body-file` is split by its shell's quoting,
 // and every word after a `--body-file` word is a path handed to `fs.read` as
 // the split yields it, relative paths included. Every file is read first, then
 // each file's text is charged to one scan budget for the call and scanned as a
 // command's own text is. Files whose text passes SCAN_CAP in total take the
-// memq refusal before the next read. A split that ends inside an open quote or block
+// not-scanned sentence before the next read. The first file whose scan
+// changed its text takes the match sentence, with that file's spans and
+// their count, the file named by its order among the line's `--body-file`
+// words and never by its path, and no later file is scanned. A split that ends inside an open quote or block
 // comment, and a file the read rejects, throws or does not hold, are each
 // refused with a sentence naming the cause, since the call has not run and a
 // file the read cannot return may still be one memq reads. The file sentence quotes the path as the split yielded it, scrubbed
 // (the split can join a secret the command scan saw in pieces) and cut to 200
 // code points. A `--body-file` inside a wrapper's quoted string,
 // `bash -c "memq put n d --body-file f"`, is part of one word and is never
-// reached. A budget error on a file's scan is the memq refusal; any other
+// reached. A budget error on a file's scan is the not-scanned sentence; any other
 // error from the split or a scan, a budget error on the path's scrub among
 // them, escapes, and the caller refuses the call before it runs.
 export async function bodyFileRefusal(e: ToolCallInput, fs: { read: (path: string) => Promise<unknown> }, remainingMs: number): Promise<string | null> {
@@ -712,7 +847,7 @@ export async function bodyFileRefusal(e: ToolCallInput, fs: { read: (path: strin
     // pass SCAN_CAP: a command naming one large file hundreds of times then
     // holds no more than the cap and one read, and the refusal reads no clock.
     total += text.length;
-    if (total > SCAN_CAP) return refusalFor(MEMQ_SURFACE);
+    if (total > SCAN_CAP) return notScannedRefusal(MEMQ_SURFACE);
     texts.push(text);
   }
   // Every file is read before the one budget is made, so its deadline is
@@ -722,9 +857,12 @@ export async function bodyFileRefusal(e: ToolCallInput, fs: { read: (path: strin
   const budget = scanBudget(remainingMs);
   try {
     for (const text of texts) budget.charge(text);
-    for (const text of texts) if (budget.scrub(text) !== text) return refusalFor(MEMQ_SURFACE);
+    for (const [i, text] of texts.entries()) {
+      const out = budget.scrub(text);
+      if (out !== text) return matchRefusalOf(MEMQ_SURFACE, [{ holder: { bodyFile: i + 1 }, text, out }], budget);
+    }
   } catch (err) {
-    if (err instanceof ScanBudgetError) return refusalFor(MEMQ_SURFACE);
+    if (err instanceof ScanBudgetError) return notScannedRefusal(MEMQ_SURFACE);
     throw err;
   }
   return null;
