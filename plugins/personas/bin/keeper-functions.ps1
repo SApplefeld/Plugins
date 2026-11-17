@@ -118,7 +118,7 @@ function Get-KeeperDecision {
         6 {
             return @{
                 Action = 'park'; DelaySeconds = 0; NextDelaySeconds = $delay; NextExit1Count = 0
-                Reason = "supervisor exited 6: parked, back at the next boot or a start after the operator's -Release"
+                Reason = "supervisor exited 6: parked, back at the next boot or a start after the operator's -Release, or at the fleet supervisor's release where fleet.retired is beside the park marker"
             }
         }
         7 {
@@ -1255,8 +1255,10 @@ keeper, since a live keeper is the truth about the rest of its own run directory
 leaves a wanted entry down with no live keeper needs a fact in Get-KeeperHandoffDecision.
 
 Returns a hashtable: Action is one of none, start, adopted, retire, retire-timeout, retired, held,
-parked and backoff; Reason is one line of text fit for the log; Release says a start removes
-shutdown.request, keeper.hold and fleet.retired first; ClearRetired says an adoption removes a
+parked and backoff; Reason is one line of text fit for the log; Release says a start first removes
+the request, the hold, the park marker, the boot marker where the park marker is beside it, and
+the sidecar: shutdown.request, keeper.hold, keeper.park, keeper.boot and fleet.retired, so a boot
+marker alone, which a stop by TERM or INT leaves, stays; ClearRetired says an adoption removes a
 stale sidecar; DelaySeconds is a backoff's wait; NextDelaySeconds is the ladder value to carry,
 which a start after a failed clone reads as the delay the next failure waits.
 #>
@@ -1331,7 +1333,7 @@ function Get-FleetDecision {
     }
     if ($RetiredPresent) {
         $result.Action = 'start'; $result.Release = $true
-        $result.Reason = 'released: fleet.retired marks the hold as this fleet supervisor''s own'
+        $result.Reason = 'released: fleet.retired marks the stop as one this fleet supervisor asked for'
         return $result
     }
     if ($HoldPresent) {

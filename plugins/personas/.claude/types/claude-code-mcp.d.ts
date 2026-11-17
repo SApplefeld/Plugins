@@ -45,11 +45,11 @@ declare module 'claude-code' {
     }
     /** Show the current goal tree as formatted text. Read-only; works for passive readers. */
     "mcp__personas__goal_status": {}
-    /** Stop the supervisor itself, not just the current goal: the child exits by the graceful EOF path once this turn ends. park: true stops the persona for an update window and the keeper brings it back at the next boot or a start after the operator's -Release; without it the call stops for good and is made only on the operator's explicit ask. A finished goal needs no call here: goal_done already returns the supervisor to its passive waiting state. Owner only. */
+    /** Stop the supervisor itself, not just the current goal: the child exits by the graceful EOF path once this turn ends. A plain call is made on the operator's explicit ask or in answer to the launcher's own request to end the session, and while that request is open the supervisor reads either call as the stop. park: true is for an update window the operator asked for: the persona stops and the keeper brings it back at the next boot or a start after the operator's -Release. While the launcher's request is open, a park is the stop and the launcher decides whether the persona comes back. A finished goal needs no call here: the session stays up and waits for the next ask. Owner only. */
     "mcp__personas__supervisor_shutdown": {
       /** reason is optional: why the operator asked to shut down. */
       reason?: string
-      /** park: true stops the supervisor on the park code and the keeper brings the persona back at the next boot or a start after the operator's -Release. */
+      /** park: true stops the supervisor on the park code and the keeper brings the persona back at the next boot or a start after the operator's -Release. While the launcher's request is open, a park is the stop and the launcher decides whether the persona comes back. */
       park?: boolean
     }
     /** Restart this persona: this child exits by the graceful EOF path and a fresh one starts with the goal tree intact and resumes the active plan. Under a keeper that can hand the persona to the fleet supervisor, the supervisor and the keeper end too, and the fleet supervisor starts the persona again on the installed plugin build. Otherwise, and in a run with no keeper, the child is relaunched alone. Call it on the operator's ask for a restart, or to pick up an updated runtime such as a plugin update. A finished goal needs no call here either. Owner only. */

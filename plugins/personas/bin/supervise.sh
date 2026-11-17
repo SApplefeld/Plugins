@@ -23,7 +23,7 @@
 # Discord side effects).
 #
 # Exit codes:
-#   0 = shutdown_requested honored
+#   0 = shutdown_requested, or a park answering the shutdown ask, honored
 #   1 = usage, a setting refused at startup, a store migration that did
 #       not complete before the gate, or a relay not installed under the
 #       public marketplace
@@ -3375,7 +3375,7 @@ final_ask_json() {
 # shutdown request is present. The child's plugin submits it as a turn opening
 # [SUPERVISOR id=<id>], and the priming turn says what such a prompt carries.
 # Held here and handed to the poll, so the injection ledger sizes it.
-SUPERVISOR_SHUTDOWN_TEXT="The launcher is ending this session. Bank your state now, with the plan doc, the goal tree and any owed message on disk, then call supervisor_shutdown."
+SUPERVISOR_SHUTDOWN_TEXT="The launcher is ending this session. Bank your state now, with the plan doc, the goal tree and any owed message on disk, then call supervisor_shutdown. A plain call is the answer, a call with park answers this request the same way, and the launcher decides whether the persona comes back."
 
 # --- Helper: read a fact from .agentic-personas.json ---
 # Usage: get_fact <workdir> <persona> <fact>
@@ -3956,12 +3956,12 @@ clear_shutdown_request() {
 }
 
 # --- Helper: stop a child that did not honor the shutdown ask ---
-# The grace has passed with no shutdown_requested from the child, so the stop
-# proceeds through the stop phases as every decide-path stop does, under a
-# label of its own, and the run ends at exit 0, which the keeper reads as the
-# shutdown done. A process from the child left alive or unverifiable outranks
-# that and ends the run at exit 5, as it does on every other stop, and the
-# request stays in place for the next start.
+# The grace has passed with no shutdown_requested or park_requested from the
+# child, so the stop proceeds through the stop phases as every decide-path
+# stop does, under a label of its own, and the run ends at exit 0, which the
+# keeper reads as the shutdown done. A process from the child left alive or
+# unverifiable outranks that and ends the run at exit 5, as it does on every
+# other stop, and the request stays in place for the next start.
 ask_timeout_stop() {
   log "ASK TIMEOUT id=$SHUTDOWN_ASK_ID child-$CHILD_INDEX: $DECIDE_REASON"
   stop_child "ask_timeout"
@@ -5762,8 +5762,8 @@ while true; do
 
     case "$DECIDE_ACTION" in
       stop_complete)
-        # A shutdown the child recorded while the shutdown ask was open is
-        # that ask honored, and the log says so.
+        # A shutdown or a park the child recorded while the shutdown ask was
+        # open is that ask honored, and the log says so.
         if [ -n "$SHUTDOWN_ASK_ID" ]; then
           log "STOP_COMPLETE: $DECIDE_REASON (the shutdown ask id=$SHUTDOWN_ASK_ID is honored)"
         else
@@ -5989,9 +5989,28 @@ while true; do
   # The child records park_requested and exits on its own, and the answer the
   # keeper needs from that is exit 6, which is what writes the park marker, and
   # the keeper brings the persona back at the next boot or a start after the
-  # operator's -Release.
+  # operator's -Release. A park recorded while the shutdown ask to this child
+  # was open is that ask honored instead, as the decide unit reads it on the
+  # poll path: the launcher asked for the stop, so the run ends as the shutdown
+  # branch above ends it, with the same sweep and exit 0, and the launcher
+  # decides whether the persona comes back. Exit 6 there would have the keeper
+  # hold the persona down for the rest of the boot.
   PARK_REQUESTED_TS=$(get_fact "$WORKDIR" "$PERSONA" "park_requested")
   if [ -n "$PARK_REQUESTED_TS" ] && [ "$PARK_REQUESTED_TS" -gt "$CHILD_START_TS" ]; then
+    if [ -n "$SHUTDOWN_ASK_ID" ]; then
+      log "STOP_COMPLETE: park_requested at $PARK_REQUESTED_TS > child start $CHILD_START_TS answers the launcher's request (the shutdown ask id=$SHUTDOWN_ASK_ID is honored by a park)"
+      sweep_child_tree "shutdown"
+      SWEEP_RC=$?
+      if [ "$SWEEP_RC" -eq 1 ] && [ -n "$LAST_STOP_SNAPSHOT" ]; then
+        retry_stop_escalation "shutdown" "$SWEEP_RC"
+        SWEEP_RC=$?
+      fi
+      if [ "$SWEEP_RC" -eq 1 ]; then
+        log "NOTE: child-$CHILD_INDEX leaves a process that is alive or a tree that could not be read, and the shutdown the launcher asked for is still what this run reports"
+      fi
+      clear_shutdown_request
+      exit 0
+    fi
     log "STOP_PARK: park_requested at $PARK_REQUESTED_TS > child start $CHILD_START_TS"
     # Swept here for the same reason the shutdown is: no relaunch follows in
     # this run. Unlike the shutdown, a process left alive or a tree that could

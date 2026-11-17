@@ -5602,9 +5602,11 @@ export const register: Register = async (on, options) => {
       name: "supervisor_shutdown",
       description:
         "Stop the supervisor itself, not just the current goal: the child exits by the graceful " +
-        "EOF path once this turn ends. park: true stops the persona for an update window and the keeper " +
-        "brings it back at the next boot or a start after the operator's -Release; without it the call stops for good and is made only on the " +
-        "operator's explicit ask. A finished goal needs no call here: the session stays up and waits for the " +
+        "EOF path once this turn ends. A plain call is made on the operator's explicit ask or in answer to " +
+        "the launcher's own request to end the session, and while that request is open the supervisor reads " +
+        "either call as the stop. park: true is for an update window the operator asked for: the persona stops and the keeper " +
+        "brings it back at the next boot or a start after the operator's -Release. While the launcher's request is open, a park is the stop " +
+        "and the launcher decides whether the persona comes back. A finished goal needs no call here: the session stays up and waits for the " +
         "next ask. Owner only.",
       inputSchema: {
         type: "object",
@@ -5615,7 +5617,7 @@ export const register: Register = async (on, options) => {
           },
           park: {
             type: "boolean",
-            description: "park: true stops the supervisor on the park code and the keeper brings the persona back at the next boot or a start after the operator's -Release.",
+            description: "park: true stops the supervisor on the park code and the keeper brings the persona back at the next boot or a start after the operator's -Release. While the launcher's request is open, a park is the stop and the launcher decides whether the persona comes back.",
           },
         },
       },

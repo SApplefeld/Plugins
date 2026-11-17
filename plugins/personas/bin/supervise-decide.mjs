@@ -16,7 +16,7 @@
  * @property {number|null} [finalAskAt] - When the final ask for the current silence was written, in epoch ms, or null where none has been. The poll loop clears it whenever a reading is alive.
  * @property {number} [finalAskMs] - supervisorFinalAskMs: how long a final ask waits for any signal to move before a frozen child restarts.
  * @property {number|null} [shutdownAskAt] - When the shutdown ask to the current child was written to the mailbox, in epoch ms, or null where none has been. The poll loop carries it from poll to poll for as long as that child lives.
- * @property {number} [askGraceMs] - supervisorAskGraceMs: how long a shutdown ask waits for the child's own shutdown_requested before the stop proceeds through the stop phases.
+ * @property {number} [askGraceMs] - supervisorAskGraceMs: how long a shutdown ask waits for the child's own shutdown_requested or park_requested before the stop proceeds through the stop phases.
  * @property {number} [now] - Current time (for the final ask's window).
  * @property {number} [minRunMs] - Minimum run time before crash-loop counting.
  * @property {number} [maxRestartsPerHour] - Restart budget per hour.
@@ -35,13 +35,18 @@
  * 1. stop_budget - restart budget exhausted (maxRestartsPerHour reached)
  * 2. stop_crash_loop - crashLimit consecutive non-zero exits within minRunMs
  * 3. stop_complete - an explicit shutdown_requested decision newer than child start:
- *    the operator asked the supervisor itself to stop, not just the current goal
+ *    the operator asked the supervisor itself to stop, not just the current goal.
+ *    A park_requested newer than child start while a shutdown ask is open is
+ *    read here too: the launcher asked for the stop, the park is the child's
+ *    answer to it, and the launcher decides whether the persona comes back
  * 3-. ask_timeout - a shutdown ask older than askGraceMs: the child was asked
  *    to bank its state and call supervisor_shutdown, and has not, so the stop
- *    proceeds through the stop phases. Below stop_complete, so a shutdown the
- *    child records past the grace is still honored, and above every row
- *    below, so past the grace nothing else the child does keeps it running
- * 3a. stop_park - an explicit park_requested decision newer than child start:
+ *    proceeds through the stop phases. Below stop_complete, so a shutdown or
+ *    a park the child records past the grace is still honored, and above
+ *    every row below, so past the grace nothing else the child does keeps it
+ *    running
+ * 3a. stop_park - an explicit park_requested decision newer than child start
+ *    with no shutdown ask open:
  *    the persona parked for an update window. The supervisor stops as it does
  *    for a shutdown and exits on the park code, so the keeper brings the
  *    persona back at the next boot or a start after the operator's
@@ -106,8 +111,19 @@ export function decide(input) {
     return { action: 'stop_complete', reason: `shutdown_requested at ${shutdownRequestedTs} > child start ${childStartTs}` };
   }
 
+  // 3, the park under an open shutdown ask. The launcher asked for the stop,
+  // so a park the child records while that ask is open is the ask honored
+  // and not a park: the run ends as a shutdown does, and the launcher that
+  // asked decides whether the persona comes back. Read ahead of the timeout
+  // below, so a park recorded past the grace is honored as a shutdown is.
+  if (shutdownAskAt !== null && shutdownAskAt !== undefined
+    && parkRequestedTs !== null && parkRequestedTs !== undefined && parkRequestedTs > childStartTs) {
+    return { action: 'stop_complete', reason: `park_requested at ${parkRequestedTs} > child start ${childStartTs} answers the shutdown ask at ${shutdownAskAt}` };
+  }
+
   // 3-. A shutdown ask the child has not honored inside the grace. Its answer
-  // is a shutdown_requested newer than the child start, which 3 above takes.
+  // is a shutdown_requested or a park newer than the child start, which 3
+  // above takes.
   // Inside the grace every row below is read as it always is, so a crash, a
   // request the child wrote or a liveness verdict is seen on the poll that
   // finds it. The window test is the final ask's: strictly past the grace.
@@ -115,7 +131,8 @@ export function decide(input) {
     return { action: 'ask_timeout', reason: `the shutdown ask at ${shutdownAskAt} went unanswered past ${askGraceMs}ms` };
   }
 
-  // 3a. An explicit park request newer than child start: the persona asked to
+  // 3a. An explicit park request newer than child start, with no shutdown ask
+  // open, since 3 above takes a park under one: the persona asked to
   // stop for an update window and come back at the next boot or a start
   // after the operator's -Release. Stop, on a code of its own. Below the
   // shutdown, so a stop for good wins.

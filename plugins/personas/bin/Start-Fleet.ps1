@@ -33,10 +33,19 @@
 # the supervisor's poll loop honors and the keeper turns into keeper.hold at the exit 0 it leads
 # to, and beside it writes <rundir>/fleet.retired, its own sidecar marking that hold as one it
 # asked for. A run directory holding the sidecar, for an entry that is wanted again, is released by
-# removing the sidecar, the hold and any request still lying there, and started. A keeper.hold with
-# no sidecar is one the fleet supervisor did not ask for, the keeper's own policy hold or the
-# operator's, and keeps the persona down; a keeper.boot naming the current boot
-# keeps a parked persona down until the next boot. A keeper still live -RetireBoundSeconds after
+# removing five files where present, and started: any request still lying there, the hold,
+# keeper.boot, keeper.park and the sidecar, in that order. The park and boot markers are among them
+# because a session can answer the request with a park, and a supervisor that ends such a run on
+# the park code has its keeper write those two markers and no hold, which would keep the persona
+# down for the rest of the boot. The boot marker goes only where keeper.park is beside it: a
+# keeper.boot alone is what a supervisor stopped by TERM or INT leaves, a stop made on purpose,
+# and also what a park leaves where its keeper.park could not be written. It stays, so the keeper
+# the release starts exits on it and the persona is down for the boot. Where a keeper.park an
+# earlier start could not remove stands beside a later signal stop's keeper.boot, the release
+# removes both. A keeper.hold with no sidecar is one the fleet supervisor did not ask for, the
+# keeper's own policy hold or the operator's, and keeps the persona down; a keeper.boot naming the
+# current boot, with no sidecar, keeps a parked persona down until the next boot. A keeper still
+# live -RetireBoundSeconds after
 # the request is recorded retire-timeout and left alone, because every kill in this plugin is
 # identity-guarded. This script's one kill ends a clone still running at -CloneBoundSeconds, through
 # the job object or process handle it holds for the git it started. A keeper that exits inside 60 seconds of
@@ -77,9 +86,10 @@
 # directory, which a retire of a removed entry is read from, and the last action; a removed entry's
 # record reads retired for one tick and is then dropped). keeper.json
 # stays each persona's own truth and is neither read nor written here. The only files written into
-# a run directory are shutdown.request and fleet.retired. The only ones removed are those two and
-# the keeper.hold the sidecar marks, all three by a release, and a fleet.retired a live keeper
-# outlived with no request beside it, by its adoption.
+# a run directory are shutdown.request and fleet.retired. The only ones removed are those two with
+# the keeper.hold and keeper.park beside the sidecar and the keeper.boot beside that keeper.park,
+# all five by a release, and a fleet.retired a live keeper outlived with no request beside it, by
+# its adoption.
 #
 # A roster that cannot be read, or reads as not an array, is one ERROR line and leaves every live
 # keeper alone until the next tick. -Once is the test seam that runs one tick and exits. A scheduled
@@ -1416,8 +1426,13 @@ function Invoke-FleetTick {
             'start' {
                 if ($decision.Release) {
                     # The request goes first and the sidecar last, so a removal that fails leaves the
-                    # sidecar in place and the next tick releases again.
-                    $cleared = (Remove-FleetMarker -Path (Join-Path $runDir 'shutdown.request')) -and (Remove-FleetMarker -Path (Join-Path $runDir 'keeper.hold')) -and (Remove-FleetMarker -Path (Join-Path $runDir 'fleet.retired'))
+                    # sidecar in place and the next tick releases again. The boot and park markers go
+                    # between: a retire the session answered with a park ends in those two, not a hold.
+                    # The boot marker goes only where the park marker is beside it, since a boot marker
+                    # alone is a stop by TERM or INT, which holds for the boot. It goes before the park
+                    # marker, so a boot removal that fails leaves the pair for the next tick.
+                    $parkPresent = Test-Path -LiteralPath (Join-Path $runDir 'keeper.park') -PathType Leaf
+                    $cleared = (Remove-FleetMarker -Path (Join-Path $runDir 'shutdown.request')) -and (Remove-FleetMarker -Path (Join-Path $runDir 'keeper.hold')) -and ((-not $parkPresent) -or (Remove-FleetMarker -Path (Join-Path $runDir 'keeper.boot'))) -and (Remove-FleetMarker -Path (Join-Path $runDir 'keeper.park')) -and (Remove-FleetMarker -Path (Join-Path $runDir 'fleet.retired'))
                     if (-not $cleared) { $applied = $false; break }
                 }
                 if ($null -ne $want -and -not [string]::IsNullOrWhiteSpace($want.Repo)) {
