@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // landing-protection: whether the host protects the branch a plan lands on.
-// The finishing pass asks it once, at the finish, and ends the plan by the
-// word it prints.
+// The finishing pass asks it at the ending's read, whose word ends the plan,
+// and again at the ready's workflow read, whose word can drop a workflow from
+// the hold.
 //
 //   node landing-protection.js --branch <name> [--remote <name>] [--repo <dir>]
 //

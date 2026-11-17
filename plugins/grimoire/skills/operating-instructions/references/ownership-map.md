@@ -97,6 +97,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Authority over machine-shared state: the seat classes, the act class and the ask route | `role` |
 | The coordinator's runbook, the board, a persona seat's record and their bars | `coordinator` |
 | The coordinator seat on a fleet under the persona plugin: dispatching a plan to a persona worker, tracking it and redirecting it | `coordinator` (Dispatch and Redirect Rule, its Persona Fleet passage); the plugin's priming, `plugins/personas/bin/supervise-holder.sh`, owns the record's label and what the record carries |
+| A plan's trunk: what it is, who names it and where a later reader takes the name | `coordinator` (Dispatch and Redirect Rule, the queue record's `Base branch:` field; Reconciliation Pass for the seat's own read) |
 | What a worker's act is on a delegated seat's steer: a push, a deploy or a commit-model change, and the settings edit the steer never covers | `role` (the delegation model) |
 | A seat running git in the memory store | `coordinator` (Ledger) |
 | A repeating watch over a live system: tick order, ledger, wake prompt | `standing-watch` |
