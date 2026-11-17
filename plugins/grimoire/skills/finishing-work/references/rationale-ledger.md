@@ -7718,25 +7718,25 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: An entry addresses readers outside the operator and the operator's own sessions, so it voids step 2's advisory waiver.
 
 ### BK006
-- key: Carry each drafted entry's path on step 1's QA brief, the verifier taking each sentence of its What changed and By design parts as a criterion.
+- key: Carry each drafted entry's path on step 1's QA brief, the verifier taking each sentence of its What Changed and By Design parts as a criterion.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:86
-- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 3 2026-11-11.
-- verdict: keep
-- landed: b5d4e37d8 section 3
+- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 3 2026-11-11. Rewritten by docs/plans/claude-kit_changelog-entry-lists-its-changes_spec_v1.md section 1 2026-11-17, which writes the parts' names in Title Case.
+- verdict: rewrite
 - reason: Those two parts state behavior, and the verifier already runs at step 1 with a shell under a standard of execution or direct inspection, so the claim check costs no further dispatch. The prose reviewer cannot run the product. The charter holds the rule the verifier works to (BK001 under the executing-work ledger's qa-verifier heading), and the brief is how the entry reaches it.
-- passage: Where the pass drafted a changelog entry, the brief carries each entry's path, and the verifier takes each sentence of its What changed and By design parts as a criterion.
+- passage: Where the pass drafted a changelog entry, the brief carries each entry's path, and the verifier takes each sentence of its What Changed and By Design parts as a criterion.
+- landed: 4bf64741d section 1
 
 ### BK007
-- key: At step 6, after the plan brief's refresh and before the close path, finalize the entry and write the final Chapter's `Changelog:` line, bare, as the entry's path or `none, because <why>`; change a What changed or By design sentence only where a fix after step 1 changed its behavior; where such a fix changed whether the plan owes an entry or added a behavior a user sees, re-read the owe decision and write or drop the entry or the sentence on the same terms; and name each sentence so changed or added with its run on the Chapter's `Decisions / Surprises:` line.
+- key: At step 6, after the plan brief's refresh and before the close path, finalize the entry and write the final Chapter's `Changelog:` line, bare, as the entry's path or `none, because <why>`; change a What Changed or By Design sentence only where a fix after step 1 changed its behavior; where such a fix changed whether the plan owes an entry or added a behavior a user sees, re-read the owe decision and write or drop the entry or the sentence on the same terms; and name each sentence so changed or added with its run on the Chapter's `Decisions / Surprises:` line.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:84
-- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 3 2026-11-11.
-- verdict: keep
-- landed: b5d4e37d8 section 3
+- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 3 2026-11-11. Rewritten by docs/plans/claude-kit_changelog-entry-lists-its-changes_spec_v1.md section 1 2026-11-17, which writes the parts' names in Title Case.
+- verdict: rewrite
 - reason: Fixes land between step 1 and the close, so the draft can state behavior the tree no longer has. Bounding the finalize to the sentences a fix moved keeps every other sentence the one the verifier checked, and naming the run for each changed one gives it the same evidence. The owe decision is made once before step 1, so a fix after it that makes the plan owe an entry, owe none, or show a user a new behavior would otherwise reach the trunk with the entry or a sentence missing or untrue; re-reading the decision on the same terms closes that gap, and the added sentence carries its run like a changed one. The line is written bare with nothing after it because the check reads its whole value as a path or a reason (S206), so the changed sentences ride another field. The finalize sits before the close path so the entry and the Chapter are committed with the archive under step 7's docs predicate (S206). A plan that owes no entry gives its reason on the same line, where the check reads it.
 - passage: Where none is owed, step 6 records the reason.
-- passage: Then finalize the changelog entry, where the pass drafted one, and write the final Chapter's `Changelog:` line. The line names the entry's repository path or reads `none, because <why>`, written bare and with nothing after it. The finalize changes a sentence of the What changed or By design part only where a fix made after step 1 changed the behavior that sentence states. Where such a fix changed whether the plan owes an entry, or added a behavior a user sees, the finalize re-reads the owe decision made before step 1 and writes or drops the entry, or the sentence, on the same terms. The final Chapter's `Decisions / Surprises:` line names each sentence so changed or added with the run that showed the new behavior, so no claim reaches the trunk unchecked.
+- passage: Then finalize the changelog entry, where the pass drafted one, and write the final Chapter's `Changelog:` line. The line names the entry's repository path or reads `none, because <why>`, written bare and with nothing after it. The finalize changes a sentence of the What Changed or By Design part only where a fix made after step 1 changed the behavior that sentence states. Where such a fix changed whether the plan owes an entry, or added a behavior a user sees, the finalize re-reads the owe decision made before step 1 and writes or drops the entry, or the sentence, on the same terms. The final Chapter's `Decisions / Surprises:` line names each sentence so changed or added with the run that showed the new behavior, so no claim reaches the trunk unchecked.
+- landed: 4bf64741d section 1
 ### BK008
 - key: Step 5's brief states that the curator edits nothing under `docs/changelog/`, and an entry this effort falsified, the pass's own drafts among them, goes into the Drift Report as an item.
 - class: mechanic

@@ -25951,14 +25951,14 @@ Extracted at `6bc07fb`: whole document (`agents.qa-verifier.md`). Amended on 202
 - passage: You are working class per the role skill: end no process you did not start, never one by image name, and delete or overwrite no other party's files. Report such a need as `BLOCKED`.
 
 ### BK001
-- key: Where the brief names a changelog entry, read it whole and take each sentence of its What changed and By design parts as a criterion, checking the behavior a sentence states against the build under step 3's standard and the intent it states, or `None recorded.`, against the plan.
+- key: Where the brief names a changelog entry, read it whole and take each sentence of its What Changed and By Design parts as a criterion, checking the behavior a sentence states against the build under step 3's standard and the intent it states, or `None recorded.`, against the plan.
 - class: rule
 - source: plugins/grimoire/agents/qa-verifier.md:15
-- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 3 2026-11-11.
-- verdict: keep
-- landed: b5d4e37d8 section 3
-- reason: Those two parts tell a tester what the product now does and which odd behavior is intended, so a wrong sentence has him file a defect that is none or pass one that is. The verifier is the seat that runs the product, and step 3 bars "the code looks like it would do this", so the entry's behavior claims get the evidence an acceptance criterion gets. A By design sentence also states why a behavior is intended, and `None recorded.` states that no intent was recorded; no build run settles either, so the plan, whose Intent and Chapters record the intent, is what they are checked against. Finishing-work's step 1 names the entry on the brief (BK006 under that ledger).
-- passage: Where the brief names a changelog entry, read it whole. Each sentence of its What changed and By design parts is a criterion. Check the behavior a sentence states against the build, by step 3's standard, and the intent it states, or `None recorded.`, against the plan.
+- provenance: docs/plans/claude-kit_changelog-entry-per-visible-change_spec_v1.md section 3 2026-11-11. Rewritten by docs/plans/claude-kit_changelog-entry-lists-its-changes_spec_v1.md section 1 2026-11-17, which writes the parts' names in Title Case.
+- verdict: rewrite
+- reason: Those two parts tell a tester what the product now does and which odd behavior is intended, so a wrong sentence has him file a defect that is none or pass one that is. The verifier is the seat that runs the product, and step 3 bars "the code looks like it would do this", so the entry's behavior claims get the evidence an acceptance criterion gets. A By Design sentence also states why a behavior is intended, and `None recorded.` states that no intent was recorded; no build run settles either, so the plan, whose Intent and Chapters record the intent, is what they are checked against. Finishing-work's step 1 names the entry on the brief (BK006 under that ledger).
+- passage: Where the brief names a changelog entry, read it whole. Each sentence of its What Changed and By Design parts is a criterion. Check the behavior a sentence states against the build, by step 3's standard, and the intent it states, or `None recorded.`, against the plan.
+- landed: 4bf64741d section 1
 
 ### BT001
 - key: Return a base-head re-run or a proof needing a worktree to the orchestrator with its command named, and never run it.

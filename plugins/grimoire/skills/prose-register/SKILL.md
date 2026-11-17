@@ -38,14 +38,14 @@ A writer reads `references/ai-tells.md`, the catalog of machine-written patterns
 
 ## Plan Brief
 
-A plan brief is a projection of its plan document into seven labelled parts, never a fresh composition. The plan's Intent, Goal and Assumptions already hold what the brief says, and a second composition drifts from the first. Each part is a bold label ending in a period, then one or two sentences. The parts, in order, with the plan section each is drawn from:
+A plan brief is a projection of its plan document into seven labelled parts, never a fresh composition. The plan's Intent, Goal and Assumptions already hold what the brief says, and a second composition drifts from the first. Each part is a bold Title Case label ending in a period, then one or two sentences. The parts, in order, with the plan section each is drawn from:
 
-- **Why it opened.** The frame in `## Intent`.
-- **The pain.** The constraint the why chain in `## Intent` ends on.
+- **Why It Opened.** The frame in `## Intent`.
+- **The Pain.** The constraint the why chain in `## Intent` ends on.
 - **Approach.** The first point of `## Approach`.
 - **Solution.** The `## Goal` paragraph.
-- **Good enough.** What `## Intent` says done does and does not need.
-- **It assumes.** `## Assumptions` and the Chapters' `Assumptions:` lines.
+- **Good Enough.** What `## Intent` says done does and does not need.
+- **It Assumes.** `## Assumptions` and the Chapters' `Assumptions:` lines.
 - **Serves.** The `Serves:` line, the item's words or `None.`
 
 A part whose source is empty or absent says so in its own sentence rather than borrowing from another part's source.
@@ -54,7 +54,7 @@ The first line is `# Brief: <plan title>`. The brief takes the doctrine's client
 
 ## Changelog Entry
 
-A changelog entry is a projection of a finished plan into a header and five one-line parts, as the plan brief is. It is addressed to a person who uses or checks the product and has read neither the plan nor the repository. Its first line is `# Change: <what changed, in a user's words>`. Four header lines follow, in this order, and a correcting entry adds a fifth, `Corrects:`:
+A changelog entry is a projection of a finished plan into a header and five labelled parts. It is addressed to a person who uses or checks the product and has read neither the plan nor the repository. Its first line is `# Change: <title>`. The title takes the doctrine's heading form in Title Case: it names the effect in a user's words, in two to five words, and takes no prefix, since `Product:` names the product. Four header lines follow, in this order, and a correcting entry adds a fifth, `Corrects:`:
 
 - `Date:` the day the entry is drafted, as `YYYY-MM-DD`.
 - `Product:` one of the product names the changelog folder's README lists.
@@ -62,14 +62,40 @@ A changelog entry is a projection of a finished plan into a header and five one-
 - `Plan:` the plan's archived path, `docs/archive/<plan file name>`, or `none`.
 - `Corrects:` the entry this one corrects, on a correcting entry only.
 
-A `Corrected by:` line, where an entry gains one, is its last header line. Each part is one line that opens with a bold label ending in a period. The parts, in order, with the plan section each is drawn from:
+A `Corrected by:` line, where an entry gains one, is its last header line. Each part opens with a bold Title Case label ending in a period, at the start of its own line with no list marker before it, and its text follows on that line or on the lines under it. The parts, in order, with the plan section each is drawn from:
 
-- **What changed.** What a user now sees or can do, from `## Goal` and the `Completed:` and `Decisions / Surprises:` lines of the Chapters the plan's sections closed.
+- **What Changed.** A list with one item for each change a user now sees or can do, from `## Goal` and the `Completed:` and `Decisions / Surprises:` lines of the Chapters the plan's sections closed. Each item opens with a bold label ending in a period, otherwise in the heading form, Title Case and five words at most, then one to three short full sentences.
 - **Why.** One sentence, from the frame in `## Intent`.
-- **By design.** Behavior that may look like a defect and is intended, from what `## Intent` says done does not need, `## Out of Scope`, `## Assumptions`, and the Chapters' `Decisions / Surprises:` and `Assumptions:` lines.
-- **What to check.** Where to look and what to test again, from the Chapters the plan's sections closed.
-- **Not included.** What the plan left out, from `## Out of Scope`.
+- **By Design.** Behavior that may look like a defect and is intended, from what `## Intent` says done does not need, `## Out of Scope`, `## Assumptions`, and the Chapters' `Decisions / Surprises:` and `Assumptions:` lines. Sentences, or a list where the behaviors are separate.
+- **What to Check.** A list of where to look and what to test again, one check to an item, from the Chapters the plan's sections closed.
+- **Not Included.** A list of what the plan left out, from `## Out of Scope`.
 
-Where the plan document records no such behavior, By design reads `None recorded.` and nothing is invented. An oddity the writer knows only from the code stays out, since the code does not say what was intended. An `## Out of Scope` item goes to one part. One that leaves behavior a user will meet looking broken or odd goes to By design, and one that is a feature the plan did not build goes to Not included.
+The bullets above name the parts, and an entry writes no marker before a part's label. A part that holds one item may write it on the label's line. An entry reads as this one does:
 
-The entry takes the doctrine's client-briefing register with no `Voice:` layer, and is bounded to about 1,500 bytes. It names no customer, no person, no credential or internal host, and no detail of a security weakness beyond that one was fixed. No check measures the bound or this disclosure rule, so the writer holds both. An entry for work with no plan holds the header and the What changed and What to check parts. The one-line part shape is the plan brief's own. `curating-docs` states the folder an entry lives in, and `finishing-work` writes it at a plan's close.
+```markdown
+# Change: Invoice Exports Stay Consistent
+
+Date: 2026-01-15
+Product: Billing
+Kind: fixed
+Plan: docs/archive/billing_invoice-export-order_spec_v1.md
+
+**What Changed.**
+- **Exports Keep Column Order.** Every export of an invoice now lists its columns in the order the invoice screen shows. Two exports of one invoice match.
+- **Empty Invoices Export.** An invoice with no lines now exports a file that holds the header row. It showed an error before.
+
+**Why.** Two exports of one invoice came out with their columns in different orders.
+
+**By Design.** None recorded.
+
+**What to Check.**
+- Export one invoice twice and compare the two files.
+- Export an invoice that has no lines.
+
+**Not Included.**
+- Export to a spreadsheet file.
+```
+
+Where the plan document records no such behavior, By Design reads `None recorded.` and nothing is invented. An oddity the writer knows only from the code stays out, since the code does not say what was intended. An `## Out of Scope` item goes to one part. One that leaves behavior a user will meet looking broken or odd goes to By Design, and one that is a feature the plan did not build goes to Not Included.
+
+The entry takes the doctrine's client-briefing register with no `Voice:` layer. No byte count bounds it: an item's three sentences are its limit, and a longer entry reports more changes. It names no customer, no person, no credential or internal host, and no detail of a security weakness beyond that one was fixed. No check measures this disclosure rule, so the writer holds it. An entry for work with no plan holds the header and the What Changed and What to Check parts. `curating-docs` states the folder an entry lives in, and `finishing-work` writes it at a plan's close.

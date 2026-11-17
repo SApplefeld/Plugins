@@ -12,7 +12,7 @@ Seed a new or retrofitted `docs/` library from these skeletons. Replace `<projec
 - **Root (`docs/`)** holds this index and stable solution documents.
 - **`plans/`** holds active plans only. See `plans/README.md`.
 - **`briefs/`** holds the plan brief of each active plan that has one, named after its plan, and each moves to `archive/briefs/` with its plan.
-- **`changelog/`** holds one short entry per change a user can see, filed by month and never rewritten. See `changelog/README.md`.
+- **`changelog/`** holds one entry per finished piece of work a user can see, each change an item, filed by month and never rewritten. See `changelog/README.md`.
 - **`archive/`** holds finished and abandoned plans, their briefs and backlog snapshots. See `archive/README.md`.
 
 ## Living documents
@@ -68,7 +68,7 @@ Each plan in this folder carries its state in its `Status:` header.
 ```markdown
 # Changelog
 
-Each file under a `<YYYY-MM>/` folder here is one entry: a short account of a change a person using the product can see. No entry is rewritten, moved or deleted, save the single `Corrected by:` line a corrected entry gains.
+Each file under a `<YYYY-MM>/` folder here is one entry: an account of finished work a person using the product can see, each change an item. No entry is rewritten, moved or deleted, save the single `Corrected by:` line a corrected entry gains.
 
 - **Started:** <YYYY-MM-DD, the day this folder was seeded>
 - **Products:** <the product names an entry's `Product:` line may take>
