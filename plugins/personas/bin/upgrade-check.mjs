@@ -7,9 +7,10 @@
 // writes one row, and the last line printed names the verdict the exit code
 // carries.
 //
-// Three verbs. The canary's check is two of them, because half its checks
+// Four verbs. The canary's check is two of them, because half its checks
 // need a session that has already restarted onto the new build. The third
-// reads the fleet once it has restarted:
+// reads the fleet once it has restarted, and the fourth counts what one
+// persona's sessions did on each side of a model change:
 //
 //   pre   node bin/upgrade-check.mjs pre --repo <checkout> --results <dir>
 //                                        [--scratch <dir>] [--canary <persona>]
@@ -41,6 +42,24 @@
 //         else "landing: triage <persona> (<class>), ..." or
 //         "landing: no persona was judged".
 //
+//   behavior  node bin/upgrade-check.mjs behavior --results <dir> --persona <name>
+//                                        [--roster <file>] [--turns <n>]
+//         What one persona's sessions did on the newest model and effort,
+//         beside the same seven figures for the model and effort before it,
+//         and beside each how much the older one differs from itself between
+//         like windows of turns. One windows row, seven figure rows and one
+//         judged row. It changes nothing in the fleet, and it writes only the
+//         --results folder where absent, its rows and the table regenerated
+//         beside them. --roster defaults to fleet.json
+//         under --results, and --turns is the most turns a window holds, a
+//         whole number from 10 to 500 that defaults to 50. Prints
+//         "behavior: <persona> on <new id> reads inside the spread of <old id>
+//         on all seven figures, over <k> turns a window; early stops and
+//         needless approval asks are not counted (run <id>)" where the windows
+//         row and every figure row read pass, else
+//         "behavior: triage <persona>: <items>; ..." or
+//         "behavior: nothing compared for <persona>: <reason>".
+//
 // What landing reads, all of it from outside any session: the entry's model
 // as the roster name, opus where it has none; sessionId and lastSeen in
 // <rundir>/heartbeat.json; the newest LANDING_SCAN_BYTES of that session's
@@ -60,6 +79,39 @@
 // at most LANDING_BUILD_CHARS characters, and a model id of the shape
 // isModelId admits. Any other model value prints
 // as "(other)", and no evidence line carries any other transcript text.
+//
+// What behavior reads: the roster, for the entry --persona names and its
+// workdir; every file ending .jsonl directly inside the transcript folders
+// that workdir keys to, each read whole, and no subfolder; and
+// `claude --version` once. It needs no heartbeat, so it runs for a persona
+// that is stopped. Each transcript goes through countTurns in
+// turn-counts.mjs. A working turn holds one tool call or more and a start
+// time, and the working turns of every file are put in one order by start. A
+// turn's label is its model id and its effort value together, and a turn
+// whose replies name no model id, two model ids or two effort values carries
+// no label, so it is left out and counted.
+// The new stretch is the unbroken run of turns sharing the newest turn's
+// label, and the old stretch the unbroken run just before it. A window is k
+// turns, k being the smaller of --turns and the new stretch's length: the new
+// window is the first k turns of the new stretch, and the old windows are
+// every full window that fits in the old stretch, cut back from its end. The
+// difference between two windows on a figure is the larger value plus one
+// over the smaller plus one. A figure reads pass where one pair or more of
+// neighbouring old windows differs by as much as the nearest old window
+// differs from the new one, warn where none does, and gap where the old
+// stretch holds one window. A history on one label has no old stretch: its
+// windows are cut back from its newest turn, and its figure rows read gap
+// and give that one label's own spread.
+//
+// What leaves a transcript under behavior. Five things read from one reach
+// standard output, a row or the table, and no other: a count or a figure
+// computed from counts; a model id of the shape isModelId admits; an effort
+// value of the shape isEffortValue admits, or "(none)"; a version token as
+// versionToken admits one of at most LANDING_BUILD_CHARS characters; and a
+// turn's start time in the one form countTurns keeps. A model or effort value
+// of another shape names no label, so it prints nowhere. Early stops and
+// needless approval asks are not counted, and the judged row says so on
+// every run.
 //
 // The steps of pre, and what each catches:
 //   1 versions   the build on disk, and the build this session is running.
@@ -95,7 +147,19 @@
 // --expect with no --by, a command line holding any word other than its own
 // flags each given once with one value, an --expect value that is not a model
 // id, an --expect name no roster entry carries, and under --persona an
-// --expect name no entry it leaves carries. A
+// --expect name no entry it leaves carries. For behavior, so do a command
+// line holding any word other than its own four flags each given once with
+// one value, a missing --results or --persona, a --turns that is not a whole
+// number from 10 to 500, a roster that cannot be read as a JSON array or
+// holds no entry of the name --persona gives, an entry with no workdir,
+// another roster entry whose workdir keys to one of the same transcript
+// folders, a workdir no transcript folder matches, and a transcript folder
+// that cannot be listed. A behavior run that
+// writes rows exits 0 only where the windows row and all seven figure rows
+// read pass, and 1 on every other. That covers the four runs that compare
+// nothing: no labelled working turn, a newest stretch of fewer than 10
+// working turns, an old stretch too short for one window, and a history on
+// one label. A
 // scratch folder that exists,
 // holds files and carries no .upgrade-check-scratch marker also exits 2 and
 // is left as it stands, since the scratch folder is emptied at the start of a
@@ -123,6 +187,11 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { transcriptFolders } from './restart-recap.mjs';
 import { TRANSCRIPT_SCAN_BYTES, transcriptPathsFor } from './supervise-liveness.mjs';
+// The shape checks a value read from a transcript or a build passes, held in
+// turn-counts.mjs beside the turn counter that reads by them. LINE_TERMINATOR
+// is this script's own splitter and is not exported from here.
+import { EFFORT_NONE, LANDING_BUILD_CHARS, LINE_TERMINATOR, countTurns, isEffortValue, isModelId, isStartTime, versionToken } from './turn-counts.mjs';
+export { LANDING_BUILD_CHARS, isModelId, versionToken };
 
 export const STEP_TIMEOUT_MS = 180000;
 // The most output one child may print before it is stopped.
@@ -173,12 +242,6 @@ export const SUPERVISOR_GATE_PATTERNS = Object.freeze(['GATE', 'FAIL']);
 // expected; a HEARTBEAT_ABSENT line in any other shape stays an error.
 export const SUPERVISOR_HEARTBEAT_NOTE = /\bHEARTBEAT_ABSENT child-\d+: .* has not been written past the startup grace, so the heartbeat reads as not silent for this child$/;
 
-// Where one line of text ends, as hooks/operator.ts reads it: CRLF, or any
-// one of LF, CR, VT, FF, NEL, LINE SEPARATOR or PARAGRAPH SEPARATOR. Command
-// output reaches a table cell and a printed line here, and a splitter that
-// knows only LF and CR leaves five more characters that start a line the
-// reader of that text will see.
-const LINE_TERMINATOR = /\r\n|[\n\r\v\f\u{85}\u{2028}\u{2029}]/u;
 const EVIDENCE_CAP = 600;
 
 // Text folded on every line terminator, with its runs of whitespace and
@@ -718,17 +781,6 @@ export function readHeartbeatMs(rundir) {
   return DEFAULT_HEARTBEAT_MS;
 }
 
-// The version a build reports: the first token of `claude --version`, which
-// prints "<version> (Claude Code)". The whole line stays in the evidence.
-// The token names the scratch folder, so one carrying anything outside
-// letters, digits, '_', '.', '+' and '-' reads as unknown rather than
-// reaching a path.
-export function versionToken(line) {
-  const first = String(line || '').split(LINE_TERMINATOR)[0] || '';
-  const token = first.trim().split(/\s+/)[0] || '';
-  return /^[\w.+-]+$/.test(token) ? token : 'unknown';
-}
-
 // The lines a validate run reports under its own headers: a header naming a
 // count of errors or warnings, and the lines that follow it until the block
 // ends. Read this way rather than by matching the bullet character, so a build
@@ -1217,19 +1269,6 @@ export const DEFAULT_ROSTER_MODEL = 'opus';
 export const OTHER_MODEL = '(other)';
 // The most ids a printed tally names before it counts the rest.
 const TALLY_PRINT_IDS = 5;
-// The longest session build a transcript may report. A longer token reads as
-// unknown, so the one free-text value a transcript passes out stays short.
-export const LANDING_BUILD_CHARS = 32;
-
-// The model-id shape: 1 to 80 characters, each a lowercase letter, a digit, a
-// dot, a hyphen or a square bracket, the first a letter or a digit. A model
-// value read from a transcript reaches standard output, a row and the table
-// only where it has this shape, so no space, uppercase letter, slash, quote or
-// line terminator a transcript holds can ride out under a model's name.
-const MODEL_ID_SHAPE = /^[a-z0-9][a-z0-9.[\]-]{0,79}$/;
-export function isModelId(value) {
-  return typeof value === 'string' && MODEL_ID_SHAPE.test(value);
-}
 
 // Whether a reply's id is the expected id, or the expected id followed by a
 // hyphen and eight digits, which is the dated form of the same model. A roster
@@ -1241,6 +1280,24 @@ function matchesExpected(id, expected) {
   const bare = expected.replace(/\[[^[\]]*\]$/, '');
   if (id === bare) return true;
   return id.length === bare.length + 9 && id.startsWith(bare + '-') && /^[0-9]{8}$/.test(id.slice(-8));
+}
+
+// A build value read from a transcript, as it may leave one: the token
+// versionToken admits, and unknown where there is no value, where it yields
+// no token, and where the token is longer than LANDING_BUILD_CHARS.
+function transcriptBuild(version) {
+  const build = version ? versionToken(version) : 'unknown';
+  return build.length > LANDING_BUILD_CHARS ? 'unknown' : build;
+}
+
+// The build on disk, read from one run of `claude --version`, or unknown
+// where claude is not on PATH or that run fails.
+function buildOnDisk() {
+  const claude = resolveCommand('claude');
+  const versionRun = claude
+    ? runChild(claude.file, [...claude.args, '--version'])
+    : { status: null, stdout: '', stderr: '', timedOut: false, error: 'claude could not be resolved on PATH' };
+  return versionRun.status === 0 ? versionToken(versionRun.stdout) : 'unknown';
 }
 
 /**
@@ -1287,8 +1344,7 @@ function landingTally(text) {
     replies += 1;
   }
   const tally = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  const build = version ? versionToken(version) : 'unknown';
-  return { tally, replies, build: build.length > LANDING_BUILD_CHARS ? 'unknown' : build };
+  return { tally, replies, build: transcriptBuild(version) };
 }
 
 // A tally as text: "<id> x<count>", largest first, `shown` ids at most and
@@ -1392,22 +1448,20 @@ function rosterNameOf(entry) {
 // The flags landing reads.
 const LANDING_FLAGS = Object.freeze(['results', 'roster', 'expect', 'by', 'persona']);
 
-// What is wrong with landing's command line, or '' where it reads whole. It
-// reads whole where each word after the verb is one of landing's flags, given
+// What is wrong with a verb's command line, or '' where it reads whole. It
+// reads whole where each word after the verb is one of the verb's flags, given
 // once, followed by one value that is not empty and is not itself a flag.
-// parseArgs drops any other word silently, and a lost --expect or --by lets a
-// run judge against an older carried id and exit 0, while a lost --persona or
-// --roster widens or moves the read, so landing reads the command line whole.
-function landingArgsFault(argv) {
+// parseArgs drops any other word silently.
+function verbArgsFault(verb, flags, argv) {
   const list = argv.map(String);
-  const words = list[0] === 'landing' ? list.slice(1) : list;
+  const words = list[0] === verb ? list.slice(1) : list;
   const seen = new Set();
   for (let i = 0; i < words.length; i += 2) {
     const word = words[i];
     if (!word.startsWith('--')) return '"' + evidenceLine(word) + '" is not a flag, and each flag takes one value as the word after it';
     const eq = word.indexOf('=');
     const name = (eq > 0 ? word.slice(0, eq) : word).slice(2);
-    if (!LANDING_FLAGS.includes(name)) return '--' + evidenceLine(name) + ' is not a landing flag: landing takes --' + LANDING_FLAGS.slice(0, -1).join(', --') + ' and --' + LANDING_FLAGS[LANDING_FLAGS.length - 1];
+    if (!flags.includes(name)) return '--' + evidenceLine(name) + ' is not a ' + verb + ' flag: ' + verb + ' takes --' + flags.slice(0, -1).join(', --') + ' and --' + flags[flags.length - 1];
     if (eq > 0) return '--' + name + ' takes its value as the next word, not after "="';
     if (seen.has(name)) return '--' + name + ' was given more than once, and a run reads only one';
     seen.add(name);
@@ -1415,6 +1469,13 @@ function landingArgsFault(argv) {
     if (value === undefined || value === '' || value.startsWith('--')) return '--' + name + ' was given with no value';
   }
   return '';
+}
+
+// What is wrong with landing's command line. A lost --expect or --by lets a
+// run judge against an older carried id and exit 0, while a lost --persona or
+// --roster widens or moves the read, so landing reads the command line whole.
+function landingArgsFault(argv) {
+  return verbArgsFault('landing', LANDING_FLAGS, argv);
 }
 
 // What a landing verdict calls each result that needs triage.
@@ -1469,11 +1530,7 @@ export function landing(flags, argv) {
     cannotRun(resultsDir + ' cannot be written: ' + (e && e.message));
   }
 
-  const claude = resolveCommand('claude');
-  const versionRun = claude
-    ? runChild(claude.file, [...claude.args, '--version'])
-    : { status: null, stdout: '', stderr: '', timedOut: false, error: 'claude could not be resolved on PATH' };
-  const disk = versionRun.status === 0 ? versionToken(versionRun.stdout) : 'unknown';
+  const disk = buildOnDisk();
   const runId = newRunId();
   const runAt = new Date().toISOString();
   const profileRoot = String(process.env.USERPROFILE || process.env.HOME || '');
@@ -1580,6 +1637,271 @@ export function landing(flags, argv) {
   return { rows, line, code: triage.length === 0 && judged ? 0 : 1, runId, resultsDir };
 }
 
+// The flags behavior reads.
+const BEHAVIOR_FLAGS = Object.freeze(['results', 'persona', 'roster', 'turns']);
+// The fewest turns a window holds, which is also the fewest working turns a
+// newest stretch needs before anything is compared, then the most turns a
+// window holds and the count --turns defaults to.
+const BEHAVIOR_TURNS_MIN = 10;
+const BEHAVIOR_TURNS_MAX = 500;
+const BEHAVIOR_TURNS_DEFAULT = 50;
+// What the judged row says on every run.
+const BEHAVIOR_NOT_COUNTED = 'early stops and needless approval asks are not counted';
+
+// The lower of the two middle values where the count is even, so a median of
+// whole numbers is a whole number.
+function lowerMedian(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[(sorted.length - 1) >> 1];
+}
+const sumOf = (window, key) => window.reduce((sum, turn) => sum + turn[key], 0);
+
+// The seven figures, each a printed name, the value over one window of
+// working turns, and the decimals it prints to. Every turn in a window holds
+// one tool call or more, so the two rates never divide by zero.
+const BEHAVIOR_FIGURES = Object.freeze([
+  ['tool calls a turn', (w) => lowerMedian(w.map((t) => t.tools)), 0],
+  ['quiet run, median', (w) => lowerMedian(w.map((t) => t.quietText)), 0],
+  ['quiet run, longest', (w) => Math.max(...w.map((t) => t.quietText)), 0],
+  ['quiet run with updates, median', (w) => lowerMedian(w.map((t) => t.quietUpdate)), 0],
+  ['quiet run with updates, longest', (w) => Math.max(...w.map((t) => t.quietUpdate)), 0],
+  ['replies per 100 calls', (w) => (100 * sumOf(w, 'replies')) / sumOf(w, 'tools'), 2],
+  ['subagents per 100 calls', (w) => (100 * sumOf(w, 'agents')) / sumOf(w, 'tools'), 2],
+]);
+
+// How much two windows differ on a figure: the larger value plus one over the
+// smaller plus one, so a zero never makes the difference endless.
+function windowDifference(a, b) {
+  return (Math.max(a, b) + 1) / (Math.min(a, b) + 1);
+}
+
+// Every full window of k turns that fits in a list, cut back from its end,
+// the newest window first.
+function windowsBack(list, k) {
+  const out = [];
+  for (let end = list.length; end - k >= 0; end -= k) out.push(list.slice(end - k, end));
+  return out;
+}
+
+// A turn's start as a key that sorts in time order, with or without a
+// fraction of a second: the nineteen characters to the second, then the
+// fraction's digits. Comparing these keys as text is exact time order only
+// because isStartTime in turn-counts.mjs admits UTC stamps ending in "Z" and
+// no other zone, so every start is on one clock.
+const startKey = (start) => start.slice(0, 19) + '.' + start.slice(20, -1);
+
+// Whether a turn carries a label: a model id of the model-id shape, and an
+// effort value of the effort shape or the one countTurns writes for none.
+// countTurns admits no other value, and the check is made again here because
+// a label is printed.
+function isLabelled(turn) {
+  return isModelId(turn.model) && (turn.effort === EFFORT_NONE || isEffortValue(turn.effort));
+}
+const sameLabel = (a, b) => a.model === b.model && a.effort === b.effort;
+const labelText = (turn) => turn.model + ' at effort ' + turn.effort;
+
+// A window as the windows row names it: the start and the build of its first
+// turn and of its last.
+function windowSpan(window) {
+  const first = window[0];
+  const last = window[window.length - 1];
+  return 'from ' + first.start + ' on build ' + transcriptBuild(first.build) + ' to ' + last.start + ' on build ' + transcriptBuild(last.build);
+}
+
+/**
+ * What one persona's sessions did on its newest model and effort, beside the
+ * same seven figures for the model and effort before it and the older one's
+ * own spread between like windows: one windows row, seven figure rows where
+ * anything can be read, and one judged row. It writes only the results
+ * folder where absent, its rows and the table, and what it lets out
+ * of a transcript is bounded as the module header states.
+ * @param {Record<string,string>} flags
+ * @param {string[]} argv the command line flags was parsed from, read whole
+ * @returns {{rows: object[], line: string, code: number, runId: string, resultsDir: string}}
+ */
+export function behavior(flags, argv) {
+  // Required, so a caller cannot skip the whole-line check by leaving it out.
+  if (!Array.isArray(argv)) throw new Error('behavior takes the command line its flags were parsed from');
+  // A lost --persona or --roster would move the read to other sessions, and a
+  // lost --turns would change every window, so the command line is read whole.
+  const argsFault = verbArgsFault('behavior', BEHAVIOR_FLAGS, argv);
+  if (argsFault) cannotRun(argsFault);
+  const resultsDir = flags.results ? path.resolve(flags.results) : '';
+  if (!resultsDir) cannotRun('--results names the directory the rows are written to, and it was not given');
+  if (flags.persona === undefined) cannotRun('--persona names the one persona whose sessions are counted, and it was not given');
+  const turnsText = flags.turns === undefined ? String(BEHAVIOR_TURNS_DEFAULT) : flags.turns;
+  const turnsMost = /^[1-9][0-9]{1,2}$/.test(turnsText) ? Number(turnsText) : 0;
+  if (turnsMost < BEHAVIOR_TURNS_MIN || turnsMost > BEHAVIOR_TURNS_MAX) {
+    cannotRun('--turns is a whole number from ' + BEHAVIOR_TURNS_MIN + ' to ' + BEHAVIOR_TURNS_MAX + ', and "' + evidenceLine(turnsText) + '" is not one');
+  }
+  const rosterPath = flags.roster ? path.resolve(flags.roster) : path.join(resultsDir, 'fleet.json');
+  const entries = readRoster(rosterPath);
+  const own = entries.findIndex((e) => e.name === String(flags.persona));
+  if (own < 0) cannotRun('--persona names ' + evidenceLine(flags.persona) + ', and the roster ' + rosterPath + ' holds no entry of that name');
+  const persona = evidenceLine(entries[own].name);
+  const workdir = typeof entries[own].workdir === 'string' ? entries[own].workdir : '';
+  if (!workdir) cannotRun('the roster entry for ' + persona + ' names no workdir, so its transcript folders cannot be found');
+  const profileRoot = String(process.env.USERPROFILE || process.env.HOME || '');
+  const foldersOf = (dir) => (profileRoot ? transcriptFolders(path.join(profileRoot, '.claude', 'projects'), dir) : null) || [];
+  const folders = foldersOf(workdir);
+  if (folders.length === 0) cannotRun('no transcript folder under the profile\'s .claude/projects matches the workdir the roster names for ' + persona);
+  // A folder two entries key to holds two personas' sessions, and nothing in
+  // a transcript says which persona ran it, so the run stops.
+  const ownFolders = new Set(folders.map((folder) => folder.path));
+  entries.forEach((other, index) => {
+    if (index === own || typeof other.workdir !== 'string' || !other.workdir) return;
+    if (foldersOf(other.workdir).some((folder) => ownFolders.has(folder.path))) {
+      cannotRun('the roster entry ' + evidenceLine(other.name) + ' shares a transcript folder with ' + persona + ', so that folder holds the sessions of two personas and the count cannot tell them apart');
+    }
+  });
+  try {
+    fs.mkdirSync(resultsDir, { recursive: true });
+    fs.accessSync(resultsDir, fs.constants.W_OK);
+  } catch (e) {
+    cannotRun(resultsDir + ' cannot be written: ' + (e && e.message));
+  }
+
+  const disk = buildOnDisk();
+  const runId = newRunId();
+
+  // Every transcript directly inside the folders, read whole, one at a time,
+  // so only its turns are held once it is counted. One that cannot be read
+  // whole is left out and counted. A folder that cannot be listed stops the
+  // run before any row, since its files could be neither read nor counted.
+  const working = [];
+  let filesRead = 0;
+  let filesLeftOut = 0;
+  for (const folder of folders) {
+    let names = [];
+    try { names = fs.readdirSync(folder.path); } catch (e) {
+      cannotRun('the transcript folder ' + folder.path + ' cannot be listed' + (e && e.code ? ': ' + e.code : ''));
+    }
+    for (const name of names.filter((n) => n.endsWith('.jsonl')).sort()) {
+      const file = path.join(folder.path, name);
+      let text;
+      try {
+        if (!fs.statSync(file).isFile()) continue;
+        text = fs.readFileSync(file, 'utf8');
+      } catch (e) {
+        filesLeftOut += 1;
+        continue;
+      }
+      filesRead += 1;
+      for (const turn of countTurns(text)) {
+        if (turn.tools > 0 && isStartTime(turn.start)) working.push(turn);
+      }
+    }
+  }
+  // The sort is stable, so two turns starting together keep their file order.
+  working.sort((a, b) => {
+    const ka = startKey(a.start);
+    const kb = startKey(b.start);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+  const labelled = working.filter(isLabelled);
+  const leftOut = 'unlabelled turns left out: ' + (working.length - labelled.length) + '; files left out: ' + filesLeftOut + ' of ' + (filesRead + filesLeftOut);
+
+  const rows = [];
+  const record = (name, result, evidence) => {
+    const built = row(runId, disk, '', '', 'behavior: ' + persona + ': ' + name, result, evidence);
+    rows.push(built);
+    return built.result;
+  };
+  const judged = () => record('judged behaviors', 'gap', BEHAVIOR_NOT_COUNTED + ': a person or a judge reads them');
+  const outcome = (line, code) => ({ rows, line: line + ' (run ' + runId + ')', code, runId, resultsDir });
+  // A run that compares nothing: the windows row carries the reason, and the
+  // last line names it.
+  const notCompared = (reason, detail) => {
+    record('windows', 'gap', 'nothing compared: ' + reason + (detail ? ': ' + detail : '') + '; ' + leftOut);
+    judged();
+    return outcome('behavior: nothing compared for ' + persona + ': ' + reason, 1);
+  };
+
+  // The index a label's unbroken run starts at, given the index it ends at.
+  const runStart = (end) => {
+    let i = end;
+    while (i > 0 && sameLabel(labelled[i - 1], labelled[end])) i -= 1;
+    return i;
+  };
+  if (labelled.length === 0) return notCompared('the transcripts hold no labelled working turn', '');
+  const newStart = runStart(labelled.length - 1);
+  const newStretch = labelled.slice(newStart);
+  const newFirst = newStretch[0];
+  if (newStretch.length < BEHAVIOR_TURNS_MIN) {
+    return notCompared('the newest stretch holds fewer than ' + BEHAVIOR_TURNS_MIN + ' working turns', 'it holds ' + newStretch.length + ', on ' + labelText(newFirst));
+  }
+  const k = Math.min(turnsMost, newStretch.length);
+  const oneLabel = newStart === 0;
+  const oldStretch = oneLabel ? [] : labelled.slice(runStart(newStart - 1), newStart);
+  if (!oneLabel && oldStretch.length < k) {
+    return notCompared('the old stretch holds fewer than ' + k + ' working turns', 'it holds ' + oldStretch.length + ', on ' + labelText(oldStretch[0]) + ', before ' + newStretch.length + ' on ' + labelText(newFirst));
+  }
+
+  // On two labels the new window opens the new stretch and the old windows
+  // end where it begins. On one label the newest window stands where the new
+  // window would, and the windows before it are the old windows.
+  const cut = windowsBack(oneLabel ? newStretch : oldStretch, k);
+  const newWindow = oneLabel ? cut[0] : newStretch.slice(0, k);
+  const oldWindows = oneLabel ? cut.slice(1) : cut;
+  const spans = (oneLabel ? 'newest window ' : 'new window ') + windowSpan(newWindow)
+    + (oldWindows.length > 0 ? '; nearest old window ' + windowSpan(oldWindows[0]) : '');
+  // On one label every window is counted, the newest among them, so the row
+  // names them all as windows rather than as old windows.
+  const sizes = 'turns a window: ' + k + (oneLabel ? '; windows: ' + cut.length : '; old windows: ' + oldWindows.length) + '; ' + leftOut;
+
+  if (oneLabel) {
+    const reason = 'every labelled turn carries one label';
+    record('windows', 'gap', 'nothing compared: ' + reason + ', ' + labelText(newFirst) + '; ' + sizes + '; ' + spans);
+    for (const [name, figure, decimals] of BEHAVIOR_FIGURES) {
+      const olds = oldWindows.map(figure);
+      const all = [figure(newWindow), ...olds];
+      // On one label the spread is read over every window, the newest among
+      // them, so W windows give W - 1 pairs and one window gives none.
+      const pairs = all.slice(1).map((value, i) => windowDifference(all[i], value));
+      record(name, 'gap', 'newest ' + all[0].toFixed(decimals)
+        + ', windows ' + Math.min(...all).toFixed(decimals) + ' to ' + Math.max(...all).toFixed(decimals)
+        + (pairs.length > 0 ? ', pairs of neighbouring windows: ' + pairs.length + ', differing by ' + Math.max(...pairs).toFixed(2) + ' at most' : ', no old pair'));
+    }
+    judged();
+    return outcome('behavior: nothing compared for ' + persona + ': ' + reason, 1);
+  }
+
+  const oldFirst = oldStretch[0];
+  const modelMoved = newFirst.model !== oldFirst.model;
+  const effortMoved = newFirst.effort !== oldFirst.effort;
+  const moved = modelMoved && effortMoved ? 'the model and the effort moved' : modelMoved ? 'the model moved' : 'the effort moved';
+  let windowsResult = 'pass';
+  if (newFirst.effort === EFFORT_NONE || oldFirst.effort === EFFORT_NONE) windowsResult = 'gap';
+  else if (effortMoved) windowsResult = 'warn';
+  record('windows', windowsResult, moved + ': new ' + labelText(newFirst) + ', old ' + labelText(oldFirst) + '; ' + sizes + '; ' + spans);
+
+  const items = [];
+  if (effortMoved) items.push(modelMoved ? 'effort moved' : 'the effort moved and the model did not');
+  if (windowsResult === 'gap') items.push('effort not recorded');
+  for (const [name, figure, decimals] of BEHAVIOR_FIGURES) {
+    const now = figure(newWindow);
+    const olds = oldWindows.map(figure);
+    const pairs = olds.slice(1).map((value, i) => windowDifference(olds[i], value));
+    const differs = windowDifference(olds[0], now);
+    const smaller = pairs.filter((pair) => pair < differs).length;
+    const evidence = 'new ' + now.toFixed(decimals) + ', nearest old ' + olds[0].toFixed(decimals)
+      + ', old windows ' + Math.min(...olds).toFixed(decimals) + ' to ' + Math.max(...olds).toFixed(decimals)
+      + ', new and old differ by ' + differs.toFixed(2)
+      + (pairs.length > 0
+        ? ', old pairs differ by ' + Math.max(...pairs).toFixed(2) + ' at most, larger than ' + smaller + ' of ' + pairs.length + ' old pairs'
+        : ', no old pair');
+    const result = record(name, pairs.length === 0 ? 'gap' : smaller < pairs.length ? 'pass' : 'warn', evidence);
+    if (result === 'warn') items.push(name + ' outside the spread');
+    else if (result === 'gap') items.push(name + ' has no old pair');
+  }
+  judged();
+  if (items.length === 0) {
+    return outcome('behavior: ' + persona + ' on ' + newFirst.model + ' reads inside the spread of ' + oldFirst.model + ' on all seven figures, over ' + k + ' turns a window; ' + BEHAVIOR_NOT_COUNTED, 0);
+  }
+  // The items are joined by a semicolon, since four figure names hold a comma.
+  return outcome('behavior: triage ' + persona + ': ' + items.join('; ') + '; ' + BEHAVIOR_NOT_COUNTED, 1);
+}
+
 // Whether node was asked to run this file, rather than one that imported it.
 // The check errs toward running: it stands down only where the entry point is
 // another readable file, which is what an import looks like. A launch spelled
@@ -1596,18 +1918,25 @@ function launchedDirectly() {
   try { return !fs.statSync(entry).isFile(); } catch (e) { return true; }
 }
 
-// The verbs are a closed list of three, and anything else exits 2 with the
-// usage rather than running a half-named check.
+// The verbs are a closed list of four, each named here with the function
+// that runs it, and anything else exits 2 with the usage rather than running
+// a half-named check.
+const VERBS = Object.freeze({
+  pre: (flags) => pre(flags),
+  post: (flags) => post(flags),
+  landing: (flags, argv) => landing(flags, argv),
+  behavior: (flags, argv) => behavior(flags, argv),
+});
+
 // The exit code is set rather than exited on, so output still queued for a
 // pipe is written before the process ends.
 function main() {
-  const parsed = parseArgs(process.argv.slice(2));
-  if (parsed.verb !== 'pre' && parsed.verb !== 'post' && parsed.verb !== 'landing') {
-    cannotRun('the verb is "pre", "post" or "landing"; usage: upgrade-check.mjs pre --repo <checkout> --results <dir> [--scratch <dir>] [--canary <persona>] | upgrade-check.mjs post --run <id> --results <dir> --rundir <dir> --tools <ok | fail: reason> | upgrade-check.mjs landing --results <dir> [--roster <file>] [--expect <name>=<id>[,<name>=<id>...]] [--by <persona>] [--persona <name>]');
+  const argv = process.argv.slice(2);
+  const parsed = parseArgs(argv);
+  if (!Object.hasOwn(VERBS, parsed.verb)) {
+    cannotRun('the verb is "pre", "post", "landing" or "behavior"; usage: upgrade-check.mjs pre --repo <checkout> --results <dir> [--scratch <dir>] [--canary <persona>] | upgrade-check.mjs post --run <id> --results <dir> --rundir <dir> --tools <ok | fail: reason> | upgrade-check.mjs landing --results <dir> [--roster <file>] [--expect <name>=<id>[,<name>=<id>...]] [--by <persona>] [--persona <name>] | upgrade-check.mjs behavior --results <dir> --persona <name> [--roster <file>] [--turns <n>]');
   }
-  const outcome = parsed.verb === 'pre' ? pre(parsed.flags)
-    : parsed.verb === 'post' ? post(parsed.flags)
-      : landing(parsed.flags, process.argv.slice(2));
+  const outcome = VERBS[parsed.verb](parsed.flags, argv);
   // The step lines print first, so a failed append still leaves each step's
   // reading in the log. The rows are recorded before the verdict prints, so a
   // reader of the table and a reader of the verdict never disagree.

@@ -169,6 +169,17 @@ export function sameSessionId(a: unknown, b: unknown): boolean {
   return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 }
 
+// The home directory a path under it may be composed from, trimmed, or null:
+// a home that is unknown, empty, relative or a network share composes no
+// path, since a relative one lands under whatever directory the process is
+// in and a share makes this machine authenticate outbound.
+function usableHome(home: unknown): string | null {
+  if (typeof home !== "string") return null;
+  const trimmed = home.trim();
+  if (trimmed === "" || !isAbsolutePath(trimmed) || namesNetworkShare(trimmed)) return null;
+  return trimmed;
+}
+
 // The directory every role-boundary marker on this machine lives in,
 // `~/.kit/role-boundary`, or null where no such root can be opened. It hangs
 // off the home directory rather than off any project directory, so a
@@ -176,8 +187,27 @@ export function sameSessionId(a: unknown, b: unknown): boolean {
 // session works in. A home that is unknown, empty, relative or a network
 // share answers null, which every reader here takes as "no marker".
 export function roleBoundaryRoot(home: unknown): string | null {
-  if (typeof home !== "string" || home.trim() === "" || !isAbsolutePath(home.trim()) || namesNetworkShare(home.trim())) return null;
-  return joined(home.trim(), ".kit", "role-boundary");
+  const base = usableHome(home);
+  return base === null ? null : joined(base, ".kit", "role-boundary");
+}
+
+// The store's coordinator directory, `~/.claude/coordinator`, which holds one
+// folder per machine, or null where usableHome refuses the home. The kit
+// spells the same directory as coordinatorRoot in hooks/kit-compact-lib.js.
+export function coordinatorRoot(home: unknown): string | null {
+  const base = usableHome(home);
+  return base === null ? null : joined(base, ".claude", "coordinator");
+}
+
+// One machine folder's registry folder under the coordinator directory, which
+// holds one `<session id>.md` entry per registered session, or null where
+// coordinatorRoot answers null. The module reads no host name, so a caller
+// takes `machineFolder` from a listing of the coordinator directory. The kit
+// composes the same folder for its own machine in registryEntryPath, and
+// test/kit-compact-lib.test.js pins the two equal.
+export function machineRegistryDir(home: unknown, machineFolder: string): string | null {
+  const root = coordinatorRoot(home);
+  return root === null ? null : joined(root, machineFolder, "registry");
 }
 
 // One session's role-boundary marker in that root, or null where the id or

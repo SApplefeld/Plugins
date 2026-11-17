@@ -1,8 +1,9 @@
-// follow-ups.ts: the follow-up queue, and the documentation check that is
-// one of its three sources. Source turn-end is the follow-ups the memory
-// fork's reply lists, which the controller tick's memory drain in
-// hooks/index.ts enqueues under the owed turn's id. Source distillation is
-// the stretch fork's, enqueued at a compaction (hooks/stretch-distillation.ts).
+// follow-ups.ts: the follow-up queue, and the documentation check and the
+// registry check, which are two of its four sources. Source turn-end is the
+// follow-ups the memory fork's reply lists, which the controller tick's
+// memory drain in hooks/index.ts enqueues under the owed turn's id. Source
+// distillation is the stretch fork's, enqueued at a compaction
+// (hooks/stretch-distillation.ts).
 //
 // The queue carries what the module observed at a turn's end into the next
 // prompt's context. It is one $.store value per session, under
@@ -15,11 +16,18 @@
 // writes each one's own `outcome`, true where a tool call's path argument or
 // the reply names the subject, with a followup_outcome decision. That
 // `outcome` is the entry's field and never a decision journal outcome kind.
+// A registry check entry is the exception: it takes its outcome from whether
+// the session's registry entry exists at that turn's end.
 //
 // The documentation check reads the session's working directory at a turn's
 // end and returns one finding per plan under docs/plans/ that reads complete
 // and per scratch file under docs/, each read through the engine's $.fs
 // under the bounds stated beside its scan below.
+//
+// The registry check looks, at a turn's end of a session the launcher
+// primed, for that session's entry in a registry folder of the kit's
+// coordinator directory, and keeps one line in the queue for as long as it
+// finds none.
 //
 // No `import $` and no side effects at load. The engine's loader follows `$`
 // only into functions declared in hooks/index.ts (hooks/host.ts says why), so
@@ -29,6 +37,7 @@
 
 import { bracketSafeText, headPoints, oneLine } from "./agent-state";
 import { followUpsKey, type CommonsStore } from "./commons";
+import { coordinatorRoot, machineRegistryDir, sameSessionId, usableSessionId } from "./compaction";
 
 // The store key of one session's queue. It is spelled in hooks/commons.ts,
 // whose stale-entry collection deletes a dead session's queue with its
@@ -214,11 +223,20 @@ export function followUpActed(subject: string, toolPaths: readonly string[], rep
   return toolPaths.some((p) => followUpPathNames(subject, p)) || followUpReplyNames(subject, reply);
 }
 
+// The followup_outcome decision of one entry: its id, its source and the
+// value.
+function decideOutcome(entry: FollowUpEntry, outcome: boolean, decide: FollowUpDecide): void {
+  decide("followup_outcome", detailText(`${entry.id} source ${entry.source}: ${outcome}`));
+}
+
 // At the end of turn `turnId`: each entry that turn showed and that holds no
 // outcome yet takes one, true where its id is among `hitIds`, the entries a
 // tool call's path argument named during the turn, or the reply names its
 // subject, with a followup_outcome decision naming its id, its source and
-// the value. Answers whether any entry changed.
+// the value. A registry check entry is passed over, since neither rule says
+// whether the session's registry entry exists: registryCheckAtTurnEnd alone
+// gives it its outcome, so one decision is written for it and no more.
+// Answers whether any entry changed.
 export function settleFollowUps(
   queue: FollowUpEntry[],
   turnId: string,
@@ -228,10 +246,10 @@ export function settleFollowUps(
 ): boolean {
   let changed = false;
   for (const entry of queue) {
-    if (entry.shownTurnId !== turnId || entry.outcome !== undefined) continue;
+    if (entry.shownTurnId !== turnId || entry.outcome !== undefined || entry.source === REGISTRY_CHECK_SOURCE) continue;
     entry.outcome = hitIds.includes(entry.id) || followUpReplyNames(entry.subject, reply);
     changed = true;
-    decide("followup_outcome", detailText(`${entry.id} source ${entry.source}: ${entry.outcome}`));
+    decideOutcome(entry, entry.outcome, decide);
   }
   return changed;
 }
@@ -243,6 +261,10 @@ export const DOCS_CHECK_SOURCE = "docs-check";
 // The memory fork's follow-ups: the steps a turn promised or was asked and
 // did not do, as the fork read them from the session's transcript.
 export const TURN_END_SOURCE = "turn-end";
+
+// The registry check's one line: a session the launcher primed holds no
+// registry entry.
+export const REGISTRY_CHECK_SOURCE = "registry-check";
 
 // One entry of a listing as the engine's $.fs.list gives it: the entry's own
 // kind, a link being `other`, and a file's size in bytes.
@@ -415,7 +437,7 @@ async function planHeadOf(fs: DocsCheckFs, path: string, size: number, budget: D
 // The entries of one listing, or null where it rejected or answered with
 // something that is not a list. An entry not shaped as a listing's is left
 // out.
-async function listingOf(fs: DocsCheckFs, path: string): Promise<DocsCheckEntry[] | null> {
+async function listingOf(fs: Pick<DocsCheckFs, "list">, path: string): Promise<DocsCheckEntry[] | null> {
   let listed: unknown;
   try {
     listed = await fs.list(path);
@@ -539,4 +561,114 @@ export async function docsCheckFindings(fs: DocsCheckFs, cwd: string): Promise<F
   } catch {
     return [];
   }
+}
+
+// --- The registry check ---
+
+// The registry check's line. It is fixed and holds no id, so nothing a
+// registry folder holds reaches a prompt through it.
+const REGISTRY_CHECK_TEXT = "This session has no registry entry: no file named for its session id stands in a registry folder of the coordinator directory. The role skill's Takeover Ritual writes the entry and stamps it.";
+
+// What the check reads through: hooks/index.ts builds it over $.fs.list
+// alone, so the check can open no file.
+export type RegistryCheckFs = Pick<DocsCheckFs, "list">;
+
+// Whether a session's registry entry exists: `present`, `absent`, or
+// `unknown` where nothing could be read to say.
+export type RegistryReading = "present" | "absent" | "unknown";
+
+// Looks for the registry entry of session `sessionId` under the home
+// `home`. The module reads no host name, so it lists the coordinator
+// directory and then the registry folder of each entry there that is a
+// directory and no link. A folder whose registry folder is missing or will
+// not list is passed over. The answer is `present` where a listing holds a
+// regular file named `<id>.md` whose id is the session's under
+// sameSessionId. A link or a directory of that name is no entry, which is
+// the kind rule the kit's own readers hold an entry to. It is `absent` where
+// one registry folder or more listed and none holds such a file. It is
+// `unknown` where the id is not usable, the home composes no coordinator
+// directory, that directory will not list, no registry folder listed, or
+// anything threw. Names and kinds are all it reads: it opens no entry, and
+// its whole cost is one listing of the coordinator directory and one of each
+// registry folder under it. Never rejects.
+export async function registryEntryReading(fs: RegistryCheckFs, home: unknown, sessionId: unknown): Promise<RegistryReading> {
+  try {
+    const id = usableSessionId(sessionId);
+    const root = coordinatorRoot(home);
+    if (id === null || root === null) return "unknown";
+    const machines = await listingOf(fs, root);
+    if (machines === null) return "unknown";
+    let listedOne = false;
+    for (const machine of machines) {
+      if (machine.kind !== "dir") continue;
+      const registryDir = machineRegistryDir(home, machine.name);
+      const entries = registryDir === null ? null : await listingOf(fs, registryDir);
+      if (entries === null) continue;
+      listedOne = true;
+      if (entries.some((e) => e.kind === "file" && e.name.endsWith(".md") && sameSessionId(e.name.slice(0, -".md".length), id))) return "present";
+    }
+    return listedOne ? "absent" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+// How many of the documentation check's findings one turn end keeps, in scan
+// order. A flagged session's registry check may hold one slot of the queue,
+// so its scan is cut one short of FOLLOW_UPS_MAX and the scan and the line
+// fit the bound together. Otherwise a tree with more findings than the cut
+// would drop and re-add one entry at every turn end.
+export function followUpScanCut(flagged: boolean): number {
+  return flagged ? FOLLOW_UPS_MAX - 1 : FOLLOW_UPS_MAX;
+}
+
+// Whether the launcher primed session `sessionId`: `flag` is the plugin
+// load's own knowledge, and `kept` is the session id the launch prompt's
+// branch kept in $.state, which a reload of the plugin's code does not
+// clear. A kept value counts only where it names this session.
+export function launchPrimed(flag: boolean, kept: unknown, sessionId: unknown): boolean {
+  return flag || (typeof kept === "string" && sameSessionId(kept, sessionId));
+}
+
+// The registry check's step at the end of turn `turnId`, over the session's
+// queue. `flagged` is whether the launcher primed this session, which is
+// what makes it owe an entry: a session that is not flagged gets its queue
+// back unchanged and nothing is read. For a flagged one the reading is taken
+// once, and then:
+// - `unknown` leaves the queue's entries of this source as they stand.
+// - A line a turn showed, holding no outcome, takes one, true on `present`
+//   and false on `absent`, with its followup_outcome decision. That holds
+//   for a line an earlier turn showed whose own turn end read `unknown`.
+// - `present` takes every entry of this source out of the queue.
+// - `absent` takes out each entry of this source a turn has shown and
+//   leaves an unshown one as it stands. Where none is then left, one fresh
+//   line is enqueued through enqueueFollowUps, so it stands last and the
+//   queue's bound drops older entries before it.
+// So the line shows on every prompt that carries the block until the entry
+// exists, and a line the bound dropped returns at the next turn end that
+// reads `absent`. Answers the queue and whether it changed.
+export async function registryCheckAtTurnEnd(
+  flagged: boolean,
+  fs: RegistryCheckFs,
+  home: unknown,
+  sessionId: string,
+  queue: FollowUpEntry[],
+  turnId: string,
+  at: number,
+  decide: FollowUpDecide,
+): Promise<{ queue: FollowUpEntry[]; changed: boolean }> {
+  if (!flagged) return { queue, changed: false };
+  const reading = await registryEntryReading(fs, home, sessionId);
+  if (reading === "unknown") return { queue, changed: false };
+  const present = reading === "present";
+  for (const entry of queue) {
+    if (entry.source !== REGISTRY_CHECK_SOURCE || entry.shownTurnId === undefined || entry.outcome !== undefined) continue;
+    entry.outcome = present;
+    decideOutcome(entry, present, decide);
+  }
+  const kept = queue.filter((e) => e.source !== REGISTRY_CHECK_SOURCE || (!present && e.shownTurnId === undefined));
+  const changed = kept.length !== queue.length;
+  if (present || kept.some((e) => e.source === REGISTRY_CHECK_SOURCE)) return { queue: kept, changed };
+  const line: FollowUpInput = { source: REGISTRY_CHECK_SOURCE, subject: sessionId, text: REGISTRY_CHECK_TEXT };
+  return { queue: enqueueFollowUps(kept, [line], at, turnId, decide), changed: true };
 }

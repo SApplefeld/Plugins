@@ -199,9 +199,9 @@ import { endStretchAtCompaction, markStretchApplied, stretchInstructions, WRITER
 import { boundaryBankCompactionBoundary, boundaryKitInstallPathOf, boundaryKitMemq, boundaryKitNodeRun, firstFailureToday, MEMQ_UNAVAILABLE_LINES, type KitBoundaryDeps, type KitMemqOptions, type KitMemqResult } from "./memq-boundary";
 import { emitGoalDiff, emitGoalDiffFrom, emitKitEvent, followKitEventsOwner, newKitEventsState, type KitEventDeps } from "./kit-events";
 // The follow-up queue a turn's end fills and the next prompt's context
-// lists, and its three sources: the documentation check, the memory fork and
-// the stretch fork.
-import { docsCheckFindings, enqueueFollowUps, markFollowUpsShown, readFollowUps, settleFollowUps, unshownFollowUps, writeFollowUps, followUpId, followUpPathNames, FOLLOW_UPS_MAX, type DocsCheckFs, type FollowUpDecide, type FollowUpEntry } from "./follow-ups";
+// lists, and its four sources: the documentation check, the memory fork, the
+// stretch fork and the registry check.
+import { docsCheckFindings, enqueueFollowUps, markFollowUpsShown, readFollowUps, registryCheckAtTurnEnd, settleFollowUps, unshownFollowUps, writeFollowUps, followUpId, followUpPathNames, followUpScanCut, launchPrimed, type DocsCheckFs, type FollowUpDecide, type FollowUpEntry, type RegistryCheckFs } from "./follow-ups";
 import { skillPickPrompt, skillPickStart } from "./skill-pick";
 // The compaction veto's rule, the release marker reads behind it, and the
 // texts the skip and the reminder render.
@@ -471,6 +471,14 @@ function docsCheckFsOf(dp: any): DocsCheckFs {
   };
 }
 
+// Adapter: the one $.fs call hooks/follow-ups.ts's registry check reads
+// through, a listing and no read, built here for the reason docsCheckFsOf is.
+function registryCheckFsOf(dp: any): RegistryCheckFs {
+  return {
+    list: (path: string) => dp.fs.list(path),
+  };
+}
+
 // Adapter: the four $.fs calls the compaction veto's marker reads make,
 // built here for the reason docsCheckFsOf is: `$` never crosses an import.
 function compactionFsOf(dp: any): CompactionFs {
@@ -485,22 +493,50 @@ function compactionFsOf(dp: any): CompactionFs {
 /**
  * turn.complete's half of the queue, at the end of turn `turnId`, which
  * answered `reply` and during which a main-loop tool call's path argument
- * named the entries `hitIds`. First the documentation check reads the
- * working directory $.session.cwd() names, its findings cut to the queue's
- * FOLLOW_UPS_MAX in scan order, so one scan never holds more than the queue
- * does and a tree with more findings does not drop and re-add entries at
- * every turn end. Then the queue is read once: each entry this turn showed
- * takes its outcome where it holds none, each finding the queue does not
- * hold is appended, the bound applies, and the queue is written once where
- * anything changed. The scan runs ahead of the read, so its reads widen no
- * window. The queue holds no lock, so a turn.start's write landing between
- * this read and this write is lost. Runs in a claimed and an unclaimed
- * session alike, since it reads the working tree and writes only the
- * session's own key. Every call sits behind a catch: a failed scan finds
- * nothing, and a failed read settles and adds nothing. Never rejects.
+ * named the entries `hitIds`. The session is flagged where the launcher
+ * primed it: `primedByLauncher` is this load's own flag, and where it is
+ * false the session id the launch prompt's branch kept in $.state under
+ * launchPrimedSession flags it when it names this session, so a reload of
+ * the plugin's code keeps the flag. A failed $.state read flags nothing.
+ * Then the documentation check reads the working directory
+ * $.session.cwd() names, its findings cut in scan order to the queue's
+ * FOLLOW_UPS_MAX, or one short of it for a flagged session, whose registry
+ * check line may hold a slot. So one scan and that line never hold more than
+ * the queue does, and a tree with more findings does not drop and re-add
+ * entries at every turn end. Then the queue is read once: each entry this
+ * turn showed takes its outcome where it holds none, each finding the queue
+ * does not hold is appended, and the bound applies. Last the registry check
+ * runs for a flagged session: it looks for the session's registry entry
+ * under the home the host reads and keeps its one line in the queue while
+ * it finds none. The queue is written once where anything changed. The scan
+ * runs ahead of the read, so its reads widen no window, while the registry
+ * check's listings run between the read and the write. The queue holds no
+ * lock, so a turn.start's write landing between this read and this write is
+ * lost. Runs in a claimed and an unclaimed session alike, since it reads the
+ * working tree and the registry's names and writes only the session's own
+ * key. Every call sits behind a catch: a failed scan finds nothing, a failed
+ * read settles and adds nothing, and a home that cannot be read leaves the
+ * registry check's line as it stands. Never rejects.
  */
-async function followUpsAtTurnEnd(dp: any, turnId: string, reply: string, hitIds: readonly string[]): Promise<void> {
+async function followUpsAtTurnEnd(dp: any, turnId: string, reply: string, hitIds: readonly string[], primedByLauncher: boolean): Promise<void> {
   if (!meterSessionKnown(sess.mySessionId)) return;
+  let kept: unknown;
+  if (!primedByLauncher) {
+    try {
+      kept = (await dp.state.get({ plugin: "personas", key: "launchPrimedSession" })).value;
+    } catch {
+      kept = undefined;
+    }
+  }
+  const flagged = launchPrimed(primedByLauncher, kept, sess.mySessionId);
+  let home: unknown;
+  if (flagged) {
+    try {
+      home = await hostOf(dp).getHome();
+    } catch {
+      home = undefined;
+    }
+  }
   let findings: Awaited<ReturnType<typeof docsCheckFindings>> = [];
   try {
     const cwd = await dp.session.cwd();
@@ -508,7 +544,7 @@ async function followUpsAtTurnEnd(dp: any, turnId: string, reply: string, hitIds
   } catch {
     findings = [];
   }
-  findings = findings.slice(0, FOLLOW_UPS_MAX);
+  findings = findings.slice(0, followUpScanCut(flagged));
   const store = commonsStoreOf(dp);
   const read = await readFollowUps(store, sess.mySessionId);
   if (read === null) return;
@@ -522,6 +558,9 @@ async function followUpsAtTurnEnd(dp: any, turnId: string, reply: string, hitIds
     queue = enqueueFollowUps(queue, fresh, Date.now(), turnId, pushFollowUpDecision);
     changed = true;
   }
+  const checked = await registryCheckAtTurnEnd(flagged, registryCheckFsOf(dp), home, sess.mySessionId, queue, turnId, Date.now(), pushFollowUpDecision);
+  queue = checked.queue;
+  changed = changed || checked.changed;
   if (changed) await writeFollowUps(store, sess.mySessionId, queue);
 }
 
@@ -4324,6 +4363,16 @@ export const register: Register = async (on, options) => {
   // shouldn't have (only the real hook, seeing the actual marker, ever
   // sets this true).
   let isPrimingTurn = false;
+  // Whether the supervisor's launch prompt reached this session: set by the
+  // real prompt.submit hook where it keeps that prompt, and never cleared.
+  // The launch prompt tells the session to take a seat, so a session that
+  // read it owes a registry entry, and the registry check at each turn end
+  // runs only for such a session. A reload of the plugin's code starts this
+  // flag false, so the same branch also keeps the session's id in $.state
+  // under launchPrimedSession, and the turn end counts the session as
+  // flagged where that kept id names it. The kept launch text is never read
+  // for this, since it outlives the session that wrote it.
+  let primedByLauncher = false;
   // Steer 68/69: whether the real prompt.submit hook (a genuine external
   // turn) just saw e.origin.kind === "channel" - a message that arrived
   // through the Discord relay, as opposed to the keyboard, an SDK caller,
@@ -8176,10 +8225,16 @@ export const register: Register = async (on, options) => {
       // text. This runs before the reader return below, since a reader session
       // holds its role as an owner does.
       if (fromSupervisor && e.text.startsWith("[SUPERVISOR-PRIMING]")) {
+        primedByLauncher = true;
         try {
           await $.state.set({ plugin: "personas", key: "launchInstructions" }, keptText);
         } catch {
           // $.state unavailable; a compaction repeats nothing from this prompt
+        }
+        try {
+          if (meterSessionKnown(sess.mySessionId)) await $.state.set({ plugin: "personas", key: "launchPrimedSession" }, sess.mySessionId);
+        } catch {
+          // $.state unavailable; a reload of the plugin's code drops the flag
         }
       }
       lastPromptWasChannelOrigin = originKind === "channel";
@@ -8600,7 +8655,7 @@ export const register: Register = async (on, options) => {
         promotePlanTouchingRecord: (editedPaths, coordinator, architect, newerTurnStarted) => promotePlanTouchingRecord($, editedPaths, coordinator, architect, newerTurnStarted),
         closeTurnRecordAtTurnEnd: (activeGoal, closingText, askedText, activityText, endedOnLead, readLiveAgent, newerTurnStarted, mode, live, budget) => closeTurnRecordAtTurnEnd($, activeGoal, closingText, askedText, activityText, endedOnLead, readLiveAgent, newerTurnStarted, mode, live, budget),
         answerMemoryCheck: (goalId, goalIds, answer) => answerMemoryCheck($, goalId, goalIds, answer),
-        followUpsAtTurnEnd: (turnId, reply, hitIds) => followUpsAtTurnEnd($, turnId, reply, hitIds),
+        followUpsAtTurnEnd: (turnId, reply, hitIds) => followUpsAtTurnEnd($, turnId, reply, hitIds, primedByLauncher),
         liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt,
         steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns,
         compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget,

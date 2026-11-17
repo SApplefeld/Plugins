@@ -8,6 +8,9 @@
 // sees a moved cwd. launchInstructions is the whole text of the latest
 // [SUPERVISOR-PRIMING] prompt the supervisor wrote with the sdk origin,
 // which session.compact repeats directly after a compaction's summary.
+// launchPrimedSession is the session id that prompt reached, which the
+// registry check reads at a turn end so a reload of the plugin's code keeps
+// the session flagged.
 // compactionVerdicts is the compaction pass's verdict cache, one entry per
 // tool result judged this session, by tool_use_id: the verdict the pass
 // applies, the option Jev answered, and whether the stamp fell on the
@@ -21,6 +24,7 @@ declare module "claude-code" {
     "personas": {
       memqLaunchDir: string;
       launchInstructions: string;
+      launchPrimedSession: string;
       compactionVerdicts: Record<string, { verdict: "keep" | "cut" | "drop"; answered: string; holdout: boolean }>;
       recognitionNudgeMarker: { fired: Record<string, 1>; firedDispatch: Record<string, 1>; windowStart: number; windowCount: number; promptStart: number; promptCount: number };
     };
