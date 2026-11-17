@@ -80,30 +80,93 @@
 // call. A call with no working directory skips the directory test, and its -F
 // file cannot be read.
 //
-// Every heredoc body is searched as command text, on a PowerShell call too,
-// where the lexer reads no <# block comment as a comment. The gate reads a
-// command a second time, as bash reads comments and heredoc bodies, where the
-// first reading allowed it and it holds a # or a <, and refuses on either
-// reading. The search
-// reads each { and } outside quotes as a ;, so a git word opening a PowerShell
-// script block stands in command position.
+// A heredoc body on a Bash call is data, blanked out of the search, where the
+// lexer's dataBodies reads it so by its six tests. Test 6 is the rule: the
+// whole call is exactly one sink heredoc command, its intro line, its body
+// and its terminator, with nothing before the intro and only blank lines
+// after the terminator. A runner in the same call can execute a body by
+// means no name list closes, source, a run by path, exec, at, a quoted shell
+// name or a sink shadowed by a function among them, which is why only a lone
+// sink call's body is data. A script a lone sink call writes and a later
+// call runs is the gate's declared residual. Tests 1 to 5 are fail-closed
+// preconditions that never widen what test 6 admits: the delimiter is
+// quoted and plain, letters, digits, underscore, dot and hyphen alone
+// between its quotes, so the line the lexer ends the body at and the line
+// bash ends it at are one, where bash strips the backslash in <<"E\\OF"
+// and ends that body a line before the lexer does; the intro line parses
+// clean, carrying no pipe, separator, subshell or brace group,
+// substitution, further input redirect, descriptor dup, word-start
+// comment, second heredoc or continuation, and holds no $ directly before
+// a quote, since bash reads $'...' as an ANSI-C quote whose \' escapes a
+// quote the lexer reads as closing, so the two can disagree on whether the
+// line's << is a heredoc at all; the first word, as written, is the
+// bare name of a sink on the closed list cat, tee, gh (with issue, pr or
+// api) or memq, each a command that stores, forwards or ignores its standard
+// input and runs none of it; no name on the lexer's closed executor list stands in
+// command position anywhere outside a body, a substitution interior
+// included; and no unquoted heredoc introduction stands outside a quoted
+// body on the masked copy, since the lexer reads no unquoted body and would
+// find a quoted introduction inside one as a fresh body. A command holding a
+// NUL byte has no data body, since bash drops the byte where it reads the
+// command through a substitution and can end a body the lexer runs on. Every
+// other body is searched as command text. A PowerShell call has no heredoc,
+// so no body in one is data, and the lexer reads no <# block comment as a
+// comment there.
+// The gate reads a command a second time, as bash reads comments and heredoc
+// bodies, where the first reading allowed it and it holds a # or a <, and
+// refuses on either reading. A data body is blanked under each reading, and
+// under a reading only where that reading holds the same body: the range
+// dataBodies returned is one of the reading's own heredoc bodies, and its
+// text stands unchanged where the reading's splice put it. Elsewhere nothing
+// is blanked, and the body is searched as command text under that reading. A
+// heredoc fault under either reading refuses the command before any body is
+// blanked. The search reads each { and } outside quotes as a ;, so a git word
+// opening a PowerShell script block stands in command position. The fixtures
+// that bound the rule: 0050, 0052, 0077, 0091 and 0134 pass a body that is
+// data; 0051, 0054, 0075, 0087, 0093 and 0139 keep a body fed to a shell or
+// an interpreter command text, 0071, 0072 and 0136 one whose intro line
+// carries a pipe or a separator, 0080 and 0083 one xargs or a while loop
+// consumes, 0073, 0084, 0085 and 0138 one beside a bash, a trap, a
+// backgrounded bash -c or a node in the same call, 0135 one with an echo
+// after its terminator, 0137 one whose delimiter is unquoted, 0076, 0086 and
+// 0092 one in a call that also introduces an unquoted heredoc, 0162 one
+// whose intro line carries an ANSI-C quote, 0165 one whose ANSI-C quote
+// opens after a continuation, 0163 one fed to ., which is no sink, 0164 one
+// behind a cat function defined ahead of the intro, 0166 one whose body
+// holds a NUL byte inside a terminator, 0098 one on a PowerShell call, and
+// 0133 one fed to git itself. 0099, whose intro line
+// carries a process substitution after the delimiter, and 0150, 0151 and
+// 0153, whose delimiter is not plain, are refused as heredoc faults before
+// any body is read.
 //
 // The lone rule costs false refusals, by design, since a shape the lexer could
 // misread fails closed rather than open. Any chain, pipeline, wrapper,
 // redirect or heredoc beside a git add, commit or push refuses, cd sub && git
 // commit included: run each git step as its own call, and write git -C sub in
-// place of the cd. A heredoc writing a document whose prose holds a git add,
-// commit or push refuses too, since its body is read as command text: write
-// the document with the Write tool, and run the git step on its own with
-// git -C where it needs a directory. A heredoc whose delimiter word holds a
+// place of the cd. A heredoc whose body is not data, one fed to a shell or an
+// interpreter, consumed by a loop or xargs, unquoted, on an intro line
+// carrying an excluded construct, in a call that also introduces an
+// unquoted heredoc, or in a call holding any text before its intro or after
+// its terminator, is read as command text, so prose in it naming a git add,
+// commit or push refuses: write the document with the Write tool, or feed it
+// to a sink on the list in a call of its own, and run the git step on its
+// own with git -C where it needs a directory. A heredoc whose delimiter word
+// holds a
 // quote or a backslash and is not plain, one word of [A-Za-z0-9_.-]+ inside
 // one pair of quotes or after one backslash, refuses naming the word before
 // any body is read, since bash removes quotes and backslashes from a
 // delimiter where the gate compares the raw token, and a terminator line the
 // two read differently puts the git lines inside the gate's body or inside a
-// quote span a stray quote opens. Where the body names a git add and a git
-// commit, or a git commit and a git push, the chain refusal answers first with
-// its own advice, and the Write tool is still the way around it. A git with no
+// quote span a stray quote opens. Where a body that is not data names a git
+// add and a git commit, or a git commit and a git push, the chain refusal
+// answers first with its own advice, and the Write tool is still the way
+// around it. A command after a terminator makes the call more than the
+// sink, so a git push in a body with an echo on the line after it refuses as
+// compound. A terminator line carrying leading or trailing spaces is body
+// text to bash and to the lexer alike, so the body runs on to the next line
+// that is the delimiter alone. Where no such line follows, the body has no
+// terminator and test 6 refuses it, a false refusal and never a leak: spell
+// the terminator alone on its line. A git with no
 // subcommand word inside a compound command refuses as compound too,
 // git --version && node -v included, and so does a bare git word standing as
 // an operand, as in which git, since the lexer reads it as a git call with no
@@ -136,7 +199,9 @@
 // read-only guard also leaves a miss, since the lexer finds git only where
 // its name stands unquoted and whole: a quoted name ("git" add . or
 // 'git' add .), a name split by an empty quote or an escape (g''it add . or
-// gi\t add .), a name a variable supplies (G=git; $G add .), and on a
+// gi\t add .), a name split or ended by a NUL byte, which bash drops where it
+// reads the command through a substitution (git<NUL> add .), a name a
+// variable supplies (G=git; $G add .), and on a
 // PowerShell call a quoted path after the call operator
 // (& "C:\Program Files\Git\cmd\git.exe" add .); a git alias defined outside
 // the command line, in a config file or through GIT_CONFIG_PARAMETERS or
@@ -168,7 +233,7 @@
 
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
-  CONTINUATION_CAP_ADVICE, GIT_VALUE_FLAGS, IN_WORD_PAIR_CAP, commandPositions, delimiterAdvice, delimiterWhat, exactReadingDiffers, heredocBodies, heredocWalk,
+  CONTINUATION_CAP_ADVICE, GIT_VALUE_FLAGS, IN_WORD_PAIR_CAP, commandPositions, dataBodies, delimiterAdvice, delimiterWhat, exactReadingDiffers, heredocBodies, heredocWalk,
   maskExact, maskQuoted, memoized, nestedPayloads, offendingDelimiter, readUnderContinuations, resolveTarget, segment, spliceContinuations,
   tokens, type DelimiterFault, type LexHost, type VerdictMemo,
 } from "./readonly-agent";
@@ -694,27 +759,63 @@ function gitCallAt(cmd: string, masked: string, at: number, depth: number, power
 // returned the same way; otherwise the walk's data and live bodies,
 // continuations spliced outside the data bodies, a live body's among them
 // since bash removes them as it reads the body, then `maskExact`, which reads
-// a word-start # as a comment and a body's quotes as bytes. A heredoc body
-// stays command text under either reading. The splice reads the reading's
+// a word-start # as a comment and a body's quotes as bytes. The splice reads
+// the reading's
 // own quote mask of the text as handed in, so a pair inside a single-quoted
 // span stays as typed. `join` and `boundary` are the splice's reading of this
 // text, as `spliceContinuations` takes them; the joined readings shorten the
 // text, so the data spans come back shifted and the live spans are read
 // through the splice's map onto it.
-function maskOf(cmd: string, subs: Span[], join: boolean, boundary: number, exact: boolean): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
+//
+// Where `data` is set, each body the lexer's dataBodies reads as data is
+// then blanked to spaces in the masked copy under either reading, through
+// `blankData`, so the git-word search and the nested-payload read see
+// nothing in it; a substitution opener inside a body the reading holds is
+// data the mask never collects. Every other body stays command text, and a
+// heredoc fault returns before any body is blanked. `data` is set only at
+// the top level of a Bash call. A PowerShell call has no heredoc, so every
+// body-shaped range in one stays command text. Below the top level the text
+// is a payload some executor was handed, and what consumes that executor's
+// own output sits in the command around it, out of this string (sh -c "cat
+// <<'EOF' ... EOF" | sh runs the body while the payload alone reads as a
+// sink copying stdin), so no body there is data.
+function maskOf(cmd: string, subs: Span[], join: boolean, boundary: number, exact: boolean, data: boolean): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
   if (exact) {
     const walk = heredocWalk(cmd, "", true);
     if (walk.fault !== null) return { cmd, masked: cmd, delimiter: walk.fault };
     const joined = spliceContinuations(cmd, walk.data, maskExact(cmd, walk.data, walk.live), join, boundary);
     const live = walk.live.map(s => ({ from: joined.at(s.from), to: joined.at(s.to) }));
-    return { cmd: joined.cmd, masked: maskExact(joined.cmd, joined.bodies, live, subs), delimiter: null };
+    const masked = maskExact(joined.cmd, joined.bodies, live, subs);
+    return { cmd: joined.cmd, masked: data ? blankData(cmd, walk.data, joined, masked) : masked, delimiter: null };
   }
   const bare = maskQuoted(cmd);
   const delimiter = offendingDelimiter(cmd, bare);
   if (delimiter !== null) return { cmd, masked: cmd, delimiter };
   const bodies = heredocBodies(cmd, bare);
   const joined = spliceContinuations(cmd, bodies, maskQuoted(cmd, bodies), join, boundary);
-  return { cmd: joined.cmd, masked: maskQuoted(joined.cmd, joined.bodies, subs), delimiter: null };
+  const masked = maskQuoted(joined.cmd, joined.bodies, subs);
+  return { cmd: joined.cmd, masked: data ? blankData(cmd, bodies, joined, masked) : masked, delimiter: null };
+}
+
+// The masked copy of one reading with each data body of `cmd` blanked to
+// spaces. `own` are the heredoc bodies the reading found on `cmd` and
+// spliced by, `joined` its splice, whose bodies answer `own` index for
+// index, and `masked` the reading's mask of the spliced text. A range
+// dataBodies returns is blanked only where it is one of `own`, start and
+// end alike, and the spliced text over the range the splice mapped it to is
+// the body's text unchanged. A reading that holds no such body, or whose
+// splice moved text inside it, keeps the body as command text and searches
+// it.
+function blankData(cmd: string, own: readonly Span[], joined: { cmd: string; bodies: readonly Span[] }, masked: string): string {
+  const spans = dataBodies(cmd);
+  if (spans.length === 0) return masked;
+  const chars = masked.split("");
+  for (const d of spans) {
+    const to = joined.bodies[own.findIndex((b) => b.from === d.from && b.to === d.to)];
+    if (to === undefined || joined.cmd.slice(to.from, to.to) !== cmd.slice(d.from, d.to)) continue;
+    for (let i = to.from; i < to.to; i++) chars[i] = " ";
+  }
+  return chars.join("");
 }
 
 // What one text's read finds: its git calls, or the heredoc fault that ended
@@ -754,7 +855,7 @@ async function gitCallsOf(cmd: string, masked: string, subs: readonly Span[], de
       exact,
       (t, join, boundary) => {
         const innerSubs: Span[] = [];
-        const read = maskOf(t, innerSubs, join, boundary, exact);
+        const read = maskOf(t, innerSubs, join, boundary, exact, false);
         if (read.delimiter !== null) return { calls: [], delimiter: read.delimiter, capped: false };
         return gitCallsOf(read.cmd, read.masked, innerSubs, depth + 1, powershell, exact, memo);
       },
@@ -830,7 +931,7 @@ async function loneReason(call: GitCall, cwd: string | null, host: () => Promise
 // unread. `memo` is the call's, holding each nested text's read.
 async function gateReason(cmd: string, cwd: string | null, powershell: boolean, join: boolean, boundary: number, exact: boolean, host: () => Promise<LexHost>, io: GateIo, memo: VerdictMemo): Promise<string | null> {
   const subs: Span[] = [];
-  const read = maskOf(cmd, subs, join, boundary, exact);
+  const read = maskOf(cmd, subs, join, boundary, exact, !powershell);
   if (read.delimiter !== null) return delimiterRefusal(read.delimiter, io);
   const calls = await gitCallsOf(read.cmd, read.masked, subs, 0, powershell, exact, memo);
   if (calls.delimiter !== null) return delimiterRefusal(calls.delimiter, io);

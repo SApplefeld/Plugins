@@ -7925,7 +7925,7 @@ export const register: Register = async (on, options) => {
       try { refusal = toolCallRefusal(e, next.budget?.remainingMs ?? Infinity); } catch { return withheldToolResult(); }
       // A memq command's --body-file is read and scanned; a file it cannot read, or a command ending inside an open quote or block comment, is refused with its cause named.
       if (refusal === null) {
-        try { refusal = await bodyFileRefusal(e, { read: (p) => $.fs.read(p) }, next.budget?.remainingMs ?? Infinity); } catch { return withheldToolResult(); }
+        try { refusal = await bodyFileRefusal(e, { read: (p) => $.fs.read(p), cwd: () => guardCwdOf($), lexHost: () => guardLexHostOf($) }, next.budget?.remainingMs ?? Infinity); } catch { return withheldToolResult(); }
       }
       if (refusal !== null) return { deny: refusal };
     }
@@ -8109,7 +8109,7 @@ export const register: Register = async (on, options) => {
       let refusal: string | null;
       try { refusal = toolCallRefusal(e, next.budget.remainingMs); } catch { return withheldToolResult(); }
       if (refusal === null) {
-        try { refusal = await bodyFileRefusal(e, { read: (p) => $.fs.read(p) }, next.budget.remainingMs); } catch { return withheldToolResult(); }
+        try { refusal = await bodyFileRefusal(e, { read: (p) => $.fs.read(p), cwd: () => guardCwdOf($), lexHost: () => guardLexHostOf($) }, next.budget.remainingMs); } catch { return withheldToolResult(); }
       }
       if (refusal !== null) return { deny: refusal };
     }

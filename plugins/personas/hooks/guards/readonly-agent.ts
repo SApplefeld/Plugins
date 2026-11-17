@@ -1023,7 +1023,9 @@ export const QUOTED_HEREDOC_INTRO = String.raw`(?<!<)<<(-?)[ \t]*(?:'([^'\n]*)'|
 // run.
 //
 // This finds the bodies of the legacy reading, kept byte for byte, and serves
-// the legacy pass alone. The exact reading's bodies come from `heredocWalk`
+// the legacy pass and `dataBodies`, which decides on these ranges which
+// bodies are data and calls `offendingDelimiter` first, as every guard does.
+// The exact reading's bodies come from `heredocWalk`
 // below, which reads one forward mask that honors each body as the walk
 // passes it, so the two readers it replaces cannot disagree, and which reads a
 // word-start `#` as a comment and an unquoted body as a live range.
@@ -3270,9 +3272,192 @@ export function nestedPayloads(cmd: string, masked: string): string[] {
   return out;
 }
 
-// Every command name a heuristic in this file scans for, assembled from the lists
-// those heuristics use so a name cannot be governed by one and unknown to the
-// splice check below. The literals are the names the heuristics spell inline.
+// The commands a quoted-delimiter heredoc body is data to: each stores,
+// forwards or ignores its standard input and runs none of it. Membership is by bare
+// name and never by what a command does, so a fifth sink joins by amending
+// this list, never by a reading of the command.
+export const DATA_SINKS = ['cat', 'tee', 'gh', 'memq'];
+
+// The names whose presence in command position anywhere outside a heredoc
+// body keeps every body command text: the nested executors above, which run
+// text handed to them; trap, whose quoted argument is a command the shell
+// runs later, so a trap set ahead of a heredoc write of x.sh is a deferred
+// run; the remote and other shells; and the interpreters a body is a program
+// to. Membership is by name, so an unlisted program that runs its argument,
+// awk or make among them, does not keep a body command text.
+export const DATA_BODY_EXECUTORS = [...NESTED_EXECUTORS, 'trap', 'wsl', 'ssh', 'tcsh', 'csh', 'ksh', 'fish',
+  'python', 'python3', 'py', 'node', 'deno', 'bun', 'perl', 'ruby', 'php'];
+
+// A heredoc introduction whose delimiter is not quoted, as it stands on a
+// masked copy: a << that is not part of a <<< here-string, its optional dash
+// and spacing, then anything but a quote. The quote characters of a quoted
+// delimiter survive masking, since maskQuoted blanks only a span's interior,
+// so <<'EOF' and <<"EOF" match nothing here while <<EOF, <<\EOF and <<$'EOF'
+// each do. The last two are quoted to bash and not to heredocBodies, so their
+// bodies are text the lexer reads as command text, where a quoted
+// introduction would be found as a fresh body.
+const UNQUOTED_INTRO = /(?<!<)<<(?!<)-?[ \t]*(?!['"])/;
+
+// The ranges of the heredoc bodies that are data: text the shell hands to a
+// command that only stores it, in a call that is that one command alone. The
+// rule is test 6, the lone sink call, and tests 1 to 5 are fail-closed
+// preconditions that never widen what it admits. A runner in the same call
+// can execute a body by means no name list closes: source, ., a run by path,
+// exec, at, a quoted shell name, a sink shadowed by a function, or a group
+// piped into a read loop. So only a lone sink call's body is data, and a
+// script a lone sink call writes and a later call runs is the gate's declared
+// residual. Each test is stated below as its own step, and any reading a test
+// cannot settle leaves the body command text. The reading is exported so
+// every guard that decides a body by what consumes it reads this one, the
+// commit gate blanking these ranges out of its search. No guard reads what an
+// interpreter does with its input, so a python3, node or bash heredoc stays
+// command text, as does a body written beside a deferred run through trap or
+// a backgrounded shell, and an unquoted heredoc, which the shell expands. A
+// quoted delimiter that is not plain, one holding a backslash, a dollar
+// sign, an inner quote or any other character off PLAIN_DELIMITER_CLASS,
+// keeps its body command text too, since bash may end that body at a line
+// the lexer still reads as body and run the lines after it: with
+// <<"E\\OF" bash ends the body at the line E\OF while heredocBodies, which
+// reads the token raw, ends it at E\\OF, a line later. A command carrying
+// any heredoc fault `offendingDelimiter` names, that delimiter among
+// them, has no data body at all. A
+// <<\EOF delimiter is quoted to bash and not to heredocBodies, so that body
+// stays command text as well, and so does one whose intro line holds a $
+// directly before a quote, since the lexer decodes no ANSI-C quote and bash
+// may read that line's << as quoted text. The read-only guard's own heredocExemption is a
+// different rule, which admits one body on its destination, and is neither
+// widened nor read here.
+export function dataBodies(cmd: string): Span[] {
+  // 1. The delimiter is quoted and plain. Quoted is what heredocBodies already
+  //    requires: only the <<'EOF' and <<"EOF" spellings yield a body, each of
+  //    which disables expansion and substitution in it. Plain is checked per
+  //    body below, once parseIntro has read the token, so it is taken from
+  //    that parse and never from a second regex over the raw command. A
+  //    command `offendingDelimiter` refuses is one whose bodies the lexer and
+  //    bash may start or end at different lines, so no body in it is data.
+  //    Nor is a body in a command holding a NUL byte: bash drops the byte
+  //    where it reads the command through a substitution, so a body line
+  //    the lexer reads as EO<NUL>F ends bash's body there.
+  if (cmd.includes('\0')) return [];
+  const bare = maskQuoted(cmd);
+  if (offendingDelimiter(cmd, bare) !== null) return [];
+  const bodies = heredocBodies(cmd, bare);
+  if (bodies.length === 0) return [];
+  // 6, settled early. Test 6 admits only a call holding exactly one body, so
+  //    a call holding more has no data body and the whole-command reads below
+  //    are not made.
+  if (bodies.length !== 1) return [];
+  // The texts the two whole-command tests below read: the masked copy, built
+  // in the order the guards build theirs with every body then blanked, so a
+  // quoted name matches nothing and a name inside a body is the data it is,
+  // and each substitution interior, masked on its own to any depth, since the
+  // shell runs $(bash x.md) and <(bash x.md) as surely as a bare bash x.md
+  // and maskQuoted blanks each span whole out of the copy it returns. The
+  // splice is the two-space reading, which keeps every index, so a span
+  // found on `cmd` holds on the spliced copy.
+  const spliced = spliceContinuations(cmd, bodies, maskQuoted(cmd, bodies), false).cmd;
+  const subs: Span[] = [];
+  const chars = maskQuoted(spliced, bodies, subs).split('');
+  for (const b of bodies) for (let i = b.from; i < b.to; i++) chars[i] = ' ';
+  const texts = [chars.join('')];
+  const pending = subs.map(s => spliced.slice(s.from, s.to));
+  while (pending.length > 0) {
+    const text = pending.pop() as string;
+    const inner: Span[] = [];
+    texts.push(maskQuoted(text, undefined, inner));
+    pending.push(...inner.map(s => text.slice(s.from, s.to)));
+  }
+  // 4. No name on the executor list stands in command position anywhere in the
+  //    command outside a body. One executor anywhere keeps every body command
+  //    text, since what it runs may be a file a sink wrote from one of them.
+  if (texts.some(t => commandPositions(t, DATA_BODY_EXECUTORS).length > 0)) return [];
+  // 5. No unquoted heredoc introduction stands outside a quoted body on the
+  //    masked copy. The shell reads an unquoted heredoc's body to its own
+  //    terminator, and heredocBodies does not read that body at all, so a
+  //    quoted introduction standing inside it is found as a fresh body whose
+  //    range runs past the point where the shell is running commands again.
+  //    No extent of an unquoted body is read here: one unquoted introduction
+  //    anywhere keeps every body command text, and the same rule holds in a
+  //    substitution interior, where the shell reads the body across the
+  //    closing parenthesis the lexer stops at.
+  if (texts.some(t => UNQUOTED_INTRO.test(t))) return [];
+  const out: Span[] = [];
+  for (const b of bodies) {
+    // 2. The intro line, the logical line ending where the body starts, parses
+    //    through parseIntro with its blocked flag clear, so none of that
+    //    parser's excluded constructs stands on it: a pipe, a separator, a
+    //    subshell or brace group, a command or process substitution, an input
+    //    redirect that is not the heredoc, a descriptor dup, a word-start
+    //    comment, a second heredoc or a backslash continuation. The line
+    //    starts where the spliced copy's last newline ahead of the body says
+    //    it does, so the shell's own line is read, and a continuation that
+    //    joined physical lines into it is the newline the raw slice still
+    //    holds. A line parseIntro cannot parse at all is left command text
+    //    the same way.
+    const lineStart = spliced.lastIndexOf('\n', b.from - 2) + 1;
+    const intro = cmd.slice(lineStart, b.from - 1);
+    if (intro.includes('\n')) continue;
+    // 2, continued. No $ stands directly before a quote on that line. bash
+    //    reads $'...' as an ANSI-C quote, where \' is an escaped quote and the
+    //    string runs on, while parseIntro and the quote masks end it at that
+    //    quote. The quotes after it then pair off differently in the two
+    //    readings, so a << the lexer reads as a heredoc can be quoted text to
+    //    bash, which runs the lines the lexer took for a body. No escape is
+    //    decoded here: the $ before either quote, $"..." included, leaves the
+    //    body command text.
+    if (/\$['"]/.test(intro)) continue;
+    const parsed = parseIntro(intro);
+    if (parsed === null || parsed.blocked) continue;
+    // 1, continued. The delimiter token parseIntro read between its quotes
+    //    matches PLAIN_HEREDOC_DELIMITER whole, so the spelling heredocBodies ended
+    //    the body at and the spelling bash ends it at are one string. A token
+    //    carrying a backslash, a dollar sign, an inner quote or any other
+    //    character leaves the body command text: for <<"E\\OF" bash ends
+    //    the body at E\OF and runs the lines after it, which heredocBodies
+    //    read as body.
+    if (parsed.heredoc === null || !PLAIN_HEREDOC_DELIMITER.test(parsed.heredoc.delim)) continue;
+    // 3. The first word, as parseIntro's stream yields it, is unquoted and is
+    //    exactly one bare name on the sink list: a path such as /usr/bin/cat,
+    //    an assignment prefix, a wrapper such as sudo, env or command ahead of
+    //    it, and node memq.js all leave the body command text. For gh the
+    //    second word is issue, pr or api, the three subcommands the kit feeds a
+    //    body to, so gh alias and gh extension exec leave it command text.
+    //    The name is compared as written: the line's raw first word, up to a
+    //    space, a tab or a redirect, is the word the stream yields, so a name
+    //    carrying a backslash, \cat or c\at, which parseIntro reads with the
+    //    backslash dropped, leaves the body command text.
+    const [owner, second] = parsed.stream;
+    const raw = (/^[ \t]*([^ \t<>]*)/.exec(intro) as RegExpExecArray)[1];
+    if (owner === undefined || owner.type !== 'word' || owner.quoted || owner.text !== raw || !DATA_SINKS.includes(owner.text)) continue;
+    if (owner.text === 'gh' && (second === undefined || second.type !== 'word' || second.quoted
+      || !['issue', 'pr', 'api'].includes(second.text))) continue;
+    // 6. The whole call is exactly this one sink heredoc command, so the shell
+    //    runs the sink and nothing else: it is the only body, nothing but
+    //    blanks stands before its intro line, the line heredocBodies ended
+    //    the body at is its terminator, and nothing but blank lines or a
+    //    trailing newline follows that line. A blank is what bash reads as
+    //    one, a space, a tab or a newline, so a no-break space, a form feed
+    //    or a carriage return is text. Any other text before the intro
+    //    or after the terminator, a comment included, leaves the body command
+    //    text, and the intro line's own constructs are test 2's. A body with
+    //    no terminator ends at the end of the command, where no line stands,
+    //    so it is left command text the same way. The only-body clause is
+    //    settled by the early return after heredocBodies above.
+    if (/[^ \t\n]/.test(cmd.slice(0, lineStart))) continue;
+    const tail = cmd.slice(b.to);
+    const termEnd = tail.indexOf('\n');
+    const terminator = termEnd < 0 ? tail : tail.slice(0, termEnd);
+    if (terminator.trim() === '' || /[^ \t\n]/.test(tail.slice(terminator.length))) continue;
+    out.push(b);
+  }
+  return out;
+}
+
+// Every command name one of the read-only guard's own heuristics scans for,
+// assembled from the lists those heuristics use so a name cannot be governed
+// by one and unknown to the splice check below. DATA_BODY_EXECUTORS, which
+// `dataBodies` reads for the guards that blank data bodies, is not one of
+// those lists. The literals are the names the heuristics spell inline.
 const GOVERNED_NAMES = ['git', 'gh', 'npm', 'pnpm', 'yarn', 'dotnet', 'dotnet-format',
   'prettier', 'find', 'xargs', 'sed', 'tee']
   .concat(DESTRUCTIVE_CMDS, CREATING_CMDS, PS_WRITE, PS_DESTRUCTIVE, PS_CREATING, NESTED_EXECUTORS);

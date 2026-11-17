@@ -87,19 +87,46 @@
 // the shared memory database is the store it reaches. The Write tool
 // restores a placeholder to the real value on disk, so bodyFileRefusal reads
 // each file a `--body-file` word names, before a Bash or PowerShell call
-// runs, and refuses the call where the file holds a raw secret. The list of
-// memq routes it does not screen is open: a body arriving by stdin, as in
-// `cat f | memq put n d`; a body built by a shell expansion, `$(cat f)` or
-// "$NAME"; a `--body-file` inside a wrapper's quoted string, such as
-// `bash -c "memq put n d --body-file f"`, which is one word of the outer
-// command; a relative path read from the session's working directory while the
-// shell has moved (a `cd` earlier in the line or in an earlier call), where
-// memq reads another file; and a file the same command writes before memq
-// runs, as in `cp x body.md && memq put n d --body-file body.md`, which is
-// scanned as it stood before. No wrapper is unwrapped and no expansion is
-// performed. A PowerShell line is split by PowerShell's quoting and a Bash line
-// by bash's, and a line ending inside an open quote is refused with a sentence
-// naming the cause.
+// runs, and refuses the call where the file holds a raw secret. On a Bash
+// call, its CRLF pairs read as LF as the commit gate reads them, the quoted
+// heredoc bodies the lexer reads as data are blanked before
+// the split, and a `--body-file -` in a lone `cat`, `tee` or `gh` heredoc
+// call is standard input and is not read. A relative path is read at the
+// call's working directory and at the target of every `cd` the lexer finds
+// ahead of memq on the same line, the Git Bash `/d/x` form included, since a
+// `cd` in a subshell or before a `popd` does not hold when memq runs and
+// leaves the shell at an earlier `cd` or the working directory. Every one of
+// those files the read returns is scanned, and one the read refuses while the
+// engine reports the file present refuses the call. A candidate the engine
+// will neither read nor test, a network location, is passed over, since memq
+// refuses a `\\`-rooted path itself. A path the guard cannot resolve
+// before the shell runs, one built from a variable, `%NAME%` or a backtick,
+// is refused by name. The list of memq routes it does not screen is open: a
+// body built by a shell expansion, `$(cat f)` or "$NAME"; a drive letter
+// mapped to a network share, where the engine refuses it as a network
+// location and memq reads it; a `--body-file` inside a wrapper's
+// quoted string, such as `bash -c "memq put n d --body-file f"`, which is
+// one word of the outer command; a relative path after a `cd` in an earlier
+// call, or after a same-line `cd` whose target the lexer cannot read, read
+// from the session's working directory while memq reads another file; a
+// `cd` standing between the nearest memq word and the `--body-file` word
+// where that memq word is not the program that runs, as with a memq behind a
+// wrapper script, since the search stops at that memq word; a
+// `cd` the search never places, a quoted verb such as `"cd" D:/a`, a bare
+// `cd`, which bash takes home, and `cd -`, which bash takes to the previous
+// directory; a quoted `~` target, `cd "~/x"`, which bash leaves literal and
+// the search places under the home directory; a chained relative `cd`, as in
+// `cd sub && cd inner`, where each target is read against the working
+// directory and not under `sub`; a PowerShell line, where the `cd` search
+// reads quoting by bash's rules and can miss a `cd` PowerShell runs; a Git
+// Bash mount path such as `/tmp`, which resolves under the drive root while
+// Git Bash maps it to a directory of its own; and a file the same command
+// writes before memq runs, as in
+// `cp x body.md && memq put n d --body-file body.md`, which is scanned as it
+// stood before. No wrapper is unwrapped and no expansion is performed. A
+// PowerShell line is split by PowerShell's quoting and a Bash line by bash's,
+// and a line ending inside an open quote is refused with a sentence naming
+// the cause.
 //
 // The comment at redactor-detect.ts:61-64 (detect.ts:42-45 in the mod) is the
 // mod's own: it says a tool that hands its input to the network gets the
@@ -148,6 +175,7 @@ import type {
   ToolCallResult,
 } from "claude-code";
 import { headPoints } from "./agent-state";
+import { dataBodies, effectiveDirs, maskQuoted, resolveTarget, type LexHost } from "./guards/readonly-agent";
 import {
   collect,
   escapeLiteralTags,
@@ -738,18 +766,24 @@ function memqShellCommandOf(e: ToolCallInput): string | null {
 // PowerShell's reading only where a space precedes it, and a backtick escape
 // letter such as `n is read as the letter. No expansion is performed, so a
 // quoted `"$(cat f)"` is one word as written and an unquoted one splits at its
-// parentheses, and a `~` path is handed to the read as written. A command
-// ending inside an open quote or block comment throws.
-function commandWords(command: string, powerShell: boolean): string[] {
-  const words: string[] = [];
+// parentheses. Each word carries the index of the command character it starts
+// at, a quote or escape that opens it included. A command ending inside an
+// open quote or block comment throws.
+function commandWords(command: string, powerShell: boolean): { text: string; at: number }[] {
+  const words: { text: string; at: number }[] = [];
   let word = "";
   let started = false;
+  let at = 0;
   let opensQuoted = false;
   let quote = "";
   const cut = () => {
-    if (started) words.push(word);
+    if (started) words.push({ text: word, at });
     word = "";
     started = opensQuoted = false;
+  };
+  const start = (i: number) => {
+    if (!started) at = i;
+    started = true;
   };
   for (let i = 0; i < command.length; i++) {
     const c = command[i];
@@ -768,18 +802,18 @@ function commandWords(command: string, powerShell: boolean): string[] {
     } else if (!powerShell && c === "\\" && next === "\n") {
       i++;
     } else if (!powerShell && c === "\\" && next !== undefined) {
+      start(i);
       word += command[++i];
-      started = true;
     } else if (powerShell && c === "`" && (next === "\n" || command.startsWith("\r\n", i + 1))) {
       i += next === "\n" ? 1 : 2;
       cut();
     } else if (powerShell && c === "`" && next !== undefined) {
+      start(i);
       word += command[++i];
-      started = true;
     } else if (c === "'" || c === '"') {
       if (!started) opensQuoted = true;
       quote = c;
-      started = true;
+      start(i);
     } else if (powerShell && c === "<" && next === "#" && !started) {
       const end = command.indexOf("#>", i + 2);
       if (end < 0) throw new Error("redactor: the command ends inside a block comment");
@@ -790,8 +824,8 @@ function commandWords(command: string, powerShell: boolean): string[] {
     } else if (/\s/.test(c) || ";|&()".includes(c) || (!powerShell && "<>".includes(c))) {
       cut();
     } else {
+      start(i);
       word += c;
-      started = true;
     }
   }
   if (quote !== "") throw new Error("redactor: the command ends inside an open quote");
@@ -799,56 +833,241 @@ function commandWords(command: string, powerShell: boolean): string[] {
   return words;
 }
 
+// The command with each span's characters replaced by spaces, every index
+// kept, so a word found in the copy stands at the same index in the command.
+function blankedSpans(command: string, spans: readonly { from: number; to: number }[]): string {
+  if (spans.length === 0) return command;
+  const chars = command.split("");
+  for (const span of spans) for (let i = span.from; i < span.to; i++) chars[i] = " ";
+  return chars.join("");
+}
+
+// The refusal for a `--body-file` word the guard cannot turn into a path
+// before the shell runs, `word` already scrubbed and cut.
+function unresolvedRefusal(word: string): string {
+  return `redactor: this command's --body-file names (${word}), a path the guard cannot resolve before the shell runs, such as one built from a variable, %NAME% or a backtick, a ~user path or the null device, so the call was refused before it ran. Name the file by a plain literal path.`;
+}
+
+// The refusal for a `--body-file` word whose file could not be read at
+// `paths`, the word and each path already scrubbed and cut.
+function unreadRefusal(word: string, paths: readonly string[]): string {
+  return `redactor: could not read the file this command's --body-file names (${word}) at ${paths.join(" or ")}, so the call was refused before it ran. Check the path, and name a file that exists before the command runs.`;
+}
+
+// The refusal for a `--body-file` word whose file the engine reports present
+// at `path` and the read refused, the word and the path already scrubbed and
+// cut.
+function presentUnreadRefusal(word: string, path: string): string {
+  return `redactor: could not read the file this command's --body-file names (${word}) at ${path}, where the file exists, so the call was refused before it ran. Name a file this session can read.`;
+}
+
+// The refusal for a `--body-file` word where the call's working directory is
+// unknown, so no path can be placed where the shell will read it.
+function unknownCwdRefusal(): string {
+  return `redactor: this call's working directory is unknown, so the file its --body-file names cannot be placed and the call was refused before it ran. Retry the call once the session reports a working directory.`;
+}
+
+// The directories of every cd, pushd, chdir, Set-Location or sl switch ahead
+// of `at`, each as `effectiveDirs` places it when that switch is the last one
+// it sees, so a switch bash keeps stays a candidate beside a later one that
+// does not hold when memq runs, as in `cd D:/a && (cd D:/b) && memq ...`.
+// The verbs are found in the masked copy by the pattern `effectiveDirs` reads
+// them with, and each call is cut at the next switch, or at `at` for the
+// last. With no switch ahead of `at` the answer is `effectiveDirs`'s own.
+async function switchDirs(line: string, masked: string, at: number, cwd: string, host: LexHost): Promise<string[]> {
+  const re = /(?:^|[\s;&|(])(?:cd|pushd|chdir|Set-Location|sl)(?=\s)/gi;
+  const starts: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(masked)) !== null && m.index < at) starts.push(m.index);
+  if (starts.length === 0) return effectiveDirs(line, masked, at, cwd, host);
+  const dirs: string[] = [];
+  for (let k = 0; k < starts.length; k++) {
+    dirs.push(...(await effectiveDirs(line, masked, k + 1 < starts.length ? starts[k + 1] : at, cwd, host)));
+  }
+  return [...new Set(dirs)];
+}
+
+// The lex host with `path.resolve(base, p)` reading `p` as `resolveTarget`
+// reads a path, so `effectiveDirs` places a `cd /d/x` target, and a `cd ~/x`
+// whose `~` is unquoted, where the shell does. A target `resolveTarget`
+// cannot read resolves as the host resolves it. `resolveTarget` is handed
+// the host itself, so the call does not come back here, and every other
+// member is the host's own.
+function cdTargetHost(host: LexHost): LexHost {
+  const path = host.path;
+  return {
+    path: {
+      sep: path.sep,
+      resolve: (...parts: string[]) => (parts.length === 2 ? resolveTarget(parts[1], parts[0], host) : null) ?? path.resolve(...parts),
+      relative: (from: string, to: string) => path.relative(from, to),
+      dirname: (p: string) => path.dirname(p),
+      join: (...parts: string[]) => path.join(...parts),
+      isAbsolute: (p: string) => path.isAbsolute(p),
+    },
+    home: host.home,
+    isDirectory: (p: string) => host.isDirectory(p),
+    exists: (p: string) => host.exists(p),
+  };
+}
+
 // The refusal where a file a Bash or PowerShell memq command's `--body-file`
 // names holds a raw secret or cannot be scanned, null where the files hold
-// none or the call is not a memq command naming one. The file is the one place a memq body the
-// model composed from a placeholder holds the real value, since Write restores
-// it. A line whose text holds `--body-file` is split by its shell's quoting,
-// and every word after a `--body-file` word is a path handed to `fs.read` as
-// the split yields it, relative paths included. Every file is read first, then
-// each file's text is charged to one scan budget for the call and scanned as a
-// command's own text is. Files whose text passes SCAN_CAP in total take the
-// not-scanned sentence before the next read. The first file whose scan
-// changed its text takes the match sentence, with that file's spans and
-// their count, the file named by its order among the line's `--body-file`
-// words and never by its path, and no later file is scanned. A split that ends inside an open quote or block
-// comment, and a file the read rejects, throws or does not hold, are each
-// refused with a sentence naming the cause, since the call has not run and a
-// file the read cannot return may still be one memq reads. The file sentence quotes the path as the split yielded it, scrubbed
-// (the split can join a secret the command scan saw in pieces) and cut to 200
-// code points. A `--body-file` inside a wrapper's quoted string,
-// `bash -c "memq put n d --body-file f"`, is part of one word and is never
-// reached. A budget error on a file's scan is the not-scanned sentence; any other
-// error from the split or a scan, a budget error on the path's scrub among
-// them, escapes, and the caller refuses the call before it runs.
-export async function bodyFileRefusal(e: ToolCallInput, fs: { read: (path: string) => Promise<unknown> }, remainingMs: number): Promise<string | null> {
-  const command = memqShellCommandOf(e);
-  if (command === null || !command.includes("--body-file")) return null;
-  let words: string[];
+// none or the call is not a memq command naming one. The file is the one
+// place a memq body the model composed from a placeholder holds the real
+// value, since Write restores it. A line whose text holds `--body-file` is split by its shell's quoting.
+// On a Bash call the command's CRLF pairs are read as LF once, as the commit
+// gate reads them, and the heredoc bodies the lexer's `dataBodies` reads as
+// data are then blanked, so an apostrophe or a lone quote in such a body opens
+// nothing; a PowerShell call has no heredoc and is split as written, its CRLF
+// pairs included. The word after a
+// `--body-file` word takes one of three readings. A word that is exactly `-`
+// is standard input, read by no file read and refused by no sentence, only
+// in a call where `dataBodies` returns a body and the first word is not a
+// memq word, the lone `cat`, `tee` or `gh` heredoc call; memq reads no
+// standard input and opens `-` as a file of that name, so in every other
+// call `-` is resolved and read like any other word. A word carrying `$`,
+// `%` or a backtick, and a word `resolveTarget` cannot resolve, such as a
+// `~user` path or the null device, is refused with a sentence naming it as a
+// path the guard cannot resolve before the shell runs, before any of its
+// candidates is read. Every other word is resolved by `resolveTarget`
+// against each candidate directory: each one the lexer's `effectiveDirs`
+// yields with each `cd` in turn read as the last one ahead of the nearest
+// memq word ahead of the `--body-file` word, or ahead of the `--body-file`
+// word itself where none stands ahead, and the call's working directory
+// `fs.cwd` beside them. A `cd` the lexer reads ahead of memq may not hold
+// when memq runs, in a subshell, after a `popd` or in a pipeline, and leaves
+// the shell at an earlier `cd` or the working directory, so each of those is
+// a candidate.
+// `effectiveDirs` is handed a lex host whose `path.resolve` reads a `cd`
+// target as `resolveTarget` does, so a Git Bash `cd /d/x`, or a `cd ~/x`
+// whose `~` is unquoted, is placed where the shell places it.
+// bash expands an unquoted `~` and leaves a quoted one literal, and the split
+// has dropped the quotes, so a word opening with `~` is read at both
+// spellings. An absolute word resolves to one path at every candidate. On a
+// Windows host the path is read with forward slashes and an upper-case drive
+// letter, the same file in the spelling the sentences quote. Every
+// candidate path is read, and every one the read returns is scanned. Where
+// a read rejects or throws, the lex host's `exists` is asked, and a path it
+// answers true for is refused with the present-file sentence naming that
+// path, since a file that exists and cannot be read may be the one memq
+// reads. A path it answers false for is passed over: it holds no file, or it
+// is a network location, which the engine neither reads nor tests and memq
+// refuses to open where its root is `\\`. The
+// lex host is `fs.lexHost` and the working directory `fs.cwd`, each called
+// once per call and only where a path is resolved; an empty working
+// directory refuses the call with a sentence naming it as unknown, so a path
+// is never resolved against this process's own directory. The candidate directories are found once per distinct memq
+// word. Every file is read first, then each file's text is charged to one
+// scan budget for the call and scanned as a command's own text is. Files
+// whose text passes SCAN_CAP in total take the not-scanned sentence before
+// the next read. A text one `--body-file` word reads at a second candidate,
+// identical to a text that word already read, counts as a read and is neither
+// charged nor scanned again. The first file
+// whose scan changed its text takes the match sentence, with that file's
+// spans and their count, the file named by its order among the line's
+// `--body-file` words and never by its path, and no later file is scanned.
+// A split that ends inside an open quote or block comment, and a word whose
+// read holds no file at every candidate, are each refused with a sentence
+// naming the cause, since the call has not run and a file the read cannot
+// return may still be one memq reads. The unread-file sentence quotes the
+// word as the split yielded it and each resolved path tried, the
+// present-file sentence the word and the one path, and the unresolved
+// sentence the word, each scrubbed (the split can join a secret the command
+// scan saw in pieces) and cut to 200 code points. A `--body-file` inside a
+// wrapper's quoted string, `bash -c "memq put n d --body-file f"`, is part
+// of one word and is never
+// reached. A budget error on a file's scan is the not-scanned sentence; any
+// other error from the split, the lex host, the working directory or a
+// scan, a budget error on a path's scrub among them, escapes, and the
+// caller refuses the call before it runs.
+export async function bodyFileRefusal(
+  e: ToolCallInput,
+  fs: { read: (path: string) => Promise<unknown>; cwd: () => Promise<string>; lexHost: () => Promise<LexHost> },
+  remainingMs: number,
+): Promise<string | null> {
+  const named = memqShellCommandOf(e);
+  if (named === null || !named.includes("--body-file")) return null;
+  const powerShell = e.tool === "PowerShell";
+  const command = powerShell ? named : named.replace(/\r\n/g, () => "\n");
+  const bodies = powerShell ? [] : dataBodies(command);
+  const line = blankedSpans(command, bodies);
+  let words: { text: string; at: number }[];
   try {
-    words = commandWords(command, e.tool === "PowerShell");
+    words = commandWords(line, powerShell);
   } catch (err) {
     const message = err instanceof Error ? err.message : "";
     const open = message.includes("block comment") ? "an open block comment" : message.includes("open quote") ? "an open quote" : null;
     if (open === null) throw err;
     return `redactor: this command ends inside ${open}, so the call was refused before it ran. Close it, or write the body to a file with the Write tool and name it with --body-file.`;
   }
-  const texts: string[] = [];
+  const quoted = (s: string) => headPoints(scanBudget(remainingMs, s.length).scrub(s), 200);
+  let lex: { host: LexHost; cdHost: LexHost; cwd: string } | null = null;
+  let masked: string | null = null;
+  const dirsAt = new Map<number, string[]>();
+  const texts: { text: string; file: number }[] = [];
+  let files = 0;
   let total = 0;
+  let memqAt = -1;
   for (let i = 0; i + 1 < words.length; i++) {
-    if (words[i] !== "--body-file") continue;
-    let text: string;
-    try {
-      text = String(await fs.read(words[i + 1]));
-    } catch {
-      return `redactor: could not read the file this command's --body-file names (${headPoints(scanBudget(remainingMs, words[i + 1].length).scrub(words[i + 1]), 200)}), so the call was refused before it ran. Write the file in its own call first, then run memq.`;
+    if (isMemqWord(words[i].text)) memqAt = words[i].at;
+    if (words[i].text !== "--body-file") continue;
+    const word = words[i + 1].text;
+    if (word === "-" && bodies.length > 0 && !isMemqWord(words[0].text)) continue;
+    if (/[$%`]/.test(word)) return unresolvedRefusal(quoted(word));
+    if (lex === null) {
+      const lexHost = await fs.lexHost();
+      const lexCwd = await fs.cwd();
+      if (lexCwd === "") return unknownCwdRefusal();
+      lex = { host: lexHost, cdHost: cdTargetHost(lexHost), cwd: lexCwd };
     }
-    // The charge would refuse these files anyway, so stop reading once they
-    // pass SCAN_CAP: a command naming one large file hundreds of times then
-    // holds no more than the cap and one read, and the refusal reads no clock.
-    total += text.length;
-    if (total > SCAN_CAP) return notScannedRefusal(MEMQ_SURFACE);
-    texts.push(text);
+    const { host, cdHost, cwd } = lex;
+    masked ??= maskQuoted(line);
+    const at = memqAt >= 0 ? memqAt : words[i].at;
+    let dirs = dirsAt.get(at);
+    if (dirs === undefined) {
+      dirs = [...new Set([...(await switchDirs(line, masked, at, cwd, cdHost)), cwd])];
+      dirsAt.set(at, dirs);
+    }
+    const targets: string[] = [];
+    for (const dir of dirs) {
+      const target = resolveTarget(word, dir, host);
+      if (target === null) return unresolvedRefusal(quoted(word));
+      targets.push(target);
+      // bash expands an unquoted `~` and leaves a quoted one literal, and the
+      // split has dropped the quotes, so both spellings are candidates.
+      if (word.startsWith("~")) targets.push(host.path.resolve(dir, word));
+    }
+    const tried: string[] = [];
+    const seen = new Set<string>();
+    let reads = 0;
+    files++;
+    for (const target of targets) {
+      const path = host.path.sep === "\\" ? target.replace(/\\/g, "/").replace(/^[a-z]:/, (drive) => drive.toUpperCase()) : target;
+      if (tried.includes(path)) continue;
+      tried.push(path);
+      let text: string;
+      try {
+        text = String(await fs.read(path));
+      } catch {
+        // A file that exists and cannot be read may be the one memq reads,
+        // so it refuses the call; a candidate that holds no file is passed
+        // over and the others are still read.
+        if (await host.exists(path)) return presentUnreadRefusal(quoted(word), quoted(path));
+        continue;
+      }
+      reads++;
+      // A text this word already read at another candidate is the same body
+      // and is charged and scanned once.
+      if (seen.has(text)) continue;
+      seen.add(text);
+      // The charge would refuse these files anyway, so stop reading once they
+      // pass SCAN_CAP: a command naming one large file hundreds of times then
+      // holds no more than the cap and one read, and the refusal reads no clock.
+      total += text.length;
+      if (total > SCAN_CAP) return notScannedRefusal(MEMQ_SURFACE);
+      texts.push({ text, file: files });
+    }
+    if (reads === 0) return unreadRefusal(quoted(word), tried.map(quoted));
   }
   // Every file is read before the one budget is made, so its deadline is
   // read from the clock on this side of every wait the engine does not
@@ -856,10 +1075,10 @@ export async function bodyFileRefusal(e: ToolCallInput, fs: { read: (path: strin
   // than each taking the hook's whole remaining time.
   const budget = scanBudget(remainingMs);
   try {
-    for (const text of texts) budget.charge(text);
-    for (const [i, text] of texts.entries()) {
+    for (const { text } of texts) budget.charge(text);
+    for (const { text, file } of texts) {
       const out = budget.scrub(text);
-      if (out !== text) return matchRefusalOf(MEMQ_SURFACE, [{ holder: { bodyFile: i + 1 }, text, out }], budget);
+      if (out !== text) return matchRefusalOf(MEMQ_SURFACE, [{ holder: { bodyFile: file }, text, out }], budget);
     }
   } catch (err) {
     if (err instanceof ScanBudgetError) return notScannedRefusal(MEMQ_SURFACE);
