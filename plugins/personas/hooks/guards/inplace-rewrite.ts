@@ -45,25 +45,40 @@
 // passes while the read fails, as it does for the other guards that take
 // guardWindowsOf. The residual false hits are three: an unquoted verb in an
 // operand list on a command line (echo sed -i, or a search for the text, as in
-// rg sed -i docs/) reads as an invocation and is refused; a heredoc body naming one is read as command text and refused; and
-// an awk or gawk call loading any library with -l, --load or --include is
-// refused, since the shared reading cannot tell inplace from another library.
+// rg sed -i docs/) reads as an invocation and is refused; a heredoc body that
+// is not data is read as command text, so an in-place call it names is
+// refused; and an awk or gawk call loading any library with -l, --load or
+// --include is refused, since the shared reading cannot tell inplace from
+// another library.
 //
 // The command is read through the read-only guard's lexer, in the order the
 // shared-state guard reads it: heredoc bodies found on a body-blind mask,
 // continuations spliced, then the quote mask, with each substitution interior
 // collected and read one level deeper beside each nested payload. A command
 // naming none of sed, awk and gawk as a whole word is passed by the matcher
-// before any lexing, so the common shell call pays one string scan. A failure
-// while reading a command denies, naming the failure, so the guard never
-// throws to the runner and never passes a command it could not finish
-// reading.
+// before any lexing, so the common shell call pays one string scan and no
+// data-body reading. A heredoc body is data, and the guard reads no call in
+// it, only where the lexer's `dataBodies` returns it, the owner of that rule:
+// the whole call is one cat, tee, gh or memq heredoc command with a quoted
+// delimiter. Such a body is blanked out of the masked copy through the
+// lexer's `blankData`, at the top level of the call alone, under the guard's
+// one reading of heredoc bodies. Text after the terminator is command text.
+// Every other body stays command text and a call in it is judged. The
+// members a session meets most often: a bash, sh, python3 or node heredoc; an
+// unquoted <<EOF; a heredoc whose intro line carries a pipe, a separator or a
+// substitution; a sink heredoc with any command before its intro line or
+// after its terminator; a body in a call that names an interpreter or a shell
+// in command position anywhere; and a body inside a nested payload or a
+// substitution interior. The route for a refused write is the Write tool, or
+// the storing command as its own call. A failure while reading a command
+// denies, naming the failure, so the guard never throws to the runner and
+// never passes a command it could not finish reading.
 //
 // Nothing here reads `$` (runner.ts says why), and nothing here resolves a
 // path, so the guard takes no LexHost.
 
 import type { BeforeGuard, GuardCall } from "./runner";
-import { CONTINUATION_CAP_ADVICE, IN_WORD_PAIR_CAP, commandPositions, heredocBodies, maskQuoted, memoized, nestedPayloads, readUnderContinuations, segment, spliceContinuations, tokens, type VerdictMemo } from "./readonly-agent";
+import { CONTINUATION_CAP_ADVICE, IN_WORD_PAIR_CAP, blankData, commandPositions, heredocBodies, maskQuoted, memoized, nestedPayloads, readUnderContinuations, segment, spliceContinuations, tokens, type VerdictMemo } from "./readonly-agent";
 import { inPlaceRewrite } from "./docs-write";
 
 // A half-open range of command indexes, the lexer's own span shape.
@@ -116,14 +131,21 @@ export type InplaceRewriteDeps = { windows(): Promise<boolean>; quote(text: stri
 // A command read the read-only guard's way, in the shared-state guard's
 // order: heredoc bodies found on a body-blind mask, continuations spliced,
 // then the quote mask, with each substitution interior collected into `subs`.
-// A heredoc body stays command text. The splice reads the quote mask of the
-// text as handed in, so a pair inside a single-quoted span stays as typed.
-// `join` and `boundary` are the splice's reading of this text, as
-// `spliceContinuations` takes them.
-function maskOf(cmd: string, subs: Span[], join: boolean, boundary: number): { cmd: string; masked: string } {
+// The splice reads the quote mask of the text as handed in, so a pair inside
+// a single-quoted span stays as typed. `join` and `boundary` are the splice's
+// reading of this text, as `spliceContinuations` takes them.
+//
+// Where `data` is set, each body the lexer's dataBodies reads as data is
+// then blanked to spaces in the masked copy, through the lexer's `blankData`,
+// so the verb search and the nested-payload read see nothing in it. Every
+// other body stays command text. `data` is set only at the top level of the
+// call. Below the top level the text is a payload some executor was handed,
+// or a substitution interior the shell runs, so no body there is data.
+function maskOf(cmd: string, subs: Span[], join: boolean, boundary: number, data: boolean): { cmd: string; masked: string } {
   const bodies = heredocBodies(cmd, maskQuoted(cmd));
   const joined = spliceContinuations(cmd, bodies, maskQuoted(cmd, bodies), join, boundary);
-  return { cmd: joined.cmd, masked: maskQuoted(joined.cmd, joined.bodies, subs) };
+  const masked = maskQuoted(joined.cmd, joined.bodies, subs);
+  return { cmd: joined.cmd, masked: data ? blankData(cmd, bodies, joined, masked) : masked };
 }
 
 // The text of the first in-place call in the command, or null: the top
@@ -151,7 +173,7 @@ async function rewriteCall(cmd: string, masked: string, subs: readonly Span[], d
       false,
       (t, join, boundary) => {
         const innerSubs: Span[] = [];
-        const read = maskOf(t, innerSubs, join, boundary);
+        const read = maskOf(t, innerSubs, join, boundary, false);
         return rewriteCall(read.cmd, read.masked, innerSubs, depth + 1, memo);
       },
       (r) => r !== null,
@@ -183,14 +205,15 @@ export function inplaceRewriteGuard(deps: InplaceRewriteDeps): BeforeGuard {
         // every reading of its continuations, the two-space reading first so
         // every refusal it gives keeps its reason byte for byte, and a call
         // found under any reading is the guard's refusal. The memo holds each
-        // nested text's read for this call.
+        // nested text's read for this call. Only this top-level read blanks a
+        // data body.
         const memo: VerdictMemo = new Map();
         const call = await readUnderContinuations(
           cmd.replace(/\r\n/g, "\n"),
           false,
           (text, join, boundary) => {
             const subs: Span[] = [];
-            const read = maskOf(text, subs, join, boundary);
+            const read = maskOf(text, subs, join, boundary, true);
             return rewriteCall(read.cmd, read.masked, subs, 0, memo);
           },
           (r) => r !== null,

@@ -3305,18 +3305,20 @@ const UNQUOTED_INTRO = /(?<!<)<<(?!<)-?[ \t]*(?!['"])/;
 // can execute a body by means no name list closes: source, ., a run by path,
 // exec, at, a quoted shell name, a sink shadowed by a function, or a group
 // piped into a read loop. So only a lone sink call's body is data, and a
-// script a lone sink call writes and a later call runs is the gate's declared
-// residual. Each test is stated below as its own step, and any reading a test
-// cannot settle leaves the body command text. The reading is exported so
-// every guard that decides a body by what consumes it reads this one, the
-// commit gate blanking these ranges out of its search. No guard reads what an
-// interpreter does with its input, so a python3, node or bash heredoc stays
-// command text, as does a body written beside a deferred run through trap or
-// a backgrounded shell, and an unquoted heredoc, which the shell expands. A
-// quoted delimiter that is not plain, one holding a backslash, a dollar
-// sign, an inner quote or any other character off PLAIN_DELIMITER_CLASS,
-// keeps its body command text too, since bash may end that body at a line
-// the lexer still reads as body and run the lines after it: with
+// script a lone sink call writes and a later call runs is each guard's
+// declared residual. Each test is stated below as its own step, and any
+// reading a test cannot settle leaves the body command text. The reading is
+// exported so every guard that decides a body by what consumes it reads this
+// one. Three guards blank these ranges out of their search, each through
+// `blankData` below: the commit gate, test-hang-gate and inplace-rewrite. No guard
+// reads what an interpreter does with its input, so a python3, node or bash
+// heredoc stays command text, as does a body written beside a deferred run
+// through trap or a backgrounded shell, and an unquoted heredoc, which the
+// shell expands. A quoted delimiter that is not plain, one holding a
+// backslash, a dollar sign, an inner quote or any other character off
+// PLAIN_DELIMITER_CLASS, keeps its body command text too, since bash may end
+// that body at a line the lexer still reads as body and run the lines after
+// it: with
 // <<"E\\OF" bash ends the body at the line E\OF while heredocBodies, which
 // reads the token raw, ends it at E\\OF, a line later. A command carrying
 // any heredoc fault `offendingDelimiter` names, that delimiter among
@@ -3337,8 +3339,11 @@ export function dataBodies(cmd: string): Span[] {
   //    bash may start or end at different lines, so no body in it is data.
   //    Nor is a body in a command holding a NUL byte: bash drops the byte
   //    where it reads the command through a substitution, so a body line
-  //    the lexer reads as EO<NUL>F ends bash's body there.
-  if (cmd.includes('\0')) return [];
+  //    the lexer reads as EO<NUL>F ends bash's body there. Nor is one in a
+  //    command holding a carriage return once its CRLF pairs are joined,
+  //    which every caller does first: Git Bash drops a CR anywhere in a
+  //    line, so a body line the lexer reads as EO<CR>F ends bash's body.
+  if (cmd.includes('\0') || cmd.includes('\r')) return [];
   const bare = maskQuoted(cmd);
   if (offendingDelimiter(cmd, bare) !== null) return [];
   const bodies = heredocBodies(cmd, bare);
@@ -3436,8 +3441,9 @@ export function dataBodies(cmd: string): Span[] {
     //    blanks stands before its intro line, the line heredocBodies ended
     //    the body at is its terminator, and nothing but blank lines or a
     //    trailing newline follows that line. A blank is what bash reads as
-    //    one, a space, a tab or a newline, so a no-break space, a form feed
-    //    or a carriage return is text. Any other text before the intro
+    //    one, a space, a tab or a newline, so a no-break space or a form
+    //    feed is text, and a carriage return never reaches this test. Any
+    //    other text before the intro
     //    or after the terminator, a comment included, leaves the body command
     //    text, and the intro line's own constructs are test 2's. A body with
     //    no terminator ends at the end of the command, where no line stands,
@@ -3451,6 +3457,30 @@ export function dataBodies(cmd: string): Span[] {
     out.push(b);
   }
   return out;
+}
+
+// The masked copy of one reading with each data body of `cmd` blanked to
+// spaces, the one blanking step of every guard that reads a data body out of
+// its search. `own` are the heredoc bodies the reading found on `cmd` and
+// spliced by, `joined` its splice, whose bodies answer `own` index for
+// index, and `masked` the reading's mask of the spliced text. A range
+// dataBodies returns is blanked only where it is one of `own`, start and
+// end alike, and the spliced text over the range the splice mapped it to is
+// the body's text unchanged. A reading that holds no such body, or whose
+// splice moved text inside it, keeps the body as command text and searches
+// it. The caller decides whether a text may hold a data body at all: only
+// the top level of a Bash call may, so a guard calls this on no nested
+// payload, substitution interior or PowerShell call.
+export function blankData(cmd: string, own: readonly Span[], joined: { cmd: string; bodies: readonly Span[] }, masked: string): string {
+  const spans = dataBodies(cmd);
+  if (spans.length === 0) return masked;
+  const chars = masked.split('');
+  for (const d of spans) {
+    const to = joined.bodies[own.findIndex((b) => b.from === d.from && b.to === d.to)];
+    if (to === undefined || joined.cmd.slice(to.from, to.to) !== cmd.slice(d.from, d.to)) continue;
+    for (let i = to.from; i < to.to; i++) chars[i] = ' ';
+  }
+  return chars.join('');
 }
 
 // Every command name one of the read-only guard's own heuristics scans for,

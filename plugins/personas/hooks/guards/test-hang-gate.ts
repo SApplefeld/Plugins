@@ -102,11 +102,15 @@
 // limit's presence and spelling and never a ceiling on its value.
 // The residual false hits are the lexer's: an unquoted runner name in an
 // operand list on a command line (echo dotnet test) reads as an invocation
-// and is judged as one; a heredoc body naming a runner is read as command
-// text and refused; a PowerShell backtick-newline continuation splits the
-// call, which is refused with its flags on the next line unread; and a
-// redirect ahead of the flags (dotnet test > out.log --blame-hang-timeout
-// 10m) ends the argument list where the shell does not, a false refusal; and
+// and is judged as one; a heredoc body that is not data is read as command
+// text, so a runner it names is judged, which refuses a storing heredoc with
+// any other command in the call, such as a plan append with a check on the
+// line after its terminator, a false refusal kept since only the lone
+// storing call settles what the shell does with the body; a PowerShell
+// backtick-newline continuation splits the call, which is refused with its
+// flags on the next line unread; and a redirect ahead of the flags (dotnet
+// test > out.log --blame-hang-timeout 10m) ends the argument list where the
+// shell does not, a false refusal; and
 // a brace word inside an eval, iex or cmd /c payload (eval dotnet test
 // ${PROJ} --blame-hang-timeout 10m ...) cuts the payload's words, a false
 // refusal kept so that a payload opening a PowerShell script block stays
@@ -117,17 +121,32 @@
 // continuations spliced, then the quote mask, with each substitution interior
 // collected and read one level deeper beside each nested payload. A command
 // naming neither dotnet nor node as a whole word is passed by the matcher
-// before any lexing, so the common shell call pays one string scan. A failure
-// while reading a command denies, naming the failure, so the guard never
-// throws to the runner and never passes a command it could not finish
-// reading.
+// before any lexing, so the common shell call pays one string scan and no
+// data-body reading. A heredoc body is data, and the gate reads no runner
+// call in it, only where the lexer's `dataBodies` returns it, the owner of
+// that rule: the whole call is one cat, tee, gh or memq heredoc command with
+// a quoted delimiter. Such a body is blanked out of the masked copy through
+// the lexer's `blankData`, at the top level of a Bash call alone, under each
+// of the two readings on that reading's own bodies, and after the heredoc
+// fault, which refuses the command before any body is blanked. Text after
+// the terminator is command text. Every other body stays command text and a
+// runner in it is judged. The members a session meets most often: a bash,
+// sh, python3 or node heredoc; an unquoted <<EOF; a heredoc whose intro line
+// carries a pipe, a separator or a substitution; a sink heredoc with any
+// command before its intro line or after its terminator; a body in a call
+// that names an interpreter or a shell in command position anywhere; a body
+// inside a nested payload or a substitution interior; and every body on a
+// PowerShell call. The route for a refused write is the Write tool, or the
+// storing command as its own call. A failure while reading a command
+// denies, naming the failure, so the guard never throws to the runner and
+// never passes a command it could not finish reading.
 //
 // Nothing here reads `$` (runner.ts says why), and nothing here resolves a
 // path, so the guard takes no LexHost.
 
 import type { BeforeGuard, GuardCall } from "./runner";
 import {
-  CONTINUATION_CAP_ADVICE, IN_WORD_PAIR_CAP, commandPositions, delimiterAdvice, delimiterWhat, exactReadingDiffers, heredocBodies, heredocWalk, maskExact, maskQuoted,
+  CONTINUATION_CAP_ADVICE, IN_WORD_PAIR_CAP, blankData, commandPositions, delimiterAdvice, delimiterWhat, exactReadingDiffers, heredocBodies, heredocWalk, maskExact, maskQuoted,
   memoized, nestedPayloads, offendingDelimiter, readUnderContinuations, segment, spliceContinuations, tokens, type DelimiterFault, type VerdictMemo,
 } from "./readonly-agent";
 
@@ -390,29 +409,42 @@ function runnerReasonAt(cmd: string, masked: string, hit: { name: string; at: nu
 // same way; otherwise the walk's data and live bodies, continuations spliced
 // outside the data bodies, a live body's among them since bash removes them
 // as it reads the body, then `maskExact`, which reads a word-start # as a
-// comment and a body's quotes as bytes. A heredoc body stays command text
-// under either reading. The splice reads the reading's own quote mask of the
-// text as handed in, so a pair inside a single-quoted span stays as typed.
+// comment and a body's quotes as bytes. The splice reads the reading's own
+// quote mask of the text as handed in, so a pair inside a single-quoted span
+// stays as typed.
 // The gate reads a command under every continuation reading twice, under the
 // legacy reading and then, where that allowed and the exact reading can
 // differ, under the exact reading, and refuses on any. `join` and `boundary`
 // are the splice's reading of this text, as `spliceContinuations` takes them;
 // the joined readings shorten the text, so the data spans come back shifted
 // and the live spans are read through the splice's map onto it.
-function maskOf(cmd: string, subs: Span[], join: boolean, boundary: number, exact: boolean): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
+//
+// Where `data` is set, each body the lexer's dataBodies reads as data is
+// then blanked to spaces in the masked copy under either reading, through
+// the lexer's `blankData`, so the runner search and the nested-payload read
+// see nothing in it; a substitution opener inside a body the reading holds
+// is data the mask never collects. Every other body stays command text, and
+// a heredoc fault returns before any body is blanked. `data` is set only at
+// the top level of a Bash call. A PowerShell call has no heredoc, so every
+// body-shaped range in one stays command text. Below the top level the text
+// is a payload some executor was handed, or a substitution interior the
+// shell runs, so no body there is data.
+function maskOf(cmd: string, subs: Span[], join: boolean, boundary: number, exact: boolean, data: boolean): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
   if (exact) {
     const walk = heredocWalk(cmd, "", true);
     if (walk.fault !== null) return { cmd, masked: cmd, delimiter: walk.fault };
     const joined = spliceContinuations(cmd, walk.data, maskExact(cmd, walk.data, walk.live), join, boundary);
     const live = walk.live.map(s => ({ from: joined.at(s.from), to: joined.at(s.to) }));
-    return { cmd: joined.cmd, masked: maskExact(joined.cmd, joined.bodies, live, subs), delimiter: null };
+    const masked = maskExact(joined.cmd, joined.bodies, live, subs);
+    return { cmd: joined.cmd, masked: data ? blankData(cmd, walk.data, joined, masked) : masked, delimiter: null };
   }
   const bare = maskQuoted(cmd);
   const delimiter = offendingDelimiter(cmd, bare);
   if (delimiter !== null) return { cmd, masked: cmd, delimiter };
   const bodies = heredocBodies(cmd, bare);
   const joined = spliceContinuations(cmd, bodies, maskQuoted(cmd, bodies), join, boundary);
-  return { cmd: joined.cmd, masked: maskQuoted(joined.cmd, joined.bodies, subs), delimiter: null };
+  const masked = maskQuoted(joined.cmd, joined.bodies, subs);
+  return { cmd: joined.cmd, masked: data ? blankData(cmd, bodies, joined, masked) : masked, delimiter: null };
 }
 
 // The first refusal any runner call in the command earns, or null: the top
@@ -447,7 +479,7 @@ async function gateReason(cmd: string, masked: string, subs: readonly Span[], de
       exact,
       (t, join, boundary) => {
         const innerSubs: Span[] = [];
-        const read = maskOf(t, innerSubs, join, boundary, exact);
+        const read = maskOf(t, innerSubs, join, boundary, exact, false);
         if (read.delimiter !== null) return delimiterRefusal(read.delimiter, quote);
         return gateReason(read.cmd, read.masked, innerSubs, depth + 1, quote, exact, memo);
       },
@@ -486,15 +518,17 @@ export function testHangGateGuard(deps: TestHangGateDeps): BeforeGuard {
         // first. Where it allows and the exact reading can differ, by
         // `exactReadingDiffers`, it runs again under the exact reading, so a
         // refusal from any pairing of a continuation reading with either
-        // stands. The memo holds each nested text's read for this call.
+        // stands. The memo holds each nested text's read for this call. Only
+        // this top-level read of a Bash call blanks a data body.
         const memo: VerdictMemo = new Map();
+        const bash = e.tool === "Bash";
         const unix = cmd.replace(/\r\n/g, "\n");
         const under = (exact: boolean) => readUnderContinuations(
           unix,
           exact,
           (text, join, boundary) => {
             const subs: Span[] = [];
-            const read = maskOf(text, subs, join, boundary, exact);
+            const read = maskOf(text, subs, join, boundary, exact, bash);
             if (read.delimiter !== null) return delimiterRefusal(read.delimiter, deps.quote);
             return gateReason(read.cmd, read.masked, subs, 0, deps.quote, exact, memo);
           },

@@ -108,7 +108,9 @@
 // body on the masked copy, since the lexer reads no unquoted body and would
 // find a quoted introduction inside one as a fresh body. A command holding a
 // NUL byte has no data body, since bash drops the byte where it reads the
-// command through a substitution and can end a body the lexer runs on. Every
+// command through a substitution and can end a body the lexer runs on, and
+// nor has one holding a carriage return outside a CRLF pair, which Git Bash
+// drops anywhere in a line, so a terminator can hide one. Every
 // other body is searched as command text. A PowerShell call has no heredoc,
 // so no body in one is data, and the lexer reads no <# block comment as a
 // comment there.
@@ -233,7 +235,7 @@
 
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
-  CONTINUATION_CAP_ADVICE, GIT_VALUE_FLAGS, IN_WORD_PAIR_CAP, commandPositions, dataBodies, delimiterAdvice, delimiterWhat, exactReadingDiffers, heredocBodies, heredocWalk,
+  CONTINUATION_CAP_ADVICE, GIT_VALUE_FLAGS, IN_WORD_PAIR_CAP, blankData, commandPositions, delimiterAdvice, delimiterWhat, exactReadingDiffers, heredocBodies, heredocWalk,
   maskExact, maskQuoted, memoized, nestedPayloads, offendingDelimiter, readUnderContinuations, resolveTarget, segment, spliceContinuations,
   tokens, type DelimiterFault, type LexHost, type VerdictMemo,
 } from "./readonly-agent";
@@ -795,27 +797,6 @@ function maskOf(cmd: string, subs: Span[], join: boolean, boundary: number, exac
   const joined = spliceContinuations(cmd, bodies, maskQuoted(cmd, bodies), join, boundary);
   const masked = maskQuoted(joined.cmd, joined.bodies, subs);
   return { cmd: joined.cmd, masked: data ? blankData(cmd, bodies, joined, masked) : masked, delimiter: null };
-}
-
-// The masked copy of one reading with each data body of `cmd` blanked to
-// spaces. `own` are the heredoc bodies the reading found on `cmd` and
-// spliced by, `joined` its splice, whose bodies answer `own` index for
-// index, and `masked` the reading's mask of the spliced text. A range
-// dataBodies returns is blanked only where it is one of `own`, start and
-// end alike, and the spliced text over the range the splice mapped it to is
-// the body's text unchanged. A reading that holds no such body, or whose
-// splice moved text inside it, keeps the body as command text and searches
-// it.
-function blankData(cmd: string, own: readonly Span[], joined: { cmd: string; bodies: readonly Span[] }, masked: string): string {
-  const spans = dataBodies(cmd);
-  if (spans.length === 0) return masked;
-  const chars = masked.split("");
-  for (const d of spans) {
-    const to = joined.bodies[own.findIndex((b) => b.from === d.from && b.to === d.to)];
-    if (to === undefined || joined.cmd.slice(to.from, to.to) !== cmd.slice(d.from, d.to)) continue;
-    for (let i = to.from; i < to.to; i++) chars[i] = " ";
-  }
-  return chars.join("");
 }
 
 // What one text's read finds: its git calls, or the heredoc fault that ended
