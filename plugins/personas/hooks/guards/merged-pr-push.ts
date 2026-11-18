@@ -12,6 +12,14 @@
 // finds the pull request's head commit on its base in the checkout's
 // remote-tracking refs.
 //
+// A push is the word `git` at a command position, then any of git's own
+// options, then `push`. The guard judges it in the folder the push names:
+// the session's working directory, moved by each `-C` value ahead of the
+// verb, in order, each read as the commit gate's tokens reads it, a Bash
+// backslash before a blank read as that blank, and resolved lexically
+// against the one before. Every query runs in that folder, and each refusal
+// closes by naming it.
+//
 // It blocks only on a positive MERGED or a positive ancestry answer. Anything
 // else allows: not a push, a branch deletion, an integration branch, a
 // branch or base name outside the allowlist, no CLI, no PR, a head commit
@@ -27,12 +35,40 @@
 // without querying, its reason and context line naming the variable.
 // Otherwise the queries run over the host's environment plus QUERY_ENV.
 //
+// Two more readings allow without querying, each naming its reason the same
+// way. A `--git-dir`, `--work-tree` or `--namespace` ahead of the verb
+// redirects git as those variables do. A `-C` value the guard cannot place
+// leaves it no folder to read. Such values include one resolveTarget cannot
+// resolve before the shell runs (built through a variable, for instance),
+// one holding an escaped line break, and, on Windows, a single-slash absolute
+// path other than the /<drive>/ form or one that places the push at a
+// folder spelled as a network location (two separators at its start). A
+// value placing the push in a folder the host cannot read as a directory
+// stands down the same way.
+//
+// Some values place where git would not. A single-quoted `$PWD`, and a
+// `%CD%`, which git receives unexpanded, place at the session's folder. On a
+// PowerShell call `/d/x` places at D:\x, where git reads a folder under the
+// current drive's root. Chained values resolve lexically, so `-C link -C ..`
+// through a symbolic link places at the link's lexical parent. A blank
+// leading or trailing a value is trimmed, and a quote character opening or
+// closing its text is dropped. On Windows a local device path such as
+// `\\.\D:` reads as a network location, and so does a relative value under a
+// session folder on a share. The network-location and directory stand-downs
+// name the last `-C` value, whichever value led there.
+//
+// Some values hide the push from the reader: a PowerShell backtick-escaped
+// blank, an escaped quote inside double quotes, which reads as the closing
+// quote, a non-breaking space, which ends a word, and an unquoted `$(...)`,
+// which ends at its first blank or `)`.
+//
 // Nothing here reads `$` (runner.ts says why). The queries go through the
 // context host, which resolves a bare `git` or `gh` to an absolute path; the
 // Azure queries' executables are resolved by azurePrs itself, as its comment
 // says.
 
 import type { BeforeGuard, GuardCall, GuardContext, GuardHost } from "./runner";
+import { GIT_VALUE_FLAGS, resolveTarget, tokens, type LexHost } from "./readonly-agent";
 
 // How long one git query and one host query may run, the hook's own bounds.
 export const PUSH_GIT_TIMEOUT_MS = 3000;
@@ -74,27 +110,204 @@ export const BRANCH_ALLOWLIST = /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/;
 // The integration branches, never guarded.
 const INTEGRATION_BRANCH = /^(develop|main|master)$/i;
 
+// The options ahead of the verb that redirect git at another repository,
+// alone or joined to a value by `=`.
+const REDIRECT_OPTION = /^(--git-dir|--work-tree|--namespace)(?:=|$)/;
+
+// A `-C` value opening with a token that names the folder the command runs
+// in: bash's $PWD and ${PWD}, and cmd.exe's %CD%, kept because resolveTarget
+// reads all three as that folder. That folder is the session's whatever `-C`
+// came before it.
+const SESSION_FOLDER_TOKEN = /^(?:\$\{PWD\}|\$PWD(?!\w)|%[Cc][Dd]%)/;
+
+// A single-slash absolute path other than the /<drive>/ form. On Windows,
+// Git Bash maps it through its own mount table (/tmp to the user's temp
+// folder, for one), which the guard does not read, so the guard does not
+// place it.
+const MSYS_ROOTED = /^\/(?![\\/]|[A-Za-z]\/)/;
+
+// A network location, `\\host\share`, `//host/share` or a `\\?\UNC\` or
+// `\\.\UNC\` path: two separators at the start. A stat of one makes the
+// machine authenticate outbound and wait for the connection's timeout. The
+// guard tests for it only where the host's separator is a backslash, since
+// on a POSIX host a folder opening with two slashes is a local one. The
+// pattern is namesNetworkShare's in hooks/compaction.ts, written here since
+// the guards import only from their own folder.
+const NETWORK_LOCATION = /^[\\/]{2}/;
+
+// What ends a word between `git` and its verb: white space, or one of the
+// separators a command ends at.
+const WORD_END = /[\s;|&<>)`\x01]/;
+
+// The index just past the word that starts at `from`. A span in single or
+// double quotes counts whole inside the word, with any white space or
+// separator it holds, and one left open runs to the end of the string. On a
+// Bash call a backslash outside quotes takes the character after it into
+// the word. On a PowerShell call a backslash is a literal character, as the
+// commit gate reads it there, so `-C D:\repo\ push` ends its value at the
+// blank.
+//
+// The answer from each index the loop stops at outside quotes depends on that
+// index alone. `ends` holds that answer plus one for every such index any
+// walk of the call has passed, and 0 for the rest, so a walk that reaches a
+// recorded index takes its answer and stops. Each index is then walked once
+// per call, and each quoted span searched once from its opening quote,
+// however many walks start inside another's quotes.
+function wordEnd(c: string, from: number, powershell: boolean, ends: Int32Array): number {
+  const walked: number[] = [];
+  let i = from;
+  let end = -1;
+  while (end < 0) {
+    const ch = c[i];
+    if (i >= c.length || WORD_END.test(ch)) end = i;
+    else if (ends[i] > 0) end = ends[i] - 1;
+    else {
+      walked.push(i);
+      if (ch === "\\" && !powershell) i = Math.min(i + 2, c.length);
+      else if (ch === "'" || ch === '"') {
+        const close = c.indexOf(ch, i + 1);
+        if (close < 0) end = c.length;
+        else i = close + 1;
+      } else i++;
+    }
+  }
+  for (const at of walked) ends[at] = end + 1;
+  return end;
+}
+
+// A Bash `-C` value with each backslash-escaped blank outside quotes written
+// as that blank in single quotes, so tokens reads `a\ b` as the one word
+// `a b`, as bash hands it to git. Quoted spans and every other escape pass
+// as typed, read as wordEnd reads them.
+function quoteEscapedBlanks(value: string): string {
+  return value.replace(/'[^']*'?|"[^"]*"?|\\[\s\S]?/g, (m) => (m === "\\ " || m === "\\\t" ? `'${m[1]}'` : m));
+}
+
+// The index of the first character at or after `from` that is not a space
+// or a tab, the blanks that part two words of one command.
+function pastBlanks(c: string, from: number): number {
+  let i = from;
+  while (c[i] === " " || c[i] === "\t") i++;
+  return i;
+}
+
+// The states a forward scan of the command holds for the command-position
+// test, one bit each: at a command's head (its start, or the blanks before or
+// after a whole NAME=value prefix), in a prefix's name, in its value outside
+// quotes, and in a single- or double-quoted span of that value.
+const AT_HEAD = 1;
+const IN_NAME = 2;
+const IN_VALUE = 4;
+const IN_SINGLE = 8;
+const IN_DOUBLE = 16;
+
+// The states after `ch`, from the states before it. A separator, redirect,
+// subshell bracket, backtick or line break opens a fresh head whatever came
+// before it, so a quoted value holding one keeps both readings alive.
+function headStep(states: number, ch: string): number {
+  let next = /[;|&<>()`\n\x01]/.test(ch) ? AT_HEAD : 0;
+  const blank = ch === " " || ch === "\t";
+  if (states & AT_HEAD) next |= blank ? AT_HEAD : /[A-Za-z_]/.test(ch) ? IN_NAME : 0;
+  if (states & IN_NAME) next |= /\w/.test(ch) ? IN_NAME : ch === "=" ? IN_VALUE : 0;
+  if (states & IN_VALUE) next |= ch === "'" ? IN_SINGLE : ch === '"' ? IN_DOUBLE : blank ? AT_HEAD : /[\s;|&<>()`\x01]/.test(ch) ? 0 : IN_VALUE;
+  if (states & IN_SINGLE) next |= ch === "'" ? IN_VALUE : IN_SINGLE;
+  if (states & IN_DOUBLE) next |= ch === '"' ? IN_VALUE : IN_DOUBLE;
+  return next;
+}
+
+// A push as the reader finds it: its operands, the `-C` values ahead of the
+// verb in order, each as typed with any quotes, and the name of the first
+// option ahead of the verb that redirects git at another repository, or null.
+export type PushCall = { operands: string; dirs: string[]; redirect: string | null };
+
+// The records the walks of one pushCall share, each kept for the call alone.
+type WalkMemo = { seen: Map<number, number>; ends: Int32Array | null };
+
+// The index of the `push` that the option words starting at `from` lead to,
+// or -1 where they lead to another word or to none. An option word opens with
+// a hyphen, and where GIT_VALUE_FLAGS names it the next word is its value and
+// is stepped over with it. Spaces and tabs part the words. `memo.seen` holds
+// the answer for each option word a walk has started at: the walk from a
+// word onward is the same whichever `git` reached it, so a later walk that
+// reaches one takes its answer and stops. `memo.ends` is wordEnd's record,
+// made at the call's first option word. With `into`, the walk reads every
+// word itself and fills in the `-C` values and the redirecting option.
+// `powershell` selects wordEnd's reading of a backslash.
+function verbAfterOptions(c: string, from: number, memo: WalkMemo, powershell: boolean, into?: PushCall): number {
+  const walked: number[] = [];
+  let at = from;
+  let verb: number | undefined;
+  while (c[at] === "-" && (verb = into ? undefined : memo.seen.get(at)) === undefined) {
+    walked.push(at);
+    const ends = (memo.ends ??= new Int32Array(c.length));
+    const end = wordEnd(c, at, powershell, ends);
+    const option = c.slice(at, end);
+    if (into) into.redirect ??= REDIRECT_OPTION.exec(option)?.[1] ?? null;
+    at = pastBlanks(c, end);
+    if (!GIT_VALUE_FLAGS.test(option)) continue;
+    const valueEnd = wordEnd(c, at, powershell, ends);
+    if (into && option === "-C" && valueEnd > at) into.dirs.push(c.slice(at, valueEnd));
+    at = pastBlanks(c, valueEnd);
+  }
+  verb ??= c.startsWith("push", at) && !/\w/.test(c.charAt(at + 4)) ? at : -1;
+  for (const start of walked) memo.seen.set(start, verb);
+  return verb;
+}
+
 /**
- * The operands of the first `git push` at a command position in a command
- * string, or null when it holds none to guard. A command begins at the start
- * of the string or just after a separator, redirect, subshell opener,
- * backtick or line break, optionally behind NAME=value assignment prefixes,
- * and ends at the next of those. Quoted text is not masked, so prose naming a
+ * The first push at a command position in a command string, or null when it
+ * holds none to guard. A push is the word `git`, then zero or more option
+ * words as verbAfterOptions reads them, then `push`. A `git` whose first
+ * word past its options is not `push` is not a push, and the scan goes on
+ * to the next `git`. The walks share one WalkMemo, its `seen` for the option
+ * words and its `ends` for the indexes inside them, so each is walked once
+ * per call, however the command's `git` words nest or quote each other.
+ *
+ * A command begins at the start of the string or just after a separator,
+ * redirect, subshell bracket, backtick or line break, optionally behind
+ * NAME=value assignment prefixes, and ends at the next of those. headStep
+ * reads that test forward over the command, each character once, however
+ * many `git` words it holds. Quoted text is not masked, so prose naming a
  * push after a separator reads as one; a push the shell reaches through a
  * layer this parser does not model (a quoted string run as code, a
- * continuation between `git` and `push`, xargs, an alias) is not seen.
+ * continuation between `git` and `push`, xargs, an alias, an option word
+ * written inside quotes) is not seen. Nor is one whose `git` is spelled
+ * `git.exe`, `Git` or by its path, whose `push` is written in quotes, or
+ * whose options ahead of the verb hold a value-taking option GIT_VALUE_FLAGS
+ * does not list, such as `--attr-source`, whose value then reads as the
+ * verb. The `-C` values are answered as typed, quotes and backslash escapes
+ * in them, and the guard takes those off when it places the folder.
+ *
+ * `powershell` is true for a PowerShell call, where a backslash is a literal
+ * character rather than an escape. It defaults to the Bash reading.
  */
-export function pushArgs(cmd: unknown): string | null {
+export function pushCall(cmd: unknown, powershell = false): PushCall | null {
   const c = String(cmd || "");
-  const re = /\bgit\s+push\b/g;
+  const re = /\bgit\s+/g;
   let m: RegExpExecArray | null;
+  let memo: WalkMemo | null = null;
+  let scanned = 0;
+  let states = AT_HEAD;
   while ((m = re.exec(c)) !== null) {
-    if (!/(?:^|[;|&<>()`\n\x01])[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|[^\s;|&<>()`'"\x01])*[ \t]+)*$/.test(c.slice(0, m.index))) continue;
-    const rest = c.slice(m.index + m[0].length);
+    const from = m.index + m[0].length;
+    memo ??= { seen: new Map(), ends: null };
+    const verb = verbAfterOptions(c, from, memo, powershell);
+    if (verb < 0) continue;
+    for (; scanned < m.index; scanned++) states = headStep(states, c[scanned]);
+    if (!(states & AT_HEAD)) continue;
+    const rest = c.slice(verb + 4);
     const cut = rest.search(/[;|&<>)`\n\x01]/);
-    return (cut < 0 ? rest : rest.slice(0, cut)).trim();
+    const call: PushCall = { operands: (cut < 0 ? rest : rest.slice(0, cut)).trim(), dirs: [], redirect: null };
+    verbAfterOptions(c, from, memo, powershell, call);
+    return call;
   }
   return null;
+}
+
+// The operands of the push pushCall finds, or null where it finds none.
+export function pushArgs(cmd: unknown): string | null {
+  const call = pushCall(cmd);
+  return call === null ? null : call.operands;
 }
 
 // The branch a push's operands name, "" where they name none (the push takes
@@ -119,7 +332,10 @@ function namedBranch(after: string): string | null {
 // Windows, the first GIT_ENV_REDIRECTS name the host's environment sets (or
 // null), the host's SystemRoot and PATH, whether a path is a file, and
 // `resolve`, the module's resolver of a bare name to an absolute path from
-// PATH (.com then .exe on Windows).
+// PATH (.com then .exe on Windows). `lexHost` is the host resolveTarget
+// places a `-C` value with, and `quote` is the fold and bracket guard a
+// folder takes on its way into a refusal or a context line, since the folder
+// is text the command supplied.
 export type MergedPrPushDeps = {
   windows(): Promise<boolean>;
   plantedGitVariable(): Promise<string | null>;
@@ -127,6 +343,8 @@ export type MergedPrPushDeps = {
   pathValue(): Promise<string>;
   isFile(path: string): Promise<boolean>;
   resolve(name: string): Promise<string | null>;
+  lexHost(): Promise<LexHost>;
+  quote(text: string): string;
 };
 
 // One query's stdout, or null where it did not run, exited non-zero or ran
@@ -313,6 +531,25 @@ export function plantedGitVariableNote(name: string): string {
   return `merged-pr-push: this push was not checked for a merged pull request, because ${name} is set in the environment and would redirect the git reads the check rests on.`;
 }
 
+// The same reason for a push behind an option that redirects git at another
+// repository, naming the option.
+export function redirectOptionNote(option: string): string {
+  return `merged-pr-push: this push was not checked for a merged pull request, because ${option} ahead of the verb would redirect the git reads the check rests on.`;
+}
+
+// The same reason for a push whose `-C` value the guard cannot place, the
+// reading the guard file's head lists. `value` is that value as typed,
+// already quoted.
+export function unplacedFolderNote(value: string): string {
+  return `merged-pr-push: this push was not checked for a merged pull request, because the guard could not place the folder ${value} it names with -C.`;
+}
+
+// The sentence each refusal closes with, one space after its last sentence.
+// `folder` is the folder the queries ran in, already quoted.
+export function judgedFolderSentence(folder: string): string {
+  return ` The guard judged the folder ${folder}.`;
+}
+
 // The fixed words of the hook's refusal after the branch, which the shadow
 // reading looks for in the command hook's error text.
 export const MERGED_PR_PUSH_COMMAND_PHRASE = "has already merged, so this push would strand off the integration branch.";
@@ -320,18 +557,19 @@ export const MERGED_PR_PUSH_COMMAND_PHRASE = "has already merged, so this push w
 /**
  * Denies a Bash or PowerShell `git push` to a branch whose pull request the
  * host reports merged, with the hook's refusal as the reason, or whose tip
- * landed on its base by a push, with a refusal naming that base. A command
- * holding no push at a command position matches nothing.
+ * landed on its base by a push, with a refusal naming that base. Each
+ * refusal closes with the folder the guard judged. A command holding no push
+ * at a command position matches nothing.
  */
 export function mergedPrPushGuard(deps: MergedPrPushDeps): BeforeGuard {
   return {
     name: "merged-pr-push",
     commandPhrase: MERGED_PR_PUSH_COMMAND_PHRASE,
-    matches: (e: GuardCall) => (e.tool === "Bash" || e.tool === "PowerShell") && pushArgs(e.command) !== null,
+    matches: (e: GuardCall) => (e.tool === "Bash" || e.tool === "PowerShell") && pushCall(e.command, e.tool === "PowerShell") !== null,
     decide: async (e: GuardCall, ctx: GuardContext) => {
-      const after = pushArgs(e.command);
-      if (after === null) return {};
-      let branch = namedBranch(after);
+      const call = pushCall(e.command, e.tool === "PowerShell");
+      if (call === null) return {};
+      let branch = namedBranch(call.operands);
       if (branch === null) return {};
       // A named branch that is HEAD, or none, is read from the checkout.
       // A named integration branch allows before any query, as the hook's
@@ -343,23 +581,65 @@ export function mergedPrPushGuard(deps: MergedPrPushDeps): BeforeGuard {
         const note = plantedGitVariableNote(planted);
         return { reason: note, context: [note] };
       }
+      if (call.redirect !== null) {
+        const note = redirectOptionNote(call.redirect);
+        return { reason: note, context: [note] };
+      }
+      // The folder the push names, where every query below runs. Each -C
+      // value is read as the commit gate's tokens reads it, its quotes and
+      // escapes taken off there, and placed against the folder before it. On
+      // a Bash call a backslash before a blank first reads as that blank, so
+      // `a\ b` is the one folder `a b`; a value still reading as more than
+      // one word stands down. A value opening with a SESSION_FOLDER_TOKEN is
+      // placed against the session's folder, as resolveTarget reads that
+      // token. An empty value moves nothing, as git reads it. On Windows a
+      // placed folder spelled as a network location stands down before the
+      // directory check, so no stat reaches a folder spelled that way. The
+      // test reads the spelling alone: a drive letter, link or subst path
+      // that leads to a share is still read by the directory check.
+      let folder = ctx.cwd;
+      if (call.dirs.length > 0) {
+        const lexHost = await deps.lexHost();
+        const unplaced = (dir: string) => {
+          const note = unplacedFolderNote(deps.quote(dir));
+          return { reason: note, context: [note] };
+        };
+        for (const dir of call.dirs) {
+          const words = tokens(e.tool === "PowerShell" ? dir : quoteEscapedBlanks(dir));
+          if (words.length !== 1) return unplaced(dir);
+          const value = words[0];
+          if (value === "") continue;
+          if (lexHost.path.sep === "\\" && MSYS_ROOTED.test(value)) return unplaced(dir);
+          const placed = resolveTarget(value, SESSION_FOLDER_TOKEN.test(value) ? ctx.cwd : folder, lexHost);
+          if (placed === null) return unplaced(dir);
+          folder = placed;
+        }
+        if (lexHost.path.sep === "\\" && NETWORK_LOCATION.test(folder)) return unplaced(call.dirs[call.dirs.length - 1]);
+        let directory = false;
+        try {
+          directory = await lexHost.isDirectory(folder);
+        } catch {
+          directory = false;
+        }
+        if (!directory) return unplaced(call.dirs[call.dirs.length - 1]);
+      }
       if (!named) {
-        const head = await query(ctx.host, ["git", "rev-parse", "--abbrev-ref", "HEAD"], ctx.cwd, PUSH_GIT_TIMEOUT_MS);
+        const head = await query(ctx.host, ["git", "rev-parse", "--abbrev-ref", "HEAD"], folder, PUSH_GIT_TIMEOUT_MS);
         if (head === null) return {};
         branch = head.trim();
         if (!branch) return {};
       }
       if (INTEGRATION_BRANCH.test(branch)) return {};
-      const originHead = await query(ctx.host, ["git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], ctx.cwd, PUSH_GIT_TIMEOUT_MS);
+      const originHead = await query(ctx.host, ["git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], folder, PUSH_GIT_TIMEOUT_MS);
       const def = originHead === null ? null : originHead.trim().replace(/^refs\/remotes\/origin\//, "") || null;
       if (def && branch.toLowerCase() === def.toLowerCase()) return {};
-      const pr = await prState(ctx.host, deps, branch, ctx.cwd);
+      const pr = await prState(ctx.host, deps, branch, folder);
       if (pr.state === "MERGED") {
         return {
           deny:
             `Blocked: the PR for branch "${branch}" has already merged, so this push would strand off the ` +
             `integration branch. The branch is frozen (pushed is not merged). Put any post-merge record in a ` +
-            `new doc PR against the integration branch instead of pushing here.\n`,
+            `new doc PR against the integration branch instead of pushing here.${judgedFolderSentence(deps.quote(folder))}\n`,
         };
       }
       if (pr.state === "LANDED") {
@@ -367,7 +647,7 @@ export function mergedPrPushGuard(deps: MergedPrPushDeps): BeforeGuard {
           deny:
             `Blocked: the tip of branch "${branch}" already landed on its base "${pr.base}" by a push, so this push would strand off the ` +
             `integration branch. The branch is frozen. Put any later record on a new branch off the integration branch ` +
-            `instead of pushing here.\n`,
+            `instead of pushing here.${judgedFolderSentence(deps.quote(folder))}\n`,
         };
       }
       return {};

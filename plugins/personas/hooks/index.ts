@@ -920,6 +920,8 @@ function moduleBeforeGuards(dp: any): BeforeGuard[] {
       pathValue: async () => guardPathValueOf(dp, await guardWindowsOf(dp)),
       isFile: (path: string) => guardIsFileOf(dp, path),
       resolve: (name: string) => executableOf(dp, name),
+      lexHost,
+      quote: (text: string) => bracketSafeText(oneLine(text)),
     }),
     readonlyAgentGuard({ lexHost, quote: (text: string) => bracketSafeText(oneLine(text)) }),
     sharedStateGuard({ lexHost, quote: (text: string) => bracketSafeText(oneLine(text)) }),
