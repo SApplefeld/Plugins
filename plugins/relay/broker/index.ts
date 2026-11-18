@@ -2568,7 +2568,7 @@ export async function startBroker(
             // timeout, then the fast model's, then the speech socket's.
             holdMs: JEV_TIMEOUT_MS + ANSWER_TIMEOUT_MS + config.speechTimeoutMs,
             pulse: { periodMs: config.voicePulseMs, volume: config.voicePulseVolume },
-            tier: ({ names, speaker, player, handOff, waitMs, forget }) =>
+            tier: ({ names, speaker, player, handOff, waitMs, forget, mark, superseded }) =>
               createFastTier({
                 names,
                 thresholds: { handoff: config.voiceHandoffThreshold, answer: config.voiceAnswerThreshold },
@@ -2581,6 +2581,8 @@ export async function startBroker(
                 handOff,
                 waitMs,
                 forget,
+                mark,
+                superseded,
                 log: note,
               }),
             speaker:

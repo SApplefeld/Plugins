@@ -30,7 +30,7 @@ import { STOPPED_LINE, isStopPhrase } from "./interrupt.ts";
 import type { FillSource, Player } from "./player.ts";
 import { conversationLine } from "./rank.ts";
 import type { LineNames } from "./rank.ts";
-import type { Speaker } from "./speaker.ts";
+import type { Speaker, SpokenLine } from "./speaker.ts";
 import type { TurnEvent } from "./transcriber.ts";
 import { wordCount } from "./transcriber.ts";
 
@@ -74,6 +74,19 @@ export type TierBinding = {
    * half-turn's answer is never remembered without its question.
    */
   forget: (text: string) => void;
+  /**
+   * The bridge's count of the events that make a helper's answer stale, as it reads now: it rises by
+   * one at each operator end with words that is not lost, before that end reaches the tier, and at
+   * each session reply the bridge accepts. The tier reads it as a turn's end reaches it.
+   */
+  mark: () => number;
+  /**
+   * What has come since `mark` was read, for the tier to ask as a turn's answer returns: "operator"
+   * where the operator holds the floor now or has ended a turn with words since, else "session"
+   * where a session reply was accepted since, else null. A turn's own end rises the count before the
+   * tier reads its mark, so it never reads as coming after it.
+   */
+  superseded: (mark: number) => "operator" | "session" | null;
 };
 
 export type VoiceBridgeOptions = {
@@ -196,6 +209,11 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
   let graceFrom = 0;
   // Whether the operator holds the floor: a turn started and not yet ended.
   let floor = false;
+  // The count the tier's `mark` reads, and its value at the last operator end with words and at the
+  // last accepted session reply, which `superseded` compares a mark with. A leave keeps all three.
+  let events = 0;
+  let operatorAt = 0;
+  let sessionAt = 0;
   // Replies that arrived while the operator held the floor, spoken in order at the turn's end.
   const held: string[] = [];
   // A spoken reply that asked: the operator's next spoken turn answers it directly.
@@ -207,7 +225,8 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
   // that turn's end and cleared by it.
   let stop: number | null = null;
   let releaseTyping: (() => void) | null = null;
-  // The account whose turn the tier is weighing, for the hand-off event's sender.
+  // The account whose operator turn ended last, not counting a backchannel, for the hand-off event's
+  // sender. A turn handed off late, after another operator's turn ended, carries that later name.
   let speakerId = "";
   // The thread posts in flight, chained so a line's messages land in order behind the line before.
   let posting: Promise<void> = Promise.resolve();
@@ -362,6 +381,16 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
     }
   }
 
+  /**
+   * The tier's reading of whether a helper's answer is stale: the operator holds the floor now or
+   * ended a turn with words after `mark`, or failing that a session reply was accepted after it.
+   */
+  function superseded(mark: number): "operator" | "session" | null {
+    if (floor || operatorAt > mark) return "operator";
+    if (sessionAt > mark) return "session";
+    return null;
+  }
+
   /** Remembers every pending line whose speech has settled, in order, and keeps the rest pending. */
   function commitSaid(): void {
     for (let index = 0; index < pending.length; ) {
@@ -382,6 +411,8 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
     handOff,
     waitMs: () => (waiting() ? now() - waitOpenedAt : null),
     forget,
+    mark: () => events,
+    superseded,
   });
   voice = options.speaker === null ? null : options.speaker(tier.player);
 
@@ -389,20 +420,30 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
     tier.speak(text).catch(() => {});
   }
 
-  /** The ring's lines since the last hand-off, in the line form, without the turn's own line. */
-  function linesBefore(turn: string): string[] {
-    const since = [...tier.ring.sinceMark()];
-    const last = since[since.length - 1];
-    if (last !== undefined && last.role === "user" && last.text === turn) since.pop();
-    // One speaker name per hand-off, the operator whose turn this is: the ring holds no account
+  /**
+   * The ring's lines since the last hand-off and before the turn's own line, in the line form, and
+   * that line, the newest operator line past the mark with the turn's text, or null where the ring
+   * holds none. A turn handed off late, after later lines joined the ring, carries only what came
+   * before it, so its question is the event's last line and the later lines wait for the next
+   * hand-off. With no own line, as for a turn the ring dropped at its bound, every line past the
+   * mark is carried, later lines included. A repeated phrase is matched at its newest copy.
+   */
+  function linesBefore(turn: string): { lines: string[]; own: SpokenLine | null } {
+    const since = tier.ring.sinceMark();
+    let at = since.length - 1;
+    while (at >= 0 && !(since[at].role === "user" && since[at].text === turn)) at -= 1;
+    const before = at < 0 ? since : since.slice(0, at);
+    // One speaker name per hand-off, the operator whose turn ended last: the ring holds no account
     // per line.
     const names = options.names(speakerId);
-    return since.map((line) => conversationLine(line, names));
+    return { lines: before.map((line) => conversationLine(line, names)), own: at < 0 ? null : since[at] };
   }
 
   /**
-   * Delivers the turn to the session: the ring's lines past the mark, found by the turn's text as
-   * the ring holds it, then the turn with `withTone`'s note where it carries a tone that note takes.
+   * Delivers the turn to the session: the ring's lines past the mark and before the turn's own,
+   * found by the turn's text as the ring holds it, then the turn with `withTone`'s note where it
+   * carries a tone that note takes. The mark moves through the turn's own line, or past every line
+   * where the ring holds none.
    * Returns whether the session was handed it. Where it was not, the cannot-reach line is spoken
    * before this returns, so the tier speaks no hand-off line ahead of it.
    */
@@ -415,7 +456,8 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
         speakLine(CANNOT_REACH_LINE);
         return false;
       }
-      const text = [...linesBefore(turn), withTone(turn, tone)].join("\n");
+      const carried = linesBefore(turn);
+      const text = [...carried.lines, withTone(turn, tone)].join("\n");
       const event = bufferedEvent(threadId, [
         {
           id: `voice-${String(now())}`,
@@ -435,7 +477,8 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
       if (!waiting()) waitOpenedAt = now();
       graceFrom = now();
       queue.push(bound.sessionId);
-      tier.ring.markNewest();
+      if (carried.own === null) tier.ring.markNewest();
+      else tier.ring.markThrough(carried.own);
       // A hand-off is new work for the session, so a quiet reading taken before it no longer holds,
       // and none is taken until the session has had the grace to open the turn that takes it.
       quietNow = false;
@@ -556,6 +599,13 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
     if (!operator) return;
     floor = false;
     const spoke = event.text !== "" && event.lost !== true;
+    // An end with words makes every answer to an earlier turn stale, on each path below. It counts
+    // here, ahead of the tier, so the mark this turn's own end takes already includes it. An end of
+    // white space alone holds no words, as the tier reads it, and counts nothing.
+    if (spoke && event.text.trim() !== "") {
+      events += 1;
+      operatorAt = events;
+    }
     // A stop phrase over a reading. `stopped` has already cancelled the speech and dropped the
     // replies held behind this turn, so nothing pending is left to remember. The turn is the
     // transcript's and the ring's, the stopped line answers it as a helper's answer would, and it
@@ -637,6 +687,9 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
       try {
         const current = bound();
         if (current === null || current.sessionId !== sessionId || openTurn !== sessionId) return;
+        // An accepted reply makes every helper's answer still out stale, held or spoken.
+        events += 1;
+        sessionAt = events;
         // A reply held behind the operator's floor has still arrived, so it ends the hold now and
         // no hand-off line is spoken over the operator for it.
         if (floor) {
