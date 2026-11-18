@@ -40,11 +40,13 @@ The script makes its own scratch folder, `cc-validate-<version>` under the syste
 
 ## Before the restart
 
-1. Run `pre` with the Bash tool's background option, since it can run 18 minutes when six steps each reach their three-minute timeout. The command writes its own exit code, so read the result from that file rather than from the task finishing:
+1. Run `pre` in the foreground, with the Bash tool's `timeout` set to 600000. Do not set `run_in_background`. Step 3 creates a goal, and the plugin starts a new goal tree only in a turn the operator, the coordinator persona or the architect persona's `[QUEUE]` record started. A background run's finish opens a turn of its own, which is none of these, so `goal_create` would be refused there. The command writes its own exit code, so read the result from that file rather than from the tool's result:
 
    ```
    node <script> pre --repo <plugin folder> --results D:/personas --canary <persona> > <log folder>/upgrade-pre.log 2>&1; echo $? > <log folder>/upgrade-pre.exit
    ```
+
+   Where the tool's result says the command was moved to the background, let it run. Read `upgrade-pre.exit` in the turn the run's finish opens, and go on from step 2. `pre` can run 18 minutes when six steps each reach their three-minute timeout, and a command still running at the tool's timeout is moved to the background and keeps running.
 
 2. Read the exit code from `upgrade-pre.exit`, and the last line of `upgrade-pre.log` for the verdict. The lines above it are one per step, as `<step>: <result> - <evidence>`.
    - **Exit 0, `pre: clear to restart the canary onto <version> (run <id>)`.** Go to step 3.
@@ -57,6 +59,8 @@ The script makes its own scratch folder, `cc-validate-<version>` under the syste
    > Finish upgrade check run <id> by following the upgrade-check skill's "After the restart" section. Call goal_status, call agentic_inbox on <coordinator persona>, and send one relay reply. Then run: node <script> post --run <id> --results D:/personas --rundir <run directory> --tools "ok", or --tools "fail: <which call failed and how>".
 
    Where the operator named the full id this persona's own roster name should reach after this release, add to the objective: `Then run landing with --expect <roster name>=<id> --by <persona>`, with that one pair and the id exactly as the operator named it. The roster name is this persona's entry's `model`, or `opus` where the entry has none. Put no other short name's id in the objective, since this persona's run reads only its own row, and put no id the operator did not name.
+
+   Where `goal_create` is refused because of the turn it runs in, send the operator the verdict, and say the restart waits on any reply from them. This message takes the place of the `pre` clear sentence under `## What to tell the operator`, since you are not restarting now. Create the goal in the turn their reply opens, unless the reply says not to restart. Do not call `supervisor_restart` before the goal exists, since the restart loses everything the goal tree does not hold. The refusal comes, for example, in the turn a long run's finish opens.
 
 4. Call `supervisor_restart` with the reason "upgrade check run <id>: restarting the canary onto <version>".
 
