@@ -226,6 +226,8 @@ export type Item = {
   reraisedAt: string | null;
   planPath: string | null;
   askId: string | null;
+  /** An ask's own short title, as the ledger reads it; null where the ask has none and on every kind but an ask. `text` stays the question. */
+  askTitle: string | null;
   /** The queue entry's id on a blocked item, so a Dismiss can name the entry; null on an ask and a hands item. */
   entryId: string | null;
 };
@@ -332,15 +334,18 @@ export type NeedsMeView = {
 
 /**
  * The ask page's view: one open ask as the persona's ledger holds it, with the fields the Needs-me
- * item drops. `title` is the ledger entry's `entryTitle` and `brief` the kit's decision brief through
- * `pageBrief`, without its part title and ask id lines. The kit scrubs the brief with its redactor
- * where one is present and the ledger reader only caps it in length, so it may still hold a secret
- * and is drawn as text and sent nowhere else. `thread` is the Discord link of the thread of the
- * persona's session that has not ended, null where none exists or the link cannot be built.
+ * item drops. `askTitle` is the ask's own short title, as the item carries it, null where the ask has
+ * none. `title` is the ledger entry's `entryTitle`, which names the goal entry the ask sits on and not
+ * the ask. `brief` is the kit's decision brief through `pageBrief`, without its part title and ask id
+ * lines. The kit scrubs the brief with its redactor where one is present and the ledger reader only
+ * caps it in length, so it may still hold a secret and is drawn as text and sent nowhere else.
+ * `thread` is the Discord link of the thread of the persona's session that has not ended, null where
+ * none exists or the link cannot be built.
  */
 export type AskView = {
   repo: string;
   askId: string;
+  askTitle: string | null;
   question: string;
   recommend: string | null;
   blocking: boolean;
@@ -452,8 +457,9 @@ export type TodayAct = "agree" | "answer" | "discuss" | "dismiss" | "open-pr" | 
 
 /**
  * One item of the Today list. `number` runs from 1 in list order. `who` names the repository's
- * folder, the persona and, on an approve item, the pull request number; `title` is the ask's
- * question, the plan's title or the blocked entry's title; `effect` says what acting on it does.
+ * folder, the persona and, on an approve item, the pull request number; `title` is the ask's own
+ * title where it has one and its question where it has none, the plan's title or the blocked entry's
+ * title; `effect` says what acting on it does.
  * `item` is the Needs me item it stands for, unchanged, so an act posts the body it posts today.
  */
 export type TodayItem = {
@@ -1049,6 +1055,7 @@ function askItem(repo: Repo, ask: AskEntry): Item {
     reraisedAt: drawn.reraisedAt,
     planPath: file === null ? null : relativeUnder(repo.persona.workdir, file),
     askId: ask.id,
+    askTitle: ask.title,
     entryId: null,
   };
 }
@@ -1137,6 +1144,7 @@ function blockedEntries(readings: Readings, repo: Repo): BlockedEntry[] {
         reraisedAt: null,
         planPath: reading === undefined ? null : planRelative(reading),
         askId: null,
+        askTitle: null,
         entryId: status.id,
       },
     });
@@ -1159,6 +1167,7 @@ function handsItems(readings: Readings, repos: readonly Repo[]): Item[] {
         reraisedAt: null,
         planPath: null,
         askId: null,
+        askTitle: null,
         entryId: null,
       });
     }
@@ -1176,6 +1185,7 @@ function handsItems(readings: Readings, repos: readonly Repo[]): Item[] {
       reraisedAt: null,
       planPath: null,
       askId: null,
+      askTitle: null,
       entryId: null,
     });
   }
@@ -1912,7 +1922,7 @@ export function todayItems(readings: Readings): TodayItem[] {
       items.push({
         kind: item.blocking ? "decide" : "answer",
         who: who(persona),
-        title: item.text,
+        title: item.askTitle ?? item.text,
         effect: item.blocking
           ? `${persona} is stopped until you answer. Agree takes the recommendation.`
           : `${persona} proceeds on the recommendation. Answer only to change it.`,
@@ -2008,6 +2018,7 @@ export function askView(
   return {
     repo: repo.persona.name,
     askId: ask.id,
+    askTitle: item.askTitle,
     question: item.text,
     recommend: ask.recommend,
     blocking: item.blocking,

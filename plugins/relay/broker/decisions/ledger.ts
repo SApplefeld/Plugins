@@ -11,6 +11,7 @@
 // `createQueueReader` and not a bare function: a function called afresh could not keep one.
 import path from "node:path";
 import { readCappedFile } from "../capped-read.ts";
+import { visible } from "../sanitize.ts";
 import { STORE_FILE_NAME, freshHeld, readHeldFile } from "../board/queues.ts";
 import type { HeldFile, PlanStat, QueueReaderOptions } from "../board/queues.ts";
 import type { RosterPersona } from "../board/roster.ts";
@@ -45,6 +46,9 @@ export type AskEntry = {
   nodeId: string | null;
   planPath: string | null;
   entryTitle: string | null;
+  /** The ask's own short title, as the asking session wrote it; null where the ask has none, a blank
+   * title included. `entryTitle` names the goal entry the ask sits on, which several asks may share. */
+  title: string | null;
   question: string;
   recommend: string | null;
   opener: string | null;
@@ -141,6 +145,15 @@ function proseField(value: unknown): string | null {
   return typeof value === "string" ? markedCut(value, MAX_ASK_FIELD_LENGTH) : null;
 }
 
+/** A one-line title the operator reads as prose: `visible` drops the characters that draw as
+ * nothing and folds the whitespace to single spaces, and what is left empty reads as null, so a
+ * title of spaces or zero-width characters means none. The cut shows itself, as `proseField`'s. */
+function titleField(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = visible(value);
+  return text === "" ? null : markedCut(text, MAX_ASK_FIELD_LENGTH);
+}
+
 function numberField(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -155,6 +168,7 @@ function entryOf(value: unknown): Readonly<AskEntry> | null {
     nodeId: textField(value.nodeId),
     planPath: textField(value.planPath),
     entryTitle: textField(value.entryTitle),
+    title: titleField(value.title),
     question,
     recommend: proseField(value.recommend),
     opener: textField(value.opener),

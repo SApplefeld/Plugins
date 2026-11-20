@@ -1029,6 +1029,16 @@
       : null;
   }
 
+  /**
+   * An ask's own short title, the one its persona wrote, where it is a string that is not blank, or
+   * null for an ask with none and for every other item. The page names a titled ask by it, and every
+   * act still sends the item's text, the question.
+   */
+  function askTitleOf(item) {
+    const title = txt(item.askTitle);
+    return item.kind === "ask" && title.trim() !== "" ? title : null;
+  }
+
   /** Appends "worker <state>" to `line`, and ", last turn <age> ago" where the worker has had one, the age as `clockText`. */
   function workerWords(line, worker, now) {
     const state = worker && worker.surfaceState ? worker.surfaceState : "no session";
@@ -1070,7 +1080,7 @@
     if (opened !== null) badge.append(" · ", clockText("span", null, span(now - opened)));
     head.append(badge);
     card.append(head);
-    if (item) card.append(link("need-line", askHrefOf(item) ?? repoHref(repo.name), cutPoints(txt(item.text), NEED_POINTER_POINTS)));
+    if (item) card.append(link("need-line", askHrefOf(item) ?? repoHref(repo.name), cutPoints(askTitleOf(item) ?? txt(item.text), NEED_POINTER_POINTS)));
     const meta = h("div", "meta");
     meta.append("queue " + (num(repo.queueDepth) ?? 0) + " · ");
     workerWords(meta, repo.worker, now);
@@ -3671,9 +3681,9 @@
     while (needsMe.acting) await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  /** What a dismissal's toast names the item by: a review's plan title, any other item's text, cut short. */
+  /** What a dismissal's toast names the item by: a review's plan title, a titled ask's title, any other item's text, cut short. */
   function dismissHeadline(one) {
-    return cutPoints(txt(one.kind === "review" ? one.title : one.text), 60);
+    return cutPoints(one.kind === "review" ? txt(one.title) : askTitleOf(one) ?? txt(one.text), 60);
   }
 
   /**
@@ -4146,10 +4156,12 @@
   }
 
   /**
-   * One item in the detail pane: who, its kind and age; its headline as the heading, an ask's whole
-   * question and any other item's text cut; the meta line, with the whole text under it where the
-   * headline was cut; for an ask "Recommendation", the recommendation as the one tinted option, then
-   * "Why it came up", the ask's brief; "Conversation", the session's newest lines; then
+   * One item in the detail pane: who, its kind and age; its headline as the heading, which for an ask
+   * with a title is that title with the whole question directly under it, for an ask with none its
+   * whole question, and for any other item its text cut; the meta line, with the whole text under it
+   * where an item headed by its text had the headline cut; for an ask "Recommendation", the
+   * recommendation as the one tinted option, then "Why it came up", the ask's brief; "Conversation",
+   * the session's newest lines; then
    * the act row with each act's key, the Answer box where open, and the broker's last word. An ask
    * takes Agree where it carries a recommendation, Answer, Discuss and Dismiss. A blocked run takes
    * Discuss and Dismiss, since it carries no recommendation and its session is stopped. Any other kind,
@@ -4166,18 +4178,22 @@
     const opened = parse(item.openedAt);
     for (const tag of kindTags(item)) who.append(" ", tag);
     head.append(who, clockText("span", "nm-age", opened === null ? "" : span(now - opened)));
-    // An ask's heading is its whole question, so the question shows once; any other item's is cut.
-    const headline = item.kind === "ask" ? txt(item.text) : cutPoints(txt(item.text), HEADLINE_POINTS);
-    // An ask's question opens its own page; any other item's text is plain.
+    // A titled ask is headed by its title, an untitled ask by its whole question, so the question shows
+    // once; any other item by its text, cut.
+    const title = askTitleOf(item);
+    const headline = title !== null ? cutPoints(title, HEADLINE_POINTS) : item.kind === "ask" ? txt(item.text) : cutPoints(txt(item.text), HEADLINE_POINTS);
+    // An ask's heading opens its own page; any other item's is plain.
     const href = askHrefOf(item);
     const heading = h("h2", "nm-heading", null, "heading");
     heading.append(href !== null ? link("nm-text", href, headline) : h("span", "nm-text", headline));
     box.append(head, heading);
+    // A titled ask's whole question stands directly under its title, and nowhere else in the detail but the Answer box's quote.
+    if (title !== null) box.append(md("div", "nm-whole", item.text, "whole"));
     const key = itemKey(item);
     const held = contextual(item) ? needsMe.detail.get(key) : undefined;
     box.append(metaLine(item, held, now));
-    // The whole text under the meta line where the headline was cut, which an ask's never is.
-    if (headline !== txt(item.text)) box.append(md("div", "nm-whole", item.text, "whole"));
+    // For an item headed by its text, the whole text under the meta line where the headline was cut, which an ask's never is.
+    if (title === null && headline !== txt(item.text)) box.append(md("div", "nm-whole", item.text, "whole"));
     if ((item.kind !== "ask" && item.kind !== "blocked") || txt(item.repo) === "") return box;
 
     const processing = needsMe.processing.has(key);
@@ -5076,7 +5092,7 @@
   }
 
   /**
-   * One ask: who asked and how long ago, the question, the recommendation, the brief, the plan, the
+   * One ask: who asked and how long ago, its title where it has one, the question, the recommendation, the brief, the plan, the
    * thread, the step to the previous and next ask, then Agree, Answer and Dismiss with a Context of
    * the session's lines. They are the Today page's acts, with the same bodies, words, touched mark
    * and inline Answer box, so the batch there skips an ask answered here. A handled ask, one whose
@@ -5088,7 +5104,7 @@
     const out = document.createDocumentFragment();
     const now = nowOf(view);
     // The ask in a Today item's shape, raise time included, so the shared acts and the touched mark key it the same way and send the version this page drew.
-    const item = { kind: "ask", repo: txt(view.repo), askId: txt(view.askId), text: txt(view.question), recommend: view.recommend, openedAt: view.openedAt, reraisedAt: view.reraisedAt };
+    const item = { kind: "ask", repo: txt(view.repo), askId: txt(view.askId), askTitle: view.askTitle, text: txt(view.question), recommend: view.recommend, openedAt: view.openedAt, reraisedAt: view.reraisedAt };
     const key = itemKey(item);
     // A delivered ask's hide holds for the reading it was drawn from alone, as on the Today page.
     for (const [held, drawn] of needsMe.delivered) if (drawn !== view) needsMe.delivered.delete(held);
@@ -5110,6 +5126,9 @@
 
     const ask = h("section", needsMe.out.has(key) ? "card pad section ask-card nm-acting" : "card pad section ask-card");
     ask.setAttribute("aria-label", "Ask");
+    // A titled ask's title heads the card above its question; an ask with none opens with the question.
+    const title = askTitleOf(item);
+    if (title !== null) ask.append(h("h2", "nm-heading", title, "title"));
     ask.append(md("div", "ask-question", item.text));
     if (txt(item.recommend) !== "") ask.append(recRow(txt(item.recommend)));
     out.append(ask);
