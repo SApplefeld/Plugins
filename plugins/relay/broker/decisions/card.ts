@@ -149,6 +149,8 @@ export const MAX_BRIEF_PARTS = 3;
 /** What the line opening each part of the kit's brief begins with, bare, since the kit escapes every
  * asterisk in a worker's words. */
 const BRIEF_PART_MARKER = "**Decision brief:";
+/** The label line the kit opens each option part of a brief with. */
+const BRIEF_OPTIONS_LABEL = "**Options**";
 
 /** The widest `heartbeat` draws: "just now" and "999d ago" are both eight characters. */
 const MAX_HEARTBEAT_LENGTH = 8;
@@ -280,6 +282,34 @@ function briefParts(brief: string): string[] {
     parts[parts.length - 1]?.push(line);
   }
   return parts.map((lines) => lines.join("\n"));
+}
+
+/**
+ * A brief as the page draws it: each part's title line, read as `briefParts` reads it, is dropped,
+ * with the `-# ask <id>` line under it and one blank line after those. A thread needs them to tell its
+ * parts apart, and the page already names the ask. A later option part's `**Options**` label under
+ * a dropped title goes too, so the options read as one list. Where a title line was dropped, blank lines left
+ * at the start are dropped too, and null is returned where nothing but blank lines is left. A brief
+ * with no title line is returned as it is.
+ */
+export function pageBrief(brief: string): string | null {
+  const lines = brief.split("\n");
+  const kept: string[] = [];
+  let dropped = false;
+  for (let at = 0; at < lines.length; at++) {
+    if (!visible(lines[at] ?? "").startsWith(BRIEF_PART_MARKER)) {
+      kept.push(lines[at] ?? "");
+      continue;
+    }
+    dropped = true;
+    if (visible(lines[at + 1] ?? "").startsWith("-# ask ")) at++;
+    if ((lines[at + 1] ?? "x").trim() === "") at++;
+    const label = (line: string): boolean => visible(line).trim() === BRIEF_OPTIONS_LABEL;
+    if (label(lines[at + 1] ?? "") && kept.some(label)) at++;
+  }
+  if (!dropped) return brief;
+  while (kept.length > 0 && (kept[0] ?? "").trim() === "") kept.shift();
+  return kept.join("\n").trim() === "" ? null : kept.join("\n");
 }
 
 /**

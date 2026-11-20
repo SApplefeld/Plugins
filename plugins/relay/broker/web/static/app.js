@@ -4146,10 +4146,10 @@
   }
 
   /**
-   * One item in the detail pane, in the order the inbox mockup draws it: who, its kind and age; its
-   * headline as the heading; the meta line, with the whole text under it where the headline was cut,
-   * which an ask draws first under "Why it came up"; for an ask "Why it came up", the ask's brief, and
-   * "Options", the recommendation as the one tinted option, since the ledger records no alternatives; "Conversation", the session's newest lines; then
+   * One item in the detail pane: who, its kind and age; its headline as the heading, an ask's whole
+   * question and any other item's text cut; the meta line, with the whole text under it where the
+   * headline was cut; for an ask "Recommendation", the recommendation as the one tinted option, then
+   * "Why it came up", the ask's brief; "Conversation", the session's newest lines; then
    * the act row with each act's key, the Answer box where open, and the broker's last word. An ask
    * takes Agree where it carries a recommendation, Answer, Discuss and Dismiss. A blocked run takes
    * Discuss and Dismiss, since it carries no recommendation and its session is stopped. Any other kind,
@@ -4166,7 +4166,8 @@
     const opened = parse(item.openedAt);
     for (const tag of kindTags(item)) who.append(" ", tag);
     head.append(who, clockText("span", "nm-age", opened === null ? "" : span(now - opened)));
-    const headline = cutPoints(txt(item.text), HEADLINE_POINTS);
+    // An ask's heading is its whole question, so the question shows once; any other item's is cut.
+    const headline = item.kind === "ask" ? txt(item.text) : cutPoints(txt(item.text), HEADLINE_POINTS);
     // An ask's question opens its own page; any other item's text is plain.
     const href = askHrefOf(item);
     const heading = h("h2", "nm-heading", null, "heading");
@@ -4175,21 +4176,15 @@
     const key = itemKey(item);
     const held = contextual(item) ? needsMe.detail.get(key) : undefined;
     box.append(metaLine(item, held, now));
-    // The whole text where the headline was cut: the first thing under "Why it came up" for an ask that draws it, under the meta line otherwise.
-    const whole = headline !== txt(item.text) ? md("div", "nm-whole", item.text, "whole") : null;
-    const whyDrawn = item.kind === "ask" && txt(item.repo) !== "";
-    if (whole !== null && !whyDrawn) box.append(whole);
+    // The whole text under the meta line where the headline was cut, which an ask's never is.
+    if (headline !== txt(item.text)) box.append(md("div", "nm-whole", item.text, "whole"));
     if ((item.kind !== "ask" && item.kind !== "blocked") || txt(item.repo) === "") return box;
 
     const processing = needsMe.processing.has(key);
     if (needsMe.out.has(key) || processing) box.classList.add("nm-acting");
     if (item.kind === "ask") {
-      const why = detailSection("Why it came up", "why");
-      if (whole !== null) why.append(whole);
-      const brief = held !== undefined && isObject(held.ask) ? txt(held.ask.brief) : "";
-      if (brief.trim() !== "") why.append(md("div", "ask-brief", brief));
-      else why.append(h("p", "meta", held === undefined || (held.loading && !isObject(held.ask)) ? "reading" : "No brief recorded for this ask."));
-      const options = detailSection("Options", "options");
+      // The recommendation comes before the brief, so the situation is read with it in mind.
+      const options = detailSection("Recommendation", "options");
       if (txt(item.recommend).trim() !== "") {
         const option = h("div", "nm-opt rec");
         option.append(h("span", "nm-opt-tag", "RECOMMENDED"), md("div", "nm-opt-text", item.recommend));
@@ -4197,7 +4192,11 @@
       } else {
         options.append(h("p", "meta", "No recommendation to agree to."));
       }
-      box.append(why, options);
+      const why = detailSection("Why it came up", "why");
+      const brief = held !== undefined && isObject(held.ask) ? txt(held.ask.brief) : "";
+      if (brief.trim() !== "") why.append(md("div", "ask-brief", brief));
+      else why.append(h("p", "meta", held === undefined || (held.loading && !isObject(held.ask)) ? "reading" : "No brief recorded for this ask."));
+      box.append(options, why);
     }
     box.append(conversation(item, held, now));
 

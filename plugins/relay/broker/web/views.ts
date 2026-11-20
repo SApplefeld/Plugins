@@ -22,6 +22,7 @@ import type { PersonaQueue, QueueEntry, QueuePlanReading } from "../board/queues
 import type { RosterPersona } from "../board/roster.ts";
 import { personaStatus } from "../board/status.ts";
 import type { PersonaStatus, StatusWord } from "../board/status.ts";
+import { pageBrief } from "../decisions/card.ts";
 import { questionOf } from "../decisions/ledger.ts";
 import type { AskEntry, LedgerReading } from "../decisions/ledger.ts";
 import { DEFAULT_EXITED_AFTER_MS, DEFAULT_IDLE_AFTER_MS } from "../discord/config.ts";
@@ -331,11 +332,11 @@ export type NeedsMeView = {
 
 /**
  * The ask page's view: one open ask as the persona's ledger holds it, with the fields the Needs-me
- * item drops. `title` is the ledger entry's `entryTitle` and `brief` the kit's decision brief, which
- * the kit scrubs with its redactor where one is present and the ledger reader only caps in length, so
- * the brief may still hold a secret and is drawn as text and sent nowhere else. `thread` is the
- * Discord link of the thread of the persona's session that has not ended, null where none exists or
- * the link cannot be built.
+ * item drops. `title` is the ledger entry's `entryTitle` and `brief` the kit's decision brief through
+ * `pageBrief`, without its part title and ask id lines. The kit scrubs the brief with its redactor
+ * where one is present and the ledger reader only caps it in length, so it may still hold a secret
+ * and is drawn as text and sent nowhere else. `thread` is the Discord link of the thread of the
+ * persona's session that has not ended, null where none exists or the link cannot be built.
  */
 export type AskView = {
   repo: string;
@@ -2014,7 +2015,7 @@ export function askView(
     reraisedAt: item.reraisedAt,
     title: ask.entryTitle,
     planPath: item.planPath,
-    brief: ask.brief,
+    brief: ask.brief === null ? null : pageBrief(ask.brief),
     thread: repo.record === null ? null : threadLink(repo.record.sessionId),
     handled: handled !== null,
     handledAt: handled === null ? null : iso(handled.markedAt),
