@@ -154,14 +154,14 @@ export type OutboundRouterOptions = {
    */
   askTap?: OutboundAskTap;
   /**
-   * The talk page's transcript ring, present only while the web surface is on. Shown each line the
-   * thread receives from a session once the whole post has landed: a reply-tool post (`reply`), a
-   * Stop mirror's reply (`mirror`), a mirrored or transcript-read prompt (`prompt`), a peer message
-   * in either direction (`peer`) and a task notice (`notice`). Narration is never shown to it, and
-   * a reply mirror dropped as the reply tool's echo is not shown again. The lineage is read from
-   * the session's registry record at the call, and a session with none is not shown. The calls are
-   * synchronous and made after the post has settled, and a throw out of one is caught and logged
-   * with the session and never the text.
+   * The transcript ring the talk page and the local door read, present while the web surface or
+   * the door is on. Shown each line the thread receives from a session once the whole post has
+   * landed: a reply-tool post (`reply`), a Stop mirror's reply (`mirror`), a mirrored or
+   * transcript-read prompt (`prompt`), a peer message in either direction (`peer`) and a task
+   * notice (`notice`). Narration is never shown to it, and a reply mirror dropped as the reply
+   * tool's echo is not shown again. The lineage is read from the session's registry record at the
+   * call, and a session with none is not shown. The calls are synchronous and made after the post
+   * has settled, and a throw out of one is caught and logged with the session and never the text.
    */
   talkTap?: TalkTap;
   /**

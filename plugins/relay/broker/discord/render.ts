@@ -1823,7 +1823,30 @@ export function renderVoiceLine(role: VoiceLineRole, name: string, text: string)
  * nor draw a chip, and the name takes the escape and the bound a peer's name takes.
  */
 export function renderPageLine(name: string, text: string): string[] {
-  return attributed(withoutInvisible(text).trim(), `${inertField(name, MAX_PEER_NAME_DRAWN)} (page): `);
+  return labelledLine(name, "page", text);
+}
+
+/**
+ * One line a named person wrote that a program on this host handed in through the local door,
+ * rendered as the ordered messages it takes to carry it whole: `<name> (portal): <text>`, the
+ * author label the session reads on the same line's event.
+ *
+ * The page line's treatment from the page line's own machinery, since the name and the text are
+ * both chosen by the door's caller: neither can open a quoted block nor draw an angle-bracket
+ * chip, such as a mention pill, a timestamp chip, a channel link or a custom emoji. A masked link
+ * and a bare link stay live in the text, as in mirrored text.
+ */
+export function renderDoorLine(name: string, text: string): string[] {
+  return labelledLine(name, "portal", text);
+}
+
+/**
+ * A person's typed line under `<name> (<slot>): `. The name takes the escape and the bound a peer's
+ * name takes, the text loses the invisible class, and the attribution is composed after the escape
+ * and spent against every message's budget.
+ */
+function labelledLine(name: string, slot: string, text: string): string[] {
+  return attributed(withoutInvisible(text).trim(), `${inertField(name, MAX_PEER_NAME_DRAWN)} (${slot}): `);
 }
 
 /**

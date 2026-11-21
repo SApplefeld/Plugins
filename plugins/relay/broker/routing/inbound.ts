@@ -29,7 +29,7 @@
 // here consults it for that.
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { inertBlock, renderPageLine } from "../discord/render.ts";
+import { inertBlock, renderDoorLine, renderPageLine } from "../discord/render.ts";
 import type { CallOutcome } from "../discord/transport.ts";
 import { questionOf } from "../decisions/ledger.ts";
 import { boundedAuthor, clean, oneLine, withoutInvisible } from "../sanitize.ts";
@@ -275,6 +275,12 @@ export type WebDeliveryStatus =
   | "unknown-file";
 
 /**
+ * What a line handed in through the local door became: each status with the meaning
+ * `WebDeliveryStatus` gives it. A door line names no file, so no file of one can be unknown.
+ */
+export type DoorDeliveryStatus = Exclude<WebDeliveryStatus, "unknown-file">;
+
+/**
  * What a typed answer from the page did. `answered` resolved the session's held question with the
  * words; `no-question` found none the desk would answer with them, and delivered and posted nothing.
  * `too-long` is a line past the inbound ceiling, which is never an answer, as a cut Discord message
@@ -294,6 +300,23 @@ export const UNPOSTED_WEB_ID_PREFIX = "web-";
  * admitted. No Discord account's id takes this shape, so a held line's origin is read off its id.
  */
 export const WEB_SENDER_PREFIX = "web:";
+
+/**
+ * The sender id a door line carries: this prefix and the bounded name its caller gave. No Discord
+ * account's id takes this shape, so a held line's origin and a ring line's are read off the id.
+ */
+export const DOOR_SENDER_PREFIX = "portal:";
+
+/**
+ * The label a door line's author rides under on its event, in the held buffer and in the talk ring:
+ * the name bounded as the gateway bounds a display name and whole past an `@`, or the
+ * door's own label where the bound leaves nothing, then ` (portal)`. The label runs past the author
+ * bound, so a held line's label is built again from its sender id at a restore rather than read
+ * back from the file, where the loader's bound would cut it.
+ */
+function doorAuthorLabel(name: string): string {
+  return `${boundedAuthor(name) || "portal"} (portal)`;
+}
 
 /**
  * The prefixes a workers-board act opens with. A page line whose bounded words open with one, case
@@ -333,15 +356,35 @@ type WebUpload = { id: string; path: string; name: string; contentType: string }
  * post, as a reply's file does, and each other file, or the first where there is no text, rides a
  * post of its own under the author label and the file's reduced name.
  */
-function pagePosts(name: string, words: string, uploads: readonly WebUpload[]): Array<{ text: string; upload: WebUpload | null }> {
-  const posts: Array<{ text: string; upload: WebUpload | null }> = renderPageLine(name, words).map((part) => ({ text: part, upload: null }));
+function pagePosts(
+  render: TypedLine["render"],
+  name: string,
+  words: string,
+  uploads: readonly WebUpload[],
+): Array<{ text: string; upload: WebUpload | null }> {
+  const posts: Array<{ text: string; upload: WebUpload | null }> = render(name, words).map((part) => ({ text: part, upload: null }));
   for (const [index, upload] of uploads.entries()) {
     const last = posts[posts.length - 1];
     if (index === 0 && last !== undefined) last.upload = upload;
-    else for (const part of renderPageLine(name, upload.name).slice(0, 1)) posts.push({ text: part, upload });
+    else for (const part of render(name, upload.name).slice(0, 1)) posts.push({ text: part, upload });
   }
   return posts;
 }
+
+/**
+ * What tells a page line from a door line on the one path that delivers both: who the line is
+ * attributed to, the class it is delivered under, how its thread copy is rendered, whether its words
+ * can make it a workers-board act, and the word a log line names its surface by.
+ */
+type TypedLine = {
+  name: string;
+  author: string;
+  senderId: string;
+  senderClass: SenderClass;
+  render: (name: string, text: string) => string[];
+  boardActs: boolean;
+  surface: "web" | "door";
+};
 
 /** A message the router built, carrying the paths saved from it, or no field where there are none. */
 function withFiles(message: BufferedMessage, files: readonly string[]): BufferedMessage {
@@ -537,17 +580,17 @@ export type InboundRouterOptions = {
    */
   receipts?: { delivered: (threadId: string, messageId: string, at: number) => void };
   /**
-   * The talk page's transcript ring, present only while the web surface is on. Shown one `inbound`
-   * line for each message handed to a session, with the author and class the message carries, and
-   * one for each typed Discord answer or verdict the thread consumes, which no session is handed. A
-   * rate-dropped, refused or ended-session message never reaches it, and a throw out of it is caught
-   * and logged with the session and never the text.
+   * The transcript ring the talk page and the local door read, present while the web surface or
+   * the door is on. Shown one `inbound` line for each message handed to a session, with the author
+   * and class the message carries, and one for each typed Discord answer or verdict the thread
+   * consumes, which no session is handed. A rate-dropped, refused or ended-session message never
+   * reaches it, and a throw out of it is caught and logged with the session and never the text.
    */
   talkTap?: TalkTap;
   /**
-   * The thread messenger's post, for the copy of a web line that goes into the session's Discord
-   * thread as the bot. Absent, as on a broker with no web surface, `deliverWeb` posts nothing and
-   * every web line takes the unposted id.
+   * The thread messenger's post, for the copy of a web line or a door line that goes into the
+   * session's Discord thread as the bot. The broker wires it whether the web surface is on or off.
+   * Absent, `deliverWeb` and `deliverDoor` post nothing and every such line takes the unposted id.
    */
   page?: {
     post: (input: {
@@ -574,6 +617,11 @@ export type InboundRouterOptions = {
    * held page line is admitted.
    */
   webOperators?: readonly string[];
+  /**
+   * Whether the local door is on. Read only where a door line held across a restart is restored:
+   * true, the line is a participant's again, and absent or false it is dropped.
+   */
+  door?: boolean;
   /**
    * The attachment intake, which fetches a delivered message's files and saves them under the
    * broker's state directory. Absent, a message's attachments are ignored, and a message with no
@@ -627,6 +675,18 @@ export type InboundRouter = {
    * event carries their saved paths, and the thread's copy carries the files. Never throws.
    */
   deliverWeb: (lineage: string, login: string, text: string, fileIds: readonly string[]) => Promise<WebDeliveryStatus>;
+  /**
+   * Hands a line `name` wrote, handed in through the local door, to the live session carrying
+   * `lineage`, on the path a page line takes: the same bound on the text, the same rate window, and
+   * a copy posted into the session's thread first. The line is a participant's whoever the caller
+   * says wrote it, since the door's key is a file any session under the broker's account can read:
+   * it is delivered as words, so it approves no tool call and answers no held question, and it is
+   * never a workers-board act. It carries no file. `name` is a display name the caller chose, bounded
+   * as the gateway bounds one. `truncated` is true where the text ran past the inbound ceiling and
+   * was cut. It does not read the router's `door` option: the door's routes, and so the calls to
+   * this, exist only while the door is on. Never throws.
+   */
+  deliverDoor: (lineage: string, name: string, text: string) => Promise<{ status: DoorDeliveryStatus; truncated: boolean }>;
   /**
    * Answers the question the live session carrying `lineage` is held on with a line the operator
    * typed on the page, through the desk's `answerTyped`, the seam a typed Discord answer takes. The
@@ -1427,9 +1487,19 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
    * page line, whose sender is a tailnet login under `WEB_SENDER_PREFIX`, was admitted by the web
    * listener's login list and is the operator's again only where that login is still on it. Its
    * device is not checked again, since the held file carries no node: the line passed the device
-   * list and the host-node refusal when it was written.
+   * list and the host-node refusal when it was written. A door line, whose sender is a name under
+   * `DOOR_SENDER_PREFIX`, is a participant's again while the door is on and dropped while it is off.
+   * It is read ahead of the roster and never from the class in the file, so neither a roster entry
+   * of that shape nor a rewritten file restores one as an operator's. Its author label is built
+   * again from the name in its sender id, since the loader cuts the label in the file at the author
+   * bound and the label runs past it.
    */
   function reclassed(message: BufferedMessage): BufferedMessage | null {
+    if (message.senderId.startsWith(DOOR_SENDER_PREFIX)) {
+      if (options.door !== true) return null;
+      const author = doorAuthorLabel(message.senderId.slice(DOOR_SENDER_PREFIX.length));
+      return { ...message, author, senderClass: "participant" };
+    }
     if (message.senderId.startsWith(WEB_SENDER_PREFIX)) {
       const login = message.senderId.slice(WEB_SENDER_PREFIX.length).toLowerCase();
       return options.webOperators?.includes(login) === true ? { ...message, senderClass: "operator" } : null;
@@ -1481,14 +1551,17 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         );
         continue;
       }
-      // Each dropped line is counted under the list that stopped admitting it, so the log says
-      // which list changed. Neither count names a login, an account or any of the text.
+      // Each dropped line is counted under what stopped admitting it, the roster, the web listener's
+      // list or the local door being off, so the log says which changed. No count names a login, an
+      // account, a name or any of the text.
       const messages: BufferedMessage[] = [];
       let fromRoster = 0;
       let fromPage = 0;
+      let fromDoor = 0;
       for (const message of entry.messages) {
         const classed = reclassed(message);
         if (classed !== null) messages.push(classed);
+        else if (message.senderId.startsWith(DOOR_SENDER_PREFIX)) fromDoor += 1;
         else if (message.senderId.startsWith(WEB_SENDER_PREFIX)) fromPage += 1;
         else fromRoster += 1;
       }
@@ -1502,6 +1575,12 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         log(
           `routing: dropped ${String(fromPage)} of ${count} buffered messages held for session ` +
             `${entry.sessionId}, page lines whose login the web listener no longer admits`,
+        );
+      }
+      if (fromDoor > 0) {
+        log(
+          `routing: dropped ${String(fromDoor)} of ${count} buffered messages held for session ` +
+            `${entry.sessionId}, door lines written through the local door, which is off`,
         );
       }
       if (messages.length > 0) kept.push({ entry: { ...entry, messages }, record });
@@ -1551,6 +1630,8 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
           buffered.id.startsWith(UNPOSTED_WEB_ID_PREFIX) || buffered.id.startsWith(REACTION_ID_PREFIX)
             ? null
             : { threadId, messageId: buffered.id },
+        // The door's mark, so the door's reader can tell a line the door itself handed in.
+        ...(buffered.senderId.startsWith(DOOR_SENDER_PREFIX) ? { door: true } : {}),
       });
     } catch {
       log(`routing: the talk tap could not take a line for session ${record.sessionId}`);
@@ -1880,6 +1961,168 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     await after;
   }
 
+  /**
+   * The one path a line typed outside Discord takes to a session, a page line and a door line
+   * alike, from finding the live session to the hand-over: `line` carries everything that tells
+   * the two apart. The answer is the line's status and whether its text was cut at the inbound
+   * ceiling, which reads false where the line was refused before its text was bounded. A line that
+   * names no file is never answered `unknown-file`. Never throws.
+   */
+  function deliverTyped(
+    lineage: string,
+    text: string,
+    fileIds: readonly [],
+    line: TypedLine,
+  ): Promise<{ status: DoorDeliveryStatus; truncated: boolean }>;
+  function deliverTyped(
+    lineage: string,
+    text: string,
+    fileIds: readonly string[],
+    line: TypedLine,
+  ): Promise<{ status: WebDeliveryStatus; truncated: boolean }>;
+  async function deliverTyped(
+    lineage: string,
+    text: string,
+    fileIds: readonly string[],
+    line: TypedLine,
+  ): Promise<{ status: WebDeliveryStatus; truncated: boolean }> {
+    /** A refusal made before the text was bounded, or of a text with nothing to cut. */
+    const short = (status: WebDeliveryStatus): { status: WebDeliveryStatus; truncated: boolean } => ({ status, truncated: false });
+    // The session is found by lineage, never by thread: the caller names the persona, and the
+    // thread is read off the session that carries it. An ended newest record is told apart from a
+    // lineage no record carries, since the two read differently to whoever sent the line.
+    const records = options.registry.list();
+    const record = liveByLineage(records, lineage);
+    if (record === null) return short(records.some((held) => held.lineage === lineage) ? "ended" : "no-session");
+    const threadId = options.threadFor(record.sessionId);
+    if (threadId === null) return short("no-thread");
+
+    // Bounded exactly as a Discord line is, and the same emptiness rule: nothing visible and no
+    // file is nothing to hand a session.
+    const { text: words, truncated } = bounded(text);
+    if (words === "" && fileIds.length === 0) return short("empty");
+
+    // Each id must name a file the page sent for this very session: an id the store never handed
+    // out, and one saved for another session, deliver nothing, before anything is posted or spent.
+    const uploads: WebUpload[] = [];
+    for (const id of fileIds) {
+      const upload = options.webFiles?.upload(id) ?? null;
+      if (upload === null || upload.sessionId !== record.sessionId) return short("unknown-file");
+      uploads.push({ id, path: upload.path, name: upload.name, contentType: upload.contentType });
+    }
+
+    // Read before anything is posted or spent: a line that would reach no pipe should neither
+    // appear in the thread as delivered nor spend the session's window. `relays.deliver` answers
+    // false for exactly this token state, so this is that answer read ahead of the write.
+    if (!options.relays.attached(record.processToken)) return { status: "no-channel", truncated };
+
+    // The one window the session has, shared with its Discord lines, so a flood from the page or
+    // the door and a flood from the thread are the same flood.
+    if (!withinRate(record.sessionId)) {
+      log(`routing: session ${record.sessionId} is over its inbound rate ceiling, dropping a ${line.surface} line`);
+      return { status: "rate", truncated };
+    }
+
+    const { name, author, senderId } = line;
+
+    // In the thread's turn, as a Discord message is, so the session reads the line in the order
+    // it landed against the thread's own. The thread post comes first, inside the turn,
+    // because its id is the id the event and the receipts carry.
+    let channel = true;
+    // Whether the pipe took the line, read off the write itself: `attached` can answer true
+    // inside the turn and the pipe still refuse the write that follows the thread post.
+    let written = true;
+    const { after } = await inTurn(threadId, async () => {
+      // Read again here, since the turn can wait on an earlier message's download and the pipe
+      // can go while it does. A line read as deliverable above but with no pipe now is neither
+      // posted nor handed over, and the caller is told no-channel, the same answer the early read
+      // gives. The window spent above stays spent, as it does for a Discord line the pipe refuses.
+      if (!options.relays.attached(record.processToken)) {
+        channel = false;
+        return { after: Promise.resolve() };
+      }
+      // The thread's copy, rendered by the machinery a voice line is rendered by, so a typed line
+      // cannot draw an angle-bracket chip, such as a mention pill, a timestamp chip, a channel link
+      // or a custom emoji, or open a quoted block in the thread, and split where it is longer than
+      // one post. Only the first post is awaited before the hand-over: its id is the line's, the
+      // message the receipts are painted on. The posts after it follow the hand-over, outside the
+      // turn and outside the caller's wait, so a slow file post neither holds the thread's turn nor
+      // runs the page's request past its timeout into a second Send of the same line.
+      const page = options.page;
+      const posts = page === undefined ? [] : pagePosts(line.render, name, words, uploads);
+      const post = async (part: { text: string; upload: WebUpload | null }): Promise<{ ok: boolean; messageId: string | null }> => {
+        if (page === undefined) return { ok: false, messageId: null };
+        let file: { name: string; data: Uint8Array; contentType: string } | undefined;
+        if (part.upload !== null) {
+          const data = (await options.webFiles?.bytesOf(part.upload.id)) ?? null;
+          // The session still gets the path; the thread's copy goes without the file.
+          if (data === null) log(`routing: a file of the ${line.surface} line for session ${record.sessionId} could not be read for its thread copy`);
+          else file = { name: part.upload.name, data, contentType: part.upload.contentType };
+        }
+        try {
+          const outcome = await page.post({ threadId, text: part.text, ...(file === undefined ? {} : { file }) });
+          if (outcome.status !== "ok") {
+            log(`routing: the thread refused the ${line.surface} line's post for session ${record.sessionId}: ${outcome.status}`);
+            return { ok: false, messageId: null };
+          }
+          return { ok: true, messageId: outcome.value.messageId };
+        } catch {
+          log(`routing: posting the ${line.surface} line for session ${record.sessionId} failed`);
+          return { ok: false, messageId: null };
+        }
+      };
+      const first = posts.length === 0 ? null : await post(posts[0]);
+      // An unposted id carries the time and this process's count, since one millisecond can
+      // hold two failed posts.
+      unposted += 1;
+      const id = first?.messageId ?? `${UNPOSTED_WEB_ID_PREFIX}${String(now())}-${String(unposted)}`;
+      // The rest of the copy, in order and stopped at the first refusal as a refused first post
+      // stops them all. Nothing awaits it: each failure is logged inside `post`.
+      if (first?.ok === true && posts.length > 1) {
+        void (async () => {
+          for (const part of posts.slice(1)) {
+            if (!(await post(part)).ok) break;
+          }
+        })();
+      }
+      const buffered = withFiles(
+        { id, senderId, author, senderClass: line.senderClass, text: words, truncated },
+        uploads.map((upload) => upload.path),
+      );
+      // The gateway's own shape with the flags a plain Discord line carries, so the response gate
+      // and the relay see this line as they see a Discord line of its class.
+      const message: InboundMessage = {
+        threadId,
+        messageId: id,
+        senderId,
+        author,
+        fromBot: false,
+        fromSelf: false,
+        mentionsBot: false,
+        repliesToBot: false,
+        text: words,
+        attachments: [],
+      };
+      // A board act is read off the bounded words, the text the session is handed, never the raw
+      // text the page sent, and only for a surface whose lines can be one.
+      const taken = deliverTakenWritten(
+        record,
+        message,
+        buffered,
+        { mentionsBot: false, repliesToBot: false },
+        [],
+        line.boardActs && isBoardAct(words, fileIds),
+      );
+      return {
+        after: taken.then((outcome) => {
+          written = outcome;
+        }),
+      };
+    });
+    await after;
+    return { status: channel && written ? "delivered" : "no-channel", truncated };
+  }
+
   return {
     async deliver(message) {
       // Everything this broker writes into a thread arrives back over the same gateway. Without
@@ -2155,140 +2398,34 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     },
 
     async deliverWeb(lineage, login, text, fileIds) {
-      // The session is found by lineage, never by thread: the page names the persona it is open on,
-      // and the thread is read off the session that carries it. An ended newest record is told
-      // apart from a lineage no record carries, since the operator reads the two differently.
-      const records = options.registry.list();
-      const record = liveByLineage(records, lineage);
-      if (record === null) return records.some((held) => held.lineage === lineage) ? "ended" : "no-session";
-      const threadId = options.threadFor(record.sessionId);
-      if (threadId === null) return "no-thread";
-
-      // Bounded exactly as a Discord line is, and the same emptiness rule: nothing visible and no
-      // file is nothing to hand a session.
-      const { text: words, truncated } = bounded(text);
-      if (words === "" && fileIds.length === 0) return "empty";
-
-      // Each id must name a file the page sent for this very session: an id the store never handed
-      // out, and one saved for another session, deliver nothing, before anything is posted or spent.
-      const uploads: WebUpload[] = [];
-      for (const id of fileIds) {
-        const upload = options.webFiles?.upload(id) ?? null;
-        if (upload === null || upload.sessionId !== record.sessionId) return "unknown-file";
-        uploads.push({ id, path: upload.path, name: upload.name, contentType: upload.contentType });
-      }
-
-      // Read before anything is posted or spent: a line that would reach no pipe should neither
-      // appear in the thread as delivered nor spend the session's window. `relays.deliver` answers
-      // false for exactly this token state, so this is that answer read ahead of the write.
-      if (!options.relays.attached(record.processToken)) return "no-channel";
-
-      // The one window the session has, shared with its Discord lines, so a flood from the page and
-      // a flood from the thread are the same flood.
-      if (!withinRate(record.sessionId)) {
-        log(`routing: session ${record.sessionId} is over its inbound rate ceiling, dropping a web line`);
-        return "rate";
-      }
-
-      const name = webAuthorName(login);
-      const author = webAuthorLabel(login);
-      const senderId = `${WEB_SENDER_PREFIX}${login}`;
-
-      // In the thread's turn, as a Discord message is, so the session reads the page's line in the
-      // order it landed against the thread's own. The thread post comes first, inside the turn,
-      // because its id is the id the event and the receipts carry.
-      let channel = true;
-      // Whether the pipe took the line, read off the write itself: `attached` can answer true
-      // inside the turn and the pipe still refuse the write that follows the thread post.
-      let written = true;
-      const { after } = await inTurn(threadId, async () => {
-        // Read again here, since the turn can wait on an earlier message's download and the pipe
-        // can go while it does. A line read as deliverable above but with no pipe now is neither
-        // posted nor handed over, and the page is told no-channel, the same answer the early read
-        // gives. The window spent above stays spent, as it does for a Discord line the pipe refuses.
-        if (!options.relays.attached(record.processToken)) {
-          channel = false;
-          return { after: Promise.resolve() };
-        }
-        // The thread's copy, rendered by the machinery a voice line is rendered by, so a typed line
-        // cannot draw a chip or open a quoted block in the thread, and split where it is longer than
-        // one post. Only the first post is awaited before the hand-over: its id is the line's, the
-        // message the receipts are painted on. The posts after it follow the hand-over, outside the
-        // turn and outside the page's wait, so a slow file post neither holds the thread's turn nor
-        // runs the page's request past its timeout into a second Send of the same line.
-        const page = options.page;
-        const posts = page === undefined ? [] : pagePosts(name, words, uploads);
-        const post = async (part: { text: string; upload: WebUpload | null }): Promise<{ ok: boolean; messageId: string | null }> => {
-          if (page === undefined) return { ok: false, messageId: null };
-          let file: { name: string; data: Uint8Array; contentType: string } | undefined;
-          if (part.upload !== null) {
-            const data = (await options.webFiles?.bytesOf(part.upload.id)) ?? null;
-            // The session still gets the path; the thread's copy goes without the file.
-            if (data === null) log(`routing: a file of the web line for session ${record.sessionId} could not be read for its thread copy`);
-            else file = { name: part.upload.name, data, contentType: part.upload.contentType };
-          }
-          try {
-            const outcome = await page.post({ threadId, text: part.text, ...(file === undefined ? {} : { file }) });
-            if (outcome.status !== "ok") {
-              log(`routing: the thread refused the web line's post for session ${record.sessionId}: ${outcome.status}`);
-              return { ok: false, messageId: null };
-            }
-            return { ok: true, messageId: outcome.value.messageId };
-          } catch {
-            log(`routing: posting the web line for session ${record.sessionId} failed`);
-            return { ok: false, messageId: null };
-          }
-        };
-        const first = posts.length === 0 ? null : await post(posts[0]);
-        // An unposted id carries the time and this process's count, since one millisecond can
-        // hold two failed posts.
-        unposted += 1;
-        const id = first?.messageId ?? `${UNPOSTED_WEB_ID_PREFIX}${String(now())}-${String(unposted)}`;
-        // The rest of the copy, in order and stopped at the first refusal as a refused first post
-        // stops them all. Nothing awaits it: each failure is logged inside `post`.
-        if (first?.ok === true && posts.length > 1) {
-          void (async () => {
-            for (const part of posts.slice(1)) {
-              if (!(await post(part)).ok) break;
-            }
-          })();
-        }
-        const buffered = withFiles(
-          { id, senderId, author, senderClass: "operator", text: words, truncated },
-          uploads.map((upload) => upload.path),
-        );
-        // The gateway's own shape with the flags a plain Discord line carries, so the response gate
-        // and the relay see this line as they see an operator's Discord line.
-        const message: InboundMessage = {
-          threadId,
-          messageId: id,
-          senderId,
-          author,
-          fromBot: false,
-          fromSelf: false,
-          mentionsBot: false,
-          repliesToBot: false,
-          text: words,
-          attachments: [],
-        };
-        // A board act is read off the bounded words, the text the session is handed, never the raw
-        // text the page sent.
-        const taken = deliverTakenWritten(
-          record,
-          message,
-          buffered,
-          { mentionsBot: false, repliesToBot: false },
-          [],
-          isBoardAct(words, fileIds),
-        );
-        return {
-          after: taken.then((outcome) => {
-            written = outcome;
-          }),
-        };
+      const { status } = await deliverTyped(lineage, text, fileIds, {
+        name: webAuthorName(login),
+        author: webAuthorLabel(login),
+        senderId: `${WEB_SENDER_PREFIX}${login}`,
+        senderClass: "operator",
+        render: renderPageLine,
+        boardActs: true,
+        surface: "web",
       });
-      await after;
-      return channel && written ? "delivered" : "no-channel";
+      return status;
+    },
+
+    async deliverDoor(lineage, name, text) {
+      // The caller's name for the writer, bounded as the gateway bounds a display name and whole
+      // past an `@`. One the bound leaves nothing of reads as the door's own label.
+      const person = boundedAuthor(name) || "portal";
+      return deliverTyped(lineage, text, [], {
+        name: person,
+        author: doorAuthorLabel(person),
+        senderId: `${DOOR_SENDER_PREFIX}${person}`,
+        // Every door line is a participant's, by this literal and by nothing a caller sends: the
+        // door's key is a file any session under the broker's account can read, so an operator's
+        // class here would let a session approve its own tool calls.
+        senderClass: "participant",
+        render: renderDoorLine,
+        boardActs: false,
+        surface: "door",
+      });
     },
 
     async answerWeb(lineage, login, text) {

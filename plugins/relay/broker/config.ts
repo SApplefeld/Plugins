@@ -353,6 +353,13 @@ export type BrokerConfig = {
    */
   webSiblings: readonly string[];
   /**
+   * The file holding the key a program on this host must send in `X-Channels-Door`, as
+   * `CHANNEL_DOOR_KEY_FILE` names it, or null when the path is unset or blank, which leaves the
+   * local door off. The path alone, and no default stands in for it, since naming the file is what
+   * switches the door on. `readDoorKey` reads the file. The key itself is never a setting.
+   */
+  doorKeyFile: string | null;
+  /**
    * The gating keys the environment leaves unset whose switch, where one applies, is on, in catalog
    * order (`settings.ts` owns the rule). A feature or surface stays off for each of them, and the
    * broker's start-up names them in one line. Empty on a host that sets every gating key.
@@ -1244,6 +1251,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     webTailscale: env.CHANNEL_WEB_TAILSCALE?.trim() || DEFAULT_WEB_TAILSCALE,
     webStaticRoot: env.CHANNEL_WEB_STATIC_ROOT?.trim() || defaultWebStaticRoot(),
     webSiblings: webList(env.CHANNEL_WEB_SIBLINGS) ?? [],
+    // The path alone, and null where none is named: the local door has no default key file, so a
+    // host that names none serves no door path.
+    doorKeyFile: env.CHANNEL_DOOR_KEY_FILE?.trim() || null,
     settingsUnset: unsetGatingKeys(env),
   };
   return config;
@@ -1346,6 +1356,43 @@ export function readWebReaderKey(
   } catch (error) {
     throw new Error(`the web reader key file ${file} ${(error as Error).message}`);
   }
+}
+
+/**
+ * The fewest characters the local door's key may hold. The key is all that stands between the door
+ * and any other process on the host, so one short enough to guess is refused.
+ */
+export const DOOR_KEY_MIN_LENGTH = 32;
+
+/**
+ * The local door's key, read from the file `doorKeyFile` names, which a program on this host must
+ * send in `X-Channels-Door`. The file is held to the rule `readWebReaderKey` states: inside the
+ * state root, and then held to the Discord token file's protection check. A file that is outside
+ * the root, unprotected, missing, unreadable, empty, holds a character a request header cannot
+ * carry or holds fewer than `DOOR_KEY_MIN_LENGTH` characters once trimmed throws, naming the file
+ * and the cause, never the contents. What a throw costs is the caller's.
+ */
+export function readDoorKey(
+  file: string,
+  stateRoot: string,
+  // Injectable so a test reaches each refusal without a hardened file; the default is the check
+  // the token file is held to.
+  protect: (file: string) => void = assertTokenFileIsProtected,
+): string {
+  if (!isInside(file, stateRoot)) {
+    throw new Error(`the door key file ${file} is outside the state root ${stateRoot}`);
+  }
+  let key: string;
+  try {
+    key = readKeyFile(file, protect);
+  } catch (error) {
+    throw new Error(`the door key file ${file} ${(error as Error).message}`);
+  }
+  // Judged last, on the trimmed key, so a file refused for its length is one a header could carry.
+  if (key.length < DOOR_KEY_MIN_LENGTH) {
+    throw new Error(`the door key file ${file} holds fewer than ${DOOR_KEY_MIN_LENGTH} characters`);
+  }
+  return key;
 }
 
 /**

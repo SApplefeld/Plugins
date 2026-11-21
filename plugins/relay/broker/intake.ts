@@ -843,12 +843,14 @@ const DRAIN_LIMIT_FACTOR = 4;
  * the drain limit the connection is destroyed instead. Only the byte count comes back on the
  * over-ceiling paths: the caller logs the count, never the text.
  *
- * Both routes read through this one function. Their ceilings differ, and nothing else about the
- * read does: a post over either one is a post from an installed hook that fires in every session on
- * the machine, and refusing one puts a visible error inside that session at the end of exactly its
- * longest turns.
+ * The hook intake's two routes and the local door's line route read through this one function.
+ * Their ceilings differ, and nothing else about the read does. For the hook routes the drain keeps
+ * the quiet answer: a post over either ceiling is a post from an installed hook that fires in every
+ * session on the machine, and refusing one puts a visible error inside that session at the end of
+ * exactly its longest turns. For the door the drain is what keeps its 413 readable. For every caller
+ * the drain limit bounds what an oversized body costs.
  */
-async function readCappedBody(
+export async function readCappedBody(
   request: IncomingMessage,
   maxBytes: number,
 ): Promise<{ body: string } | { droppedBytes: number; destroyed: boolean }> {

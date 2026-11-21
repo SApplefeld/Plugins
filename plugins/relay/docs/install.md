@@ -841,6 +841,17 @@ image or template exists. In order:
    and open any screen from your phone. The row at the top of the list shows one pill per
    sibling.
 
+### The local door (optional)
+
+`CHANNEL_DOOR_KEY_FILE` turns on the local door: three routes on the broker's loopback listener
+that a program on this host uses to read each persona's recent conversation lines and to hand in
+a line a named person wrote. It is off by default, and the installer never writes it. To turn it
+on, set it by hand in `broker.env` to the path of a key file inside the state root, protected as
+the bot token file is and holding a key of at least 32 visible ASCII characters. Every line handed
+in through the door is a participant's, so it never approves a tool call or answers a held
+question. The section "The local door" in `operations.md` sets out how to make the key file
+and how to turn the door off.
+
 ### Claude Duet (optional)
 
 `Install-Host.ps1 -Duet` sets `CHANNEL_DUET_ENABLED` to `1`. It sets `CHANNEL_DUET_PUBLIC_URL` to `-DuetPublicUrl` where given, else keeps the URL `broker.env` records, else takes this node's MagicDNS name under `https://`. Where `broker.env` holds no value, it sets `CHANNEL_DUET_STATE` to `duet-state.json` under the state root and `CHANNEL_WEB_READER_KEY_FILE` to `web-reader-key.txt` there. It adds this host's own tailnet node, the part of its MagicDNS name before the first dot, to `CHANNEL_WEB_READERS`, keeping any node already there. Where the key file is missing, it writes a 32-byte random reader key there, protected as the bot token file is. A recorded key file or state file outside the state root stops the install. The broker admits that node to its read-only views, and nothing else, only on a request carrying the key, which the Duet process reads at start. `CHANNEL_DUET_PORT` (default 8790) is the loopback port Funnel forwards to, and `CHANNEL_DUET_APPROVE_PORT` (default 8791) is the approval page's port on the web surface's address. Pass `-DuetPort` or `-DuetApprovePort` to change either. The admin-console steps, the sign-in and the off switch are under "Claude Duet" below.

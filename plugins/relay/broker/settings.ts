@@ -149,6 +149,9 @@ export const SETTINGS: readonly Setting[] = [
   { key: "CHANNEL_WEB_STATIC_ROOT", kind: "broker", meaning: "Absolute path of the directory the pages are served from", scope: "host", unset: "default" },
   { key: "CHANNEL_WEB_SIBLINGS", kind: "broker", meaning: "Name=address:port entries for the sibling sandboxes this broker polls", scope: "host", switch: ["CHANNEL_WEB_BIND"], unset: "off", stays: "the sibling poll and the rail on every page" },
 
+  // The local door, the three paths the loopback listener serves a program on this host.
+  { key: "CHANNEL_DOOR_KEY_FILE", kind: "broker", meaning: "Path of the file holding the key a program on this host must send in X-Channels-Door, inside the state root; naming the file switches the local door on", scope: "host", unset: "off", stays: "the local door, so the three door paths are not served" },
+
   // The Duet server, the read-only MCP process beside the broker, which reads these from the same
   // file through the same allowlist.
   { key: "CHANNEL_DUET_ENABLED", kind: "broker", meaning: "Whether the Duet process starts its two listeners; every other Duet key rides on it", scope: "host", unset: "off", stays: "the Duet server, whose process exits at once" },

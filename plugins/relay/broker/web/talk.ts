@@ -1,6 +1,7 @@
-// The talk page's transcript: a bounded, in-memory ring of the lines a session's Discord thread
-// carries, keyed by lineage, and the view the page polls. Nothing here is written to disk, so a
-// broker restart empties every ring and `seq` starts again at 1.
+// The talk transcript: a bounded, in-memory ring of the lines a session's Discord thread carries,
+// keyed by lineage, and the view the talk page polls. The local door reads the ring's lines too.
+// Nothing here is written to disk, so a broker restart empties every ring and `seq` starts again
+// at 1.
 //
 // The ring is fed by two taps: the outbound router for what reaches a thread from a session, and the
 // inbound router for what a session is handed. Narration is not tapped, so the ring holds landed
@@ -25,8 +26,8 @@ const MAX_AUTHOR = 240;
  * What a line is. `reply` is a reply-tool post and `mirror` the Stop hook's copy of a turn's closing
  * reply, both the session's words. `prompt` is the operator's own typed prompt as the session read
  * it at the console, `peer` a message to or from another session, `question` the notice a held
- * question raises, `inbound` a line handed to the session from Discord and `notice` a broker-composed
- * one-liner such as a finished background task.
+ * question raises, `inbound` a line handed to the session from Discord, the talk page or the local
+ * door, and `notice` a broker-composed one-liner such as a finished background task.
  */
 export type TalkKind = "reply" | "mirror" | "prompt" | "peer" | "question" | "inbound" | "notice";
 
@@ -69,7 +70,7 @@ export type TalkLine = {
  * What a tap hands the ring; the ring stamps `seq` and `at`. `files` are the files the line carries,
  * none where it is absent. `tracked` is the thread message the receipt tracker stages this line
  * under, for a line it tracks; the view reads the line's `receipt` through it, and a line with none
- * reads null.
+ * reads null. `door` is true for a line the local door handed in.
  */
 export type TalkInput = {
   kind: TalkKind;
@@ -78,6 +79,7 @@ export type TalkInput = {
   text: string;
   files?: readonly TalkFile[];
   tracked?: { threadId: string; messageId: string } | null;
+  door?: boolean;
 };
 
 /** The seam the routers push through, so they import a type and never the ring. */
@@ -85,8 +87,11 @@ export type TalkTap = {
   push: (lineage: string, input: TalkInput) => unknown;
 };
 
-/** A line as the ring holds it: the view's shape, with the key its receipt is read by. */
-export type HeldLine = TalkLine & { tracked: { threadId: string; messageId: string } | null };
+/**
+ * A line as the ring holds it: the view's shape, with the key its receipt is read by and, on a line
+ * the local door handed in and on no other, the door's mark.
+ */
+export type HeldLine = TalkLine & { tracked: { threadId: string; messageId: string } | null; door?: true };
 
 export type TalkRing = {
   /** Appends a line to the lineage's ring and returns it. */
@@ -131,6 +136,7 @@ export function createTalkRing(options: TalkRingOptions = {}): TalkRing {
         files: (input.files ?? []).map((file) => ({ name: file.name, size: file.size, url: file.url })),
         receipt: null,
         tracked: input.tracked ?? null,
+        ...(input.door === true ? { door: true as const } : {}),
       };
       ring.lines.push(line);
       if (ring.lines.length > capacity) ring.lines.splice(0, ring.lines.length - capacity);
@@ -285,11 +291,12 @@ function viewPermission(request: PendingPermission): TalkPermission {
 }
 
 /**
- * The line as the view carries it: the receipt read now from the tracker, the key left out, and the
- * text cut at `clip` code points where one is given and the text runs past it.
+ * The line as the view carries it: the receipt read now from the tracker, the key and the door's
+ * mark left out, and the text cut at `clip` code points where one is given and the text runs past
+ * it.
  */
 function viewLine(line: HeldLine, stageOf: TalkViewInput["stageOf"], clip: number | undefined): TalkLine {
-  const { tracked, ...shown } = line;
+  const { tracked, door: _door, ...shown } = line;
   const receipt = tracked === null || stageOf === undefined ? null : stageOf(tracked.threadId, tracked.messageId);
   if (clip === undefined) return { ...shown, receipt };
   // A cut text is always shorter, so an equal one was not cut.

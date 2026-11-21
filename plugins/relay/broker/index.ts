@@ -10,6 +10,7 @@ import {
   REPLY_HEARTBEAT_MS,
   WEB_BIND_RETRY_MS,
   loadConfig,
+  readDoorKey,
   readJevKey,
   readSpeechKey,
   readVoiceFastKey,
@@ -17,6 +18,7 @@ import {
 } from "./config.ts";
 import type { BrokerConfig } from "./config.ts";
 import { createAnnounceSpool } from "./announce-spool.ts";
+import { createDoorRoutes } from "./door.ts";
 import { announceSession, createHandler, createRefusalLog } from "./intake.ts";
 import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
@@ -1238,6 +1240,18 @@ export async function startBroker(
     throw error;
   }
 
+  // The local door's key, and with it the door's switch: null is the door off. Unlike the keys
+  // above, a named file the door cannot use refuses nothing. The broker starts with the door off
+  // and one line naming the file and the cause, which never carries the file's contents.
+  let doorKey: string | null = null;
+  if (config.doorKeyFile !== null) {
+    try {
+      doorKey = readDoorKey(config.doorKeyFile, path.dirname(config.stateFile));
+    } catch (error) {
+      warn(`broker: the local door is off: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   // The decisions card's sightings, mutable for the reason `threadFor` below is: the registry's
   // mutate seam reaches them through this closure so a pruned session's sightings leave with it.
   // Null while the card is off or no roster is configured, which leaves that seam a no-op.
@@ -1490,14 +1504,16 @@ export async function startBroker(
       }
     },
   };
-  // The talk page's transcript ring, memory only and present only while the web surface is on. The
-  // outbound and inbound routers and the question alert push into it; the web block below serves it.
-  const talkRing = web === null ? null : createTalkRing();
+  // The transcript ring the talk page and the local door read, memory only and present while the
+  // web surface or the door is on. The outbound and inbound routers and the question alert push
+  // into it; the web block below and the door routes serve it.
+  const talkRing = web === null && doorKey === null ? null : createTalkRing();
   // The talk page's files, both ways, under the same folder and the same switch as a Discord
-  // attachment: present only beside the ring, and absent where attachments are off, so a host that
-  // takes no file from Discord takes none from the page and keeps no reply's file for it.
+  // attachment: present only while the web surface is on, whatever the door is, and absent where
+  // attachments are off, so a host that takes no file from Discord takes none from the page and
+  // keeps no reply's file for it.
   const webFiles =
-    talkRing === null || config.attachments === "off" ? null : createWebFiles({ stateDir: path.dirname(config.stateFile) });
+    web === null || config.attachments === "off" ? null : createWebFiles({ stateDir: path.dirname(config.stateFile) });
   const outbound = createOutboundRouter({
     registry,
     threadFor: (sessionId) => threadFor(sessionId),
@@ -1745,6 +1761,27 @@ export async function startBroker(
     replyHeartbeatMs: REPLY_HEARTBEAT_MS,
     log: note,
   });
+  // The local door's routes, which exist only where the door key was read. Whether these routes
+  // exist is the door's one switch: the inbound router below is told the door is on by the same
+  // test, so a door line is delivered and a held one restored on exactly the brokers that serve
+  // the door. The ring is built wherever the key was read, so the ring test below only narrows its
+  // type.
+  const doorRoutes =
+    doorKey === null || talkRing === null
+      ? null
+      : createDoorRoutes({
+          key: doorKey,
+          records: () => registry.list(),
+          ring: talkRing,
+          // The inbound router exists only once Discord is configured, and with no router there is
+          // no session a line could reach, which `no-session` says.
+          deliverDoor: (lineage, name, text) =>
+            inbound === null
+              ? Promise.resolve({ status: "no-session", truncated: false })
+              : inbound.deliverDoor(lineage, name, text),
+          log: note,
+          now: Date.now,
+        });
 
   // Read here, ahead of the intake handler below, so the handler can decide at construction
   // whether the receipts seam is worth wiring at all: a broker this reads as unconfigured for
@@ -1902,9 +1939,11 @@ export async function startBroker(
         }),
   });
   const server = createServer((request, response) => {
-    // The relay routes answer first and report whether they took the request; everything else,
-    // including every route that does not exist, stays the hook intake's to answer.
+    // The relay routes answer first and report whether they took the request, then the door's
+    // routes where the door is on; everything else, including every route that does not exist and
+    // the door's paths on a broker with the door off, stays the hook intake's to answer.
     if (relayRoutes(request, response)) return;
+    if (doorRoutes !== null && doorRoutes(request, response)) return;
     hooks(request, response);
   });
 
@@ -2395,10 +2434,14 @@ export async function startBroker(
       ...(web === null ? {} : { webOperators: web.operators }),
       receipts: { delivered: (threadId, messageId, at) => receipts?.delivered(threadId, messageId, at) },
       ...(talkRing === null ? {} : { talkTap: talkRing }),
-      // The web page's line goes into the thread as the bot through the conversation writer's reply,
-      // the budget-paced post the mirrored replies take, so a burst of page posts is metered with the
-      // rest of the conversation volume and a block it earns never refuses a permission prompt or a
-      // question alert, which spend the other writer's bucket.
+      // On exactly where the door's routes exist, so a door line held across the restart is a
+      // participant's again only on a broker that would take that line today.
+      ...(doorRoutes === null ? {} : { door: true }),
+      // A web page's line and a local door's line each go into the thread as the bot through the
+      // conversation writer's reply, the budget-paced post the mirrored replies take, so a burst of
+      // them is metered with the rest of the conversation volume and a block it earns never refuses
+      // a permission prompt or a question alert, which spend the other writer's bucket. Wired with
+      // the web surface on or off, since a door line is copied into its thread either way.
       page: { post: (input) => mirrorWriter.reply(input.threadId, input.text, input.file) },
       ...(webFiles === null ? {} : { webFiles }),
       // Who may attach a file and how large one may be, as configured. Saved files sit under the
@@ -2712,6 +2755,11 @@ export async function startBroker(
 
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : config.port;
+  // Said once, where the listener that serves it is bound. The line names the three paths and
+  // neither the key nor the file it was read from.
+  if (doorRoutes !== null) {
+    note("broker: the local door is on, serving /door/lineages, /door/lines and /door/line on the loopback listener");
+  }
 
   // The web surface is a sibling of the Discord surfaces: with `CHANNEL_WEB_BIND` unset there is
   // no second server at all, and the broker's listening sockets are what they were. It binds after
