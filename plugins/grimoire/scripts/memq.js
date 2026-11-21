@@ -71,6 +71,13 @@
 // emits the type's snapshot records into session context through the same
 // projectType reader.
 //
+// A project's records are filed under its project key (projectKey): a
+// checkout's origin remote, a pin, or a plain folder's name. `memq db-refresh`
+// moves the records a checkout's folder name holds into its remote key, the
+// adoption, and moves the records this machine wrote under a plain folder's
+// name into that folder's machine key, the claim, after which the folder keys
+// by its machine and its name.
+//
 // The operator tier holds facts true of the operator or of a machine rather
 // than of one project or one platform. There is one operator, so no path
 // segment names it and no declaration resolves it. Every project's sessions
@@ -1624,8 +1631,16 @@ function projectTreeRoot(cwd) {
 // records under: `remote:` and the origin remote's host and path where the
 // project's root is a git checkout with one, and `path:` and the store segment
 // otherwise. The same repository then keys alike on every machine, whatever
-// folder holds it there, while a folder that is no checkout, or a checkout
-// with no origin, keeps its own records under its own name.
+// folder holds it there.
+//
+// A plain folder, one with no pin that is no checkout or a checkout with no
+// origin, keys by its machine once `db-refresh` has claimed it: where the
+// folder's claim marker stands, the key is the folder's machine key form
+// (machineKeyForm), so a folder at the same path on another machine reads
+// and writes another store. Until that marker stands, and wherever the folder
+// has no form, the key is `path:` and the segment. The marker is the one file
+// stat this adds, and only a plain folder pays it: a pinned store and a
+// checkout with an origin read no marker.
 //
 // The root is projectTreeRoot's, the one the segment is derived from, so the
 // key and the segment always answer for the same directory: a linked worktree
@@ -1637,7 +1652,57 @@ function projectKey(cwd) {
     const segment = projectSegment(cwd);
     if (pinnedProjectSegment() !== null) return 'path:' + segment;
     const remote = originRemoteKey(projectTreeRoot(cwd));
-    return remote === null ? 'path:' + segment : 'remote:' + remote;
+    if (remote !== null) return 'remote:' + remote;
+    const form = machineKeyForm(segment);
+    return form !== null && claimMarkerStands(form) ? form : 'path:' + segment;
+}
+
+// The machine key form of a store segment: `path:`, this machine's hostname in
+// lower case, `/`, and the segment, or null where the folder has none. The
+// memory database binds a machine claim's target to the calling sandbox's own
+// name in lower case, and a sandbox is named for its machine, so this is the
+// one key the host lets this machine claim a folder's records into. A store
+// segment holds no `/`, so no form equals a folder key. The hostname passes
+// machineIdentityOrNull, the gate every machine name read here passes, and a
+// hostname it refuses, a hostname the system will not give, or a form wider
+// than the database's key column, gives no form.
+function machineKeyForm(segment) {
+    let host;
+    try {
+        host = machineIdentityOrNull(os.hostname());
+    } catch {
+        return null;
+    }
+    if (host === null) return null;
+    const form = 'path:' + host.toLowerCase() + '/' + segment;
+    return form.length > memoryDatabase.PROJECT_KEY_WIDTH ? null : form;
+}
+
+// A folder's claim marker: an empty file under `claimed` beside the
+// project-type declarations, named as the snapshot names a project key's
+// directory, by the hash of the folder's machine key form. On Windows the
+// form is folded to lower case before it is hashed, since there one folder
+// reaches memq under more than one letter case of its path, the host compares
+// project keys without case (the installer refuses a database whose collation
+// does not), and the local store folds them alike (projectKeysFold), so every
+// spelling of the folder finds the one marker; elsewhere the form is hashed
+// as it is. It stands once a `db-refresh` has had the host answer the
+// folder's claim, which is what lets projectKey move the folder to its
+// machine key only after its records have. `db-refresh` alone writes and
+// removes it.
+const CLAIMED_DIR = 'claimed';
+function claimMarkerPath(form) {
+    const named = process.platform === 'win32' ? form.toLowerCase() : form;
+    return path.join(memoryRoot(), memoryDatabase.SNAPSHOT_DIR, CLAIMED_DIR,
+        memoryDatabase.snapshotKeyDir('project', named));
+}
+function claimMarkerStands(form) {
+    try {
+        const stat = fs.lstatSync(claimMarkerPath(form), { throwIfNoEntry: false });
+        return stat !== undefined && stat.isFile();
+    } catch {
+        return false;
+    }
 }
 
 // The normalized origin remote of the checkout at `root`, or null where there
@@ -5274,6 +5339,7 @@ function usage(problem) {
         + '                (records this project\'s type tier for bare --type and the session hook)\n'
         + '       memq db-refresh\n'
         + '                (drains the queue, then adopts this checkout\'s folder store into its remote key,\n'
+        + '                 or claims a plain folder\'s records this machine wrote into its machine key,\n'
         + '                 and last purges this machine\'s journal rows past their retention)\n'
         + '       memq db-promote <name> [--sandbox <name>] [--tier project|type|operator]\n'
         + '                       [--segment <segment>]\n'
@@ -14333,10 +14399,17 @@ function dbRefreshVerdict() {
 // db-refresh's steps between the drain and the purge: the adoption, the
 // index and the embed pass, in that order. A step that fails prints why, sets
 // the exit code and returns, so the steps after it are skipped and the
-// purge, which dbRefreshSteps runs after this, is not.
+// purge, which dbRefreshSteps runs after this, is not. A machine claim that
+// fails is the one exception: it fails the adoption step and the index and
+// the embed pass still run.
 async function dbRefreshMiddleSteps(drained, passed, opts, deadline, run) {
-    // The adoption, gated on the key and the host's version. A key this process
-    // cannot resolve, or one that is a folder name, adopts nothing.
+    // The adoption step, gated on the key and the host's version: an adoption
+    // for a `remote:` key and a machine claim for a plain folder's `path:`
+    // key. A key this process cannot resolve, and a pinned store's, send
+    // neither, and a pin this process cannot honor counts as a pin.
+    const pinned = () => {
+        try { return pinnedProjectSegment() !== null; } catch { return true; }
+    };
     let key = null;
     let segment = null;
     if (passed.key !== undefined) {
@@ -14370,7 +14443,37 @@ async function dbRefreshMiddleSteps(drained, passed, opts, deadline, run) {
             run.fail('adoption');
             return;
         }
-        reportAdoption(adopted.adopted, segment, key);
+        reportAdoption(adopted.adopted, 'path:' + segment, key, false);
+        // A folder this machine claimed before it gained its origin holds its
+        // records under its machine key, so a second call carries them into
+        // the remote key, and the marker goes once the host has answered it:
+        // a later refresh then sends the one call. A marker that will not
+        // unlink costs the next refresh the same call, which moves nothing.
+        const form = machineKeyForm(segment);
+        if (form !== null && claimMarkerStands(form)) {
+            const followed = memoryDatabase.adoptProjectStore({
+                config: opts.config, deps: opts.deps, fromKey: form, toKey: key, deadline
+            });
+            if (!followed.ok) {
+                run.say('memq: the adoption step did not run: the second adoption, of this folder\'s machine key, was not made: '
+                    + shownText(memoryDatabase.standDownText(followed), DB_SYNC_REASON_CAP) + '\n');
+                run.fail('adoption');
+                return;
+            }
+            reportAdoption(followed.adopted, form, key, false);
+            try { fs.unlinkSync(claimMarkerPath(form)); } catch { /* the next refresh sends the call again */ }
+        }
+    } else if (key !== null && key.startsWith('path:') && !pinned()) {
+        // The machine claim, for a plain folder that has a machine key form,
+        // on a host that carries the claim. A lower host is sent nothing and
+        // told nothing, since it would be told on every refresh of every
+        // plain folder until its install.
+        const form = machineKeyForm(segment);
+        const schema = Number(drained.schemaVersion);
+        if (form !== null && Number.isFinite(schema) && schema >= memoryDatabase.CLAIM_SCHEMA_VERSION) {
+            run.begin('adoption');
+            key = dbRefreshClaim(segment, form, opts, deadline, run);
+        }
     }
 
     // The index: the shared tiers and this key, in one spawn, into index.json.
@@ -14426,7 +14529,7 @@ async function dbRefreshMiddleSteps(drained, passed, opts, deadline, run) {
 }
 
 // memq db-refresh: drain the queue, then adopt this checkout's folder store into
-// its remote key.
+// its remote key, or claim a plain folder's records into its machine key.
 //
 // The drain is drainOnly's, the probe and then drainQueue under its own version
 // gates, so every row a write verb queued in an outage lands here in order, and
@@ -14434,8 +14537,16 @@ async function dbRefreshMiddleSteps(drained, passed, opts, deadline, run) {
 // where this working directory's key is a `remote:` one and the host is at the
 // record version: one mem.usp_AdoptProjectStore call from `path:<segment>` into
 // that key, on every refresh, since it is what sweeps rows another machine later
-// publishes under the same folder key. A `path:` working directory sends none,
-// and a host below the record version has no adoption procedure to call. The
+// publishes under the same folder key. A host below the record version has no
+// adoption procedure to call. Where the folder's claim marker stands, a second
+// call follows from the folder's machine key, once, and the marker is removed.
+//
+// A plain folder's `path:` working directory sends the machine claim in the
+// same step (dbRefreshClaim), on a host at CLAIM_SCHEMA_VERSION: one call from
+// `path:<segment>` into the folder's machine key form, on every refresh, since
+// rows keep landing under the folder key from a session on an older client or
+// a queued write. A host below that version, a pinned store and a folder with
+// no form send none, with no line and no failed step. The
 // exit code is 0 where every step completed and non-zero naming the step
 // otherwise. A refusal the drain filed and a stamp the host would not record
 // are not failed steps: each printed its line and the drain ran to its end; a
@@ -14551,7 +14662,10 @@ async function dbRefreshSteps(passed, opts, deadline, run) {
     }
 
     // The steps between the drain and the purge. A step that fails sets the
-    // exit code and skips the steps after it, never the purge.
+    // exit code and skips the steps after it, save a failed machine claim
+    // (dbRefreshClaim names each way one fails): that fails the adoption
+    // step, and the index and the embed pass still run. No
+    // failure among them skips the purge.
     await dbRefreshMiddleSteps(drained, passed, opts, deadline, run);
 
     // The purge: one mem.usp_PurgeJournal call on a host at the purge version,
@@ -14624,14 +14738,134 @@ function parseDbRefreshProject(argv) {
     return { key, segment };
 }
 
-// The adoption's line, as db-refresh prints it.
-function reportAdoption(adoption, segment, key) {
-    process.stdout.write('db-refresh: adopted ' + sanitize('path:' + segment, PATH_DISPLAY_CAP) + ' into '
+// The machine claim of a plain folder, inside db-refresh's adoption step: one
+// mem.usp_AdoptProjectStore call from the folder key into the folder's machine
+// key form, which moves the rows this machine's sandbox last wrote. It
+// answers the key the index step then takes.
+//
+// Where the host answers, whatever its counts, the folder's marker is written
+// where it is absent, and the folder keys by its machine from then on. The
+// refresh that writes the marker first copies the folder key's declared
+// project type to the machine key, where that key declares none; no later
+// refresh copies it, so a type cleared after the switch stays cleared. The
+// line is printed where the marker was written or the host moved or merged a
+// row, so a claim that changed nothing says nothing.
+//
+// A claim the host refused or did not answer writes no marker, says why, and
+// fails the adoption step without ending the middle steps: the index is then
+// taken for the key the folder still uses, so a machine whose claim fails on
+// every run keeps a fresh snapshot. A marker that could not be written is the
+// same failure, since the folder then still reads its folder key.
+//
+// Before its marker stands, a folder's type must be able to follow it, so a
+// project-types.json that is present and cannot be read as declarations holds
+// the claim back: no call, no marker, and the adoption step fails naming the
+// file, as for a refused claim, so no record moves until the file is
+// repaired. A copy that fails after the host answered writes no marker
+// either and fails the step naming the type, and the next refresh, finding
+// no marker, copies it again.
+function dbRefreshClaim(segment, form, opts, deadline, run) {
+    const folderKey = 'path:' + segment;
+    let stands = claimMarkerStands(form);
+    if (!stands) {
+        const read = readProjectTypes();
+        if (read.projects === null) {
+            run.say('memq: the adoption step did not run: the machine claim of this folder\'s records was not sent, '
+                + 'since ' + shownPath(projectTypesPath()) + ' ' + read.fault + ' and the folder\'s '
+                + 'project type could not follow it\n');
+            run.fail('adoption');
+            return folderKey;
+        }
+    }
+    const claimed = memoryDatabase.adoptProjectStore({
+        config: opts.config, deps: opts.deps, fromKey: folderKey, toKey: form, deadline
+    });
+    if (!claimed.ok) {
+        run.say('memq: the adoption step did not run: the machine claim of this folder\'s records was not made: '
+            + shownText(memoryDatabase.standDownText(claimed), DB_SYNC_REASON_CAP) + '\n');
+        run.fail('adoption');
+        return stands ? form : folderKey;
+    }
+    let wrote = false;
+    if (!stands) {
+        let carried = false;
+        try {
+            carryProjectType(folderKey, form);
+            carried = true;
+            const marker = claimMarkerPath(form);
+            fs.mkdirSync(path.dirname(marker), { recursive: true });
+            fs.writeFileSync(marker, '', { flag: 'wx' });
+            wrote = true;
+            stands = true;
+        } catch (err) {
+            // Another refresh of this folder wrote the marker first, where
+            // what stands at its path is the marker's regular file.
+            if (carried && err && err.code === 'EEXIST' && claimMarkerStands(form)) {
+                stands = true;
+            } else {
+                run.say('memq: the adoption step did not finish: the machine claim was answered and '
+                    + (carried ? 'this folder\'s claim marker was not written ('
+                        : 'the folder key\'s declared project type was not carried to its machine key (')
+                    + shownText(failureText(err), 300) + '), so no marker stands and the folder keeps its '
+                    + 'folder key until a refresh writes the marker\n');
+                run.fail('adoption');
+            }
+        }
+    }
+    if (wrote || claimed.adopted.moved > 0 || claimed.adopted.merged > 0) {
+        reportAdoption(claimed.adopted, folderKey, form, true);
+    }
+    return stands ? form : folderKey;
+}
+
+// The folder key's declared project type, copied to the folder's machine key
+// in the declarations file where the machine key declares none. On Windows
+// one folder reaches memq under more than one letter case of its path, and
+// the one marker stands for every spelling, so each folder key spelled like
+// this one but for case carries its type to its own machine key, the form's
+// host before its own segment, since that is the key the spelling then
+// reads. Elsewhere only the exact folder key carries. The file is written
+// once. A file that is present and cannot be read as declarations throws,
+// and a write that fails throws naming the last type it carried, so the
+// claim writes no marker and the next refresh copies it again.
+function carryProjectType(folderKey, form) {
+    const read = readProjectTypes();
+    if (read.projects === null) throw new Error(PROJECT_TYPES_FILE + ' ' + read.fault);
+    const projects = read.projects;
+    const declares = (key) => Object.prototype.hasOwnProperty.call(projects, key);
+    const prefix = 'path:';
+    const hostPart = form.slice(0, form.length - (folderKey.length - prefix.length));
+    const spellings = process.platform === 'win32'
+        ? Object.keys(projects).filter((key) => key.startsWith(prefix) && key.toLowerCase() === folderKey.toLowerCase())
+        : (declares(folderKey) ? [folderKey] : []);
+    let type;
+    for (const key of spellings) {
+        const target = hostPart + key.slice(prefix.length);
+        if (declares(target)) continue;
+        type = projects[key];
+        projects[target] = type;
+    }
+    if (type === undefined) return;
+    try {
+        memoryDatabase.writeAtomically(projectTypesPath(),
+            JSON.stringify({ version: PROJECT_TYPES_VERSION, projects }, null, 2) + '\n');
+    } catch (err) {
+        throw new Error('the type ' + sanitize(String(type), NAME_CAP) + ': ' + failureText(err));
+    }
+}
+
+// The adoption's line, as db-refresh prints it, and the machine claim's in
+// the same form, which also carries the count of rows left behind because no
+// sandbox is recorded as their writer.
+function reportAdoption(adoption, fromKey, key, claim) {
+    process.stdout.write('db-refresh: ' + (claim ? 'claimed ' : 'adopted ') + sanitize(fromKey, PATH_DISPLAY_CAP) + ' into '
         + sanitize(key, PATH_DISPLAY_CAP) + ' (moved ' + adoption.moved + ', merged ' + adoption.merged
-        + ', left in place ' + adoption.skipped + ')'
+        + ', left in place ' + adoption.skipped
+        + (claim ? ', left with no recorded writer ' + adoption.unowned : '') + ')'
         + (adoption.mergedNames.length > 0 ? '; merged, one copy kept under the adoption\'s rules and the other dropped: '
             + adoption.mergedNames.map((n) => wireText(n, NAME_CAP, 'unknown')).join(', ') : '')
-        + (adoption.skippedNames.length > 0 ? '; left in place because the remote key holds a record of that '
+        + (adoption.skippedNames.length > 0 ? '; left in place because the ' + (claim ? 'machine' : 'remote')
+            + ' key holds a record of that '
             + 'file it does not replace: '
             + adoption.skippedNames.map((n) => wireText(n, NAME_CAP, 'unknown')).join(', ') : '')
         + '\n');
@@ -15306,6 +15540,7 @@ module.exports = {
     projectTreeRoot,
     projectSegment,
     projectKey,
+    machineKeyForm,
     projectSpace,
     projectSpaceRoot,
     spaceOrdered,

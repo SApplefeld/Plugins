@@ -264,4 +264,4 @@ A project-tier memory is written with `memq put`, and a correction with `memq pu
 ## Known Limits
 
 - A type tier is reachable only through a project that declared it in this machine's `~/.claude/memory-snapshot/project-types.json`. Run `memq declare-type <type>` in some project of that type before running a pass over it.
-- A project with no git origin is keyed by its folder, so another machine reads its records only where that project sits at the identical path.
+- No-origin projects key by folder, shared across machines until claimed, then by folder and machine; other machines' tiers omit their records, which fleet-wide reads still find.

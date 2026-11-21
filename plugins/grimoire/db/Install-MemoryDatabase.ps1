@@ -226,7 +226,18 @@ $ErrorActionPreference = 'Stop'
 # lastKept. A version 14 host takes it in place, keeping every row. The
 # client's KEPT_SCHEMA_VERSION reads this number back through mem.usp_Health,
 # and `memq keep` refuses to stamp on a host below it.
-$script:SchemaVersion = 15
+#
+# Version 16 is where a machine claims its own records out of a folder's
+# shared store. mem.usp_AdoptProjectStore accepts a second pair of keys, from
+# a folder key holding no slash into path:, the calling sandbox's name in
+# lower case, a slash and the same tail. It moves only the rows whose
+# [WrittenBySandboxId] is the calling sandbox, leaves every other row in
+# place, and returns as unowned the count of the folder store's undeleted
+# rows with no writer stamp. A version 15 host takes it in place, changing no
+# table and no grant, so every row stays where it is until a client sends a
+# claim. The client's CLAIM_SCHEMA_VERSION reads this number back through
+# mem.usp_Health, and `memq db-refresh` sends no claim to a host below it.
+$script:SchemaVersion = 16
 
 # The five logins the Security scripts create, each with the role it joins
 # and the sandbox it publishes for. The logins file carries these three

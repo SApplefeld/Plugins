@@ -4167,10 +4167,15 @@ function summedDrains(first, second) {
 // which directory a flattened folder name came from. The working
 // directory is the one folder whose checkout this machine can read, so its
 // records are the ones carried into the key the same repository takes on
-// every machine. The procedure refuses any pair but path: into remote:, and a
-// second call changes nothing, so a resend is safe. A caller running it as one
-// step of a longer run passes that run's `deadline`, and the call takes what
-// is left of it, refused before its spawn once none is.
+// every machine. A second call changes nothing, so a resend is safe. A caller
+// running it as one step of a longer run passes that run's `deadline`, and the
+// call takes what is left of it, refused before its spawn once none is.
+//
+// The same call carries the machine claim, the procedure's second mode: from a
+// folder's `path:` key into that folder's machine key, it moves only the rows
+// the calling machine's sandbox last wrote. `unowned` is the claim's count of
+// the rows left behind because no sandbox is recorded as their writer, and 0
+// for an adoption. The procedure refuses any pair of keys but those two.
 function adoptProjectStore(options) {
     const opts = options || {};
     const loaded = hostConfig(opts);
@@ -4188,12 +4193,17 @@ function adoptProjectStore(options) {
         { deps: opts.deps, budgetMs, textWidth: PROJECT_KEY_WIDTH });
     if (!sent.ok) {
         if (!hostAnswered(sent.cause)) return { ok: false, standDown: 'unreachable', detail: sent.detail };
+        // A call into a `path:` key is the claim. A machine key is the one
+        // `path:` key with a slash, since a folder-name segment holds none.
+        const claim = String(opts.toKey).startsWith('path:');
+        const call = claim ? 'the machine claim' : 'the adoption';
+        const held = String(opts.fromKey).includes('/') ? 'its machine key' : 'its folder-name key';
         return {
             ok: false,
             standDown: 'refused',
-            detail: answeredText(sent.cause, 'the adoption of ' + opts.fromKey + ' into ' + opts.toKey, 'usp_AdoptProjectStore',
-                sent.detail, 'nothing was moved, so the folder\'s records stay under its folder-name key '
-                + 'and the next run asks for the adoption again')
+            detail: answeredText(sent.cause, call + ' of ' + opts.fromKey + ' into ' + opts.toKey, 'usp_AdoptProjectStore',
+                sent.detail, 'nothing was moved, so the folder\'s records stay under ' + held
+                + ' and the next run ' + (claim ? 'sends the claim' : 'asks for the adoption') + ' again')
         };
     }
     const adopted = counted(sent.rows);
@@ -4203,6 +4213,7 @@ function adoptProjectStore(options) {
             moved: Number(adopted.moved) || 0,
             merged: Number(adopted.merged) || 0,
             skipped: Number(adopted.skipped) || 0,
+            unowned: Number(adopted.unowned) || 0,
             mergedNames: Array.isArray(adopted.mergedNames) ? adopted.mergedNames : [],
             skippedNames: Array.isArray(adopted.skippedNames) ? adopted.skippedNames : []
         }
@@ -4213,6 +4224,12 @@ function adoptProjectStore(options) {
 // `db-refresh` skips its purge step below. A lower host has no such procedure,
 // so it is sent nothing.
 const PURGE_SCHEMA_VERSION = 14;
+
+// The schema version whose mem.usp_AdoptProjectStore carries the machine
+// claim, and the floor `db-refresh` sends no claim below. A lower host refuses
+// the claim's pair of keys, so it is sent none and every plain folder keeps
+// its folder key.
+const CLAIM_SCHEMA_VERSION = 16;
 
 // Delete this machine's own journal rows past their retention through
 // mem.usp_PurgeJournal, `db-refresh`'s last step, as {ok, purged} with the rows
@@ -6127,6 +6144,7 @@ module.exports = {
     PAIR_VERDICT_SCHEMA_VERSION,
     KEPT_SCHEMA_VERSION,
     PURGE_SCHEMA_VERSION,
+    CLAIM_SCHEMA_VERSION,
     ARCHIVED_SCHEMA_VERSION,
     ARCHIVED_DAYS_MAX,
     RECALL_LIMIT_MAX,
@@ -6227,6 +6245,7 @@ module.exports = {
     REFRESH_STEPS,
     writeRefreshResult,
     readRefreshResult,
+    snapshotKeyDir,
     snapshotRecordPath,
     writeSnapshotRecord,
     readSnapshotRecord,

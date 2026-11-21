@@ -24,9 +24,34 @@ BEGIN	-- PROCEDURE
 		SCRIPT:		mem.usp_AdoptProjectStore
 		AUTHOR:		Scott Applefeld
 		DATE:		October 3rd, 2026
-		VERSION:	v1.4
+		VERSION:	v1.5
 	*********************************************************************************************
-		NOTES:		v1.4 - 11/05/2026
+		NOTES:		v1.5 - 11/17/2026
+							A second pair of keys is accepted, the machine claim: @p_FromKey
+							is path: and a tail holding no slash, and @p_ToKey is exactly
+							path:, the calling sandbox's name in lower case, a slash and
+							that same tail, each part compared case-sensitively. A claim
+							moves, under the rules below, only the source rows whose
+							[WrittenBySandboxId] is the calling sandbox, the sandbox whose
+							mem.usp_PutRecord call last wrote the row. A row another sandbox
+							wrote last, and a row with no writer stamp whatever its
+							[LastPublishedBySandboxId], is not read for its content, moved
+							or merged. In either mode each source row and the target row
+							of its file key are read under an update lock held to the
+							commit, so no put rewrites either between the decision and
+							the write, and a claim leaves in place a row another sandbox
+							wrote after the claim picked it. A claim with no row to move
+							answers before it takes the fleet publish lock, its reads
+							before the lock reading uncommitted rows so that no publish
+							in flight holds them up; a claim that moves rows counts
+							unowned again under the lock. A source store read before the
+							lock and gone under it answers the empty result, creating no
+							store. The return gains unowned: in a claim, the count of the
+							source store's undeleted rows with no writer stamp, and 0
+							otherwise. The refusal of any other pair of keys names both
+							accepted pairs.
+
+					v1.4 - 11/05/2026
 							The usage fold below carries [LastKeptDt] too, so the winner
 							takes the later of the two rows' kept times, and a winner with
 							no usage row takes the loser's as it stands.
@@ -100,7 +125,7 @@ BEGIN	-- PROCEDURE
 							is a difference, are the same copy: the loser, the source row
 							or the target row, is dropped the same way and named under no
 							disposition, so no count reports it. So an adoption never
-							writes or deletes a memq row, never clears an archived flag or
+							overwrites or deletes a memq row, never clears an archived flag or
 							a deleted mark, and writes no deleted row: a deleted row in the
 							target store is one a database verb deleted, or a source row a
 							verb deleted that moved with its mark. An adoption creates no
@@ -130,6 +155,9 @@ BEGIN	-- PROCEDURE
 			,@EntryTranCount	INT				= @@TRANCOUNT
 			,@Now				DATETIMEOFFSET	= SYSDATETIMEOFFSET()
 			,@SandboxId			INT				= NULL
+			,@SandboxName		NVARCHAR(100)	= NULL
+			,@IsClaim			BIT				= 0
+			,@Unowned			INT				= 0
 			,@LockResult		INT				= NULL
 			,@FromKey			NVARCHAR(4000)	= NULLIF(LTRIM(RTRIM(@p_FromKey)), '')
 			,@ToKey				NVARCHAR(4000)	= NULLIF(LTRIM(RTRIM(@p_ToKey)), '')
@@ -138,6 +166,7 @@ BEGIN	-- PROCEDURE
 			,@RecordId			BIGINT			= NULL
 			,@TargetRecordId	BIGINT			= NULL
 			,@Name				NVARCHAR(200)	= NULL
+			,@FileKey			NVARCHAR(400)	= NULL
 			,@SourceDeletedDt	DATETIMEOFFSET	= NULL
 			,@SourceModifiedDt	DATETIMEOFFSET	= NULL
 			,@SourceOrigin		VARCHAR(10)		= NULL
@@ -162,36 +191,60 @@ BEGIN	-- PROCEDURE
 	********************************************************************************************/
 	;BEGIN TRY
 		/* Resolve the Caller; an Unmapped Login Writes Nothing. */
-		;SELECT	@SandboxId = CS.[SandboxId]
+		;SELECT	 @SandboxId		= CS.[SandboxId]
+				,@SandboxName	= CS.[Name]
 		FROM	mem.CallerSandbox() CS
 
 		;IF ( @SandboxId IS NULL )
 			THROW 50000, 'mem.usp_AdoptProjectStore: the calling login maps to no sandbox.', 1
 
-		/* Only a Folder-Name Key Is Adopted, and Only Into a Remote Key. */
-		;IF (	@FromKey IS NULL
-				OR @ToKey IS NULL
-				OR LEFT(@FromKey, 5) COLLATE Latin1_General_CS_AS <> 'path:'
-				OR LEFT(@ToKey, 7) COLLATE Latin1_General_CS_AS <> 'remote:'
-				OR LEN(@FromKey) < 6
-				OR LEN(@ToKey) < 8	)
-			THROW 50000, 'mem.usp_AdoptProjectStore: @p_FromKey must open path: and @p_ToKey must open remote:.', 1
+		/* A Machine Claim Is a Folder-Name Key Holding No Slash Into the Caller's Own Machine Key of the Same Tail, Each Part Compared Case-Sensitively. */
+		;IF (	LEFT(@FromKey, 5) COLLATE Latin1_General_BIN2 = 'path:'
+				AND LEN(@FromKey) >= 6
+				AND CHARINDEX(N'/', @FromKey) = 0
+				AND @ToKey COLLATE Latin1_General_BIN2 = N'path:' + LOWER(@SandboxName) + N'/' + SUBSTRING(@FromKey, 6, 4000)	)
+			SET @IsClaim = @True
+
+		/* Any Other Pair Is a Folder-Name Key Into a Remote Key, or Is Refused. */
+		;IF (	@IsClaim = @False
+				AND (	@FromKey IS NULL
+						OR @ToKey IS NULL
+						OR LEFT(@FromKey, 5) COLLATE Latin1_General_CS_AS <> 'path:'
+						OR LEFT(@ToKey, 7) COLLATE Latin1_General_CS_AS <> 'remote:'
+						OR LEN(@FromKey) < 6
+						OR LEN(@ToKey) < 8	)	)
+			THROW 50000, 'mem.usp_AdoptProjectStore: @p_FromKey must open path: and @p_ToKey must open remote:, or @p_FromKey must be path: and a tail holding no slash and @p_ToKey must be path:, the calling sandbox''s name in lower case, a slash and that same tail.', 1
 
 		/* A Key Longer Than a Store Holds Names No Store; Cut to 400 It Would Name Another. */
 		;IF ( LEN(@FromKey) > 400 OR LEN(@ToKey) > 400 )
 			THROW 50000, 'mem.usp_AdoptProjectStore: a project key holds at most 400 characters.', 1
 
-		/* No Folder-Name Store Means Nothing to Adopt, So the Empty Answer Returns Before the Publish Lock. */
+		/* No Source Store, or a Claim With No Row the Caller Wrote, Means Nothing to Move, So the Empty Answer Returns Before the Publish Lock. */
+		/* Every Read Before the Lock Reads Uncommitted Rows, so It Waits on No Row a Publish Holds. A Row Read Uncommitted Only Decides Whether the Lock Is Taken: the Work Under the Lock Re-Reads the Source Store, Answering Empty Where It Is Gone, and Every Row, and a Row Not Yet Committed Is Claimed by the Next Call. */
 		;SELECT	@SourceStoreId = S.[StoreId]
-		FROM	mem.Store S
+		FROM	mem.Store S WITH ( NOLOCK )
 		WHERE	S.[Tier] = 'project'
 				AND S.[ProjectKey] = @FromKey
 
-		;IF ( @SourceStoreId IS NULL )
+		/* A Claim Counts the Source Store's Undeleted Rows With No Writer Stamp, Which It Leaves in Place, for the Empty Answer. */
+		;IF ( @IsClaim = @True )
+			SELECT	@Unowned = COUNT(*)
+			FROM	mem.Record R WITH ( NOLOCK )
+			WHERE	R.[StoreId] = @SourceStoreId
+					AND R.[DeletedDt] IS NULL
+					AND R.[WrittenBySandboxId] IS NULL
+
+		;IF (	@SourceStoreId IS NULL
+				OR (	@IsClaim = @True
+						AND NOT EXISTS (	SELECT	NULL
+											FROM	mem.Record R WITH ( NOLOCK )
+											WHERE	R.[StoreId] = @SourceStoreId
+													AND R.[WrittenBySandboxId] = @SandboxId	)	)	)
 		BEGIN
 			;SELECT	[Json] = (	SELECT	 [moved]			= 0
 										,[merged]			= 0
 										,[skipped]			= 0
+										,[unowned]			= @Unowned
 										,[mergedNames]		= JSON_QUERY(N'[]')
 										,[skippedNames]		= JSON_QUERY(N'[]')
 								FOR JSON PATH, WITHOUT_ARRAY_WRAPPER	)
@@ -210,10 +263,28 @@ BEGIN	-- PROCEDURE
 		/****************************************************************************************
 			RESOLVE THE TWO STORES.
 		****************************************************************************************/
+		;SET @SourceStoreId = NULL
+
 		;SELECT	@SourceStoreId = S.[StoreId]
 		FROM	mem.Store S
 		WHERE	S.[Tier] = 'project'
 				AND S.[ProjectKey] = @FromKey
+
+		/* A Source Store Read Uncommitted Before the Lock and Gone Under It Means Nothing to Move: the Empty Answer Returns Before Any Store Is Created. */
+		;IF ( @SourceStoreId IS NULL )
+		BEGIN
+			;IF ( @EntryTranCount = 0 )
+				COMMIT TRANSACTION
+
+			;SELECT	[Json] = (	SELECT	 [moved]			= 0
+										,[merged]			= 0
+										,[skipped]			= 0
+										,[unowned]			= 0
+										,[mergedNames]		= JSON_QUERY(N'[]')
+										,[skippedNames]		= JSON_QUERY(N'[]')
+								FOR JSON PATH, WITHOUT_ARRAY_WRAPPER	)
+			;RETURN
+		END
 
 		;SELECT	@TargetStoreId = S.[StoreId]
 		FROM	mem.Store S
@@ -235,19 +306,30 @@ BEGIN	-- PROCEDURE
 			;SET @TargetStoreId = SCOPE_IDENTITY()
 		END
 
+		/* A Claim That Moves Rows Reports the Unowned Count Read Under the Lock From Committed Rows. */
+		;IF ( @IsClaim = @True )
+			SELECT	@Unowned = COUNT(*)
+			FROM	mem.Record R
+			WHERE	R.[StoreId] = @SourceStoreId
+					AND R.[DeletedDt] IS NULL
+					AND R.[WrittenBySandboxId] IS NULL
+
 		/****************************************************************************************
 			MOVE, MERGE OR LEAVE EACH SOURCE ROW.
 		****************************************************************************************/
+		/* The Source Set Is Every Row of the Source Store, or in a Machine Claim Only the Rows the Caller Wrote Last. */
 		;SELECT	@RecordId = MIN(R.[RecordId])
 		FROM	mem.Record R
 		WHERE	R.[StoreId] = @SourceStoreId
+				AND ( @IsClaim = @False OR R.[WrittenBySandboxId] = @SandboxId )
 
 		;WHILE ( @RecordId IS NOT NULL )
 		BEGIN
-			;SELECT	 @Name				= R.[Name]
-					,@SourceDeletedDt	= R.[DeletedDt]
-					,@SourceModifiedDt	= R.[FileModifiedDt]
-					,@SourceOrigin		= R.[Origin]
+			;SELECT	 @Name				= NULL
+					,@FileKey			= NULL
+					,@SourceDeletedDt	= NULL
+					,@SourceModifiedDt	= NULL
+					,@SourceOrigin		= NULL
 					,@TargetRecordId	= NULL
 					,@TargetName		= NULL
 					,@TargetDeletedDt	= NULL
@@ -257,26 +339,39 @@ BEGIN	-- PROCEDURE
 					,@WinnerRecordId	= NULL
 					,@LoserRecordId		= NULL
 					,@Action			= NULL
-			FROM	mem.Record R
-			WHERE	R.[RecordId] = @RecordId
 
-			/* The Target Row of the Same File Key, Equal Under the Database's Collation. */
+			/* The Source Row Is Read Under an Update Lock on Its Clustered Key, Held to the Commit, so a Put of the Row Waits to Write It Until the Adoption Commits. */
+			/* In a Machine Claim a Row Another Sandbox Wrote Since the Pick Has Left the Source Set, so It Reads as No Row and Stays. */
+			;SELECT	 @Name				= R.[Name]
+					,@FileKey			= R.[FileKey]
+					,@SourceDeletedDt	= R.[DeletedDt]
+					,@SourceModifiedDt	= R.[FileModifiedDt]
+					,@SourceOrigin		= R.[Origin]
+			FROM	mem.Record R WITH ( UPDLOCK, HOLDLOCK )
+			WHERE	R.[RecordId] = @RecordId
+					AND ( @IsClaim = @False OR R.[WrittenBySandboxId] = @SandboxId )
+
+			/* The Target Row of the Same File Key, Equal Under the Column's Own Collation, the Database's, Read Under the Same Lock, so the Row the Rules Decide On Is the Row a Loser's Drop Deletes. */
+			/* A Row No Longer in the Source Set Has No File Key, so It Reads No Target Row. */
 			;SELECT	 @TargetRecordId	= T.[RecordId]
 					,@TargetName		= T.[Name]
 					,@TargetDeletedDt	= T.[DeletedDt]
 					,@TargetIsArchived	= T.[IsArchived]
 					,@TargetOrigin		= T.[Origin]
 					,@TargetModifiedDt	= T.[FileModifiedDt]
-			FROM	mem.Record T
-					INNER JOIN mem.Record R
-						ON R.[RecordId] = @RecordId
+			FROM	mem.Record T WITH ( UPDLOCK, HOLDLOCK )
 			WHERE	T.[StoreId] = @TargetStoreId
-					AND T.[FileKey] = R.[FileKey]
+					AND T.[FileKey] = @FileKey
 
 			/************************************************************************************
 				DECIDE WHAT THE ROW DOES.
 			************************************************************************************/
-			;IF ( @TargetRecordId IS NULL )
+			;IF ( @Name IS NULL )
+			BEGIN
+				/* A Row No Longer in the Source Set Stays Where It Is, Named Under No Disposition. */
+				;SET @Action = NULL
+			END
+			ELSE IF ( @TargetRecordId IS NULL )
 			BEGIN
 				/* No Target Row: the Row Moves, Its Embeddings and Usage With It. */
 				;SET @Action = 'move'
@@ -440,6 +535,7 @@ BEGIN	-- PROCEDURE
 			FROM	mem.Record R
 			WHERE	R.[StoreId] = @SourceStoreId
 					AND R.[RecordId] > @RecordId
+					AND ( @IsClaim = @False OR R.[WrittenBySandboxId] = @SandboxId )
 		END
 
 		/* Commit Only a Transaction This Procedure Opened. */
@@ -452,6 +548,7 @@ BEGIN	-- PROCEDURE
 		;SELECT	[Json] = (	SELECT	 [moved]			= (	SELECT COUNT(*) FROM @Outcome O WHERE O.[Disposition] = 'moved' )
 									,[merged]			= (	SELECT COUNT(*) FROM @Outcome O WHERE O.[Disposition] = 'merged' )
 									,[skipped]			= (	SELECT COUNT(*) FROM @Outcome O WHERE O.[Disposition] = 'skipped' )
+									,[unowned]			= @Unowned
 									,[mergedNames]		= JSON_QUERY(COALESCE((	SELECT	'[' + STRING_AGG(CAST(N'"' + STRING_ESCAPE(O.[Name], 'json') + N'"' AS NVARCHAR(MAX)), N',')
 																							WITHIN GROUP ( ORDER BY O.[RecordId] ) + ']'
 																				FROM	@Outcome O

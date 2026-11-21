@@ -27,6 +27,6 @@ BEGIN
 		 [Version]
 		,[Notes]		)
 	SELECT	 [Version]	= $(KitSchemaVersion)
-			,[Notes]	= N'A search or nearest row carries the record''s own machine scope: mem.udf_VisibleRecords projects mem.Record''s [Machine], and mem.usp_Search and mem.usp_Nearest return it as the row''s machine key beside the sandbox key, which names the sandbox that published the row, so memq labels a shared hit with the machine the record is scoped to rather than its publisher.'
+			,[Notes]	= N'mem.usp_AdoptProjectStore accepts a second pair of keys, the machine claim: from a folder key holding no slash into path:, the calling sandbox''s name in lower case, a slash and the same tail. A claim moves only the rows whose [WrittenBySandboxId] is the calling sandbox and returns as unowned the count of undeleted rows with no writer stamp, which stay. No table and no row changes at the install.'
 END
 GO

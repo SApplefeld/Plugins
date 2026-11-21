@@ -6053,7 +6053,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: retire
 - landed: f92e99ec section 5
 - superseded-by: E005
-- reason: The incident class is live: an operator memory (`kit-project-memory-does-not-resolve-from-current-checkout`) records the kit's own project memories split across three stores by checkout path. The contrast sentence naming the tiers that resolve everywhere is the remedy, not decoration. Retired on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and removed this passage, and E005's passage carries the rule; the verdict before it was keep.
+- reason: Retired on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and removed this passage. The identical-path rule is retired: a repository is found by its origin wherever it sits, and a plain folder, once claimed, is keyed by its machine, so its project tier is that machine's. E005 carries the rule; the verdict before it was keep.
 - passage: A project store syncs under its flattened path, so a project tier resolves on another machine only where that project sits at the identical path.
 
 ### S001
@@ -6374,11 +6374,11 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 ### E005
 - key: Expect a project's records to be keyed by its git remote, so a checkout on any machine reads the same project memories.
 - class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:250, the Known Limits bullet on folder-keyed projects
+- source: plugins/grimoire/skills/memory-system/SKILL.md:267, the Known Limits bullet on folder-keyed projects
 - provenance: the memory-in-sql plan's project-key paragraph, on the operator's words of 2026-10-02: "Project memories SHOULD follow the project."
 - verdict: keep
-- reason: The key is `remote:` and the origin remote's host and path, read from the checkout's `.git/config` with no git spawn (`projectKey` in `scripts/memq.js`), so the same repository keys alike wherever it sits. A checkout with no origin, and a folder that is no checkout, keep `path:` and the folder's segment, which is the one case the bullet names as a limit.
-- passage: - A project with no git origin is keyed by its folder, so another machine reads its records only where that project sits at the identical path.
+- reason: The key is `remote:` and the origin remote's host and path, read from the checkout's `.git/config` with no git spawn (`projectKey` in `scripts/memq.js`), so the same repository keys alike wherever it sits. A checkout with no origin, and a folder that is no checkout, keep `path:`, the machine once claimed, and the folder's segment, since a plain folder's project tier is one machine's.
+- passage: - No-origin projects key by folder, shared across machines until claimed, then by folder and machine; other machines' tiers omit their records, which fleet-wide reads still find.
 
 ### E006
 - key: Declare a checkout's space in its own `.kit/memory-space`, or in `KIT_MEMORY_SPACE`, to order what its reads list first.
