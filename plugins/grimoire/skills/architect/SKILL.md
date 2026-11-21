@@ -67,7 +67,7 @@ The clone is taken under the seat's own directory the first time the repository 
 
 The seat fetches its clone before each ask and cuts each branch from the fetched remote-tracking ref of the trunk, never from the clone's own local branch of that name. The worktree is cut under the seat's own directory, never from a checkout another persona is working in. The seat commits and pushes on that branch there, naming the clone target and the remote before the push. At the end of the stretch that pushes from a worktree, once a fresh fetch shows its `HEAD` at `origin/<branch>`, the seat clears its links by branch-hygiene's reparse-point step, then removes it with `git worktree remove`, never `--force`. That stretch may report a plan's draft pull request, hand the operator a pull request, close an abandoned plan's pull request, push a stacked child's merge or push an amendment, among others. A link the step leaves, a refused removal, a folder left after it, or an unequal tip is reported with its reason, and the tree is left. The local branch stays, since the branch-hygiene sweep never runs in the seat's clones. A later amendment recuts the worktree with `git worktree add -B <branch> <path> origin/<branch>`, which moves that branch to the fetched tip. An amendment works in a tree an earlier stretch left.
 
-Every plan's branch is cut from the fetched trunk, so the seat reads no stack and a plan names no parent.
+Every plan's branch is cut from the fetched trunk, so the seat reads no stack. A plan needing an unlanded pull request names it on `brainstorming` step 9's `Needs pull request:` line, and its draft still opens on the trunk. The seat's report to the coordinator persona names that pull request, so the coordinator can order the plan behind it.
 
 ## Draft Pull Request
 
@@ -79,7 +79,7 @@ The seat merges no pull request, and reporting a draft's number does not hand it
 
 ## Report
 
-The seat reports each plan to the coordinator persona and to the operator, naming the branch, its base, the filename and the pull request number. It names the direction item the plan serves, or that it serves none, as the plan's `Serves:` line reads. A plan with no `Serves:` line is reported as serving none. Attaching the plan document over the channel, and the re-send without it, are the plan-travel bullet's. The record to the coordinator persona goes once the report has posted and says whether the file posted. With no channel attached, that record is the whole report. Answering Records below says why it is never skipped.
+The seat reports each plan to the coordinator persona and to the operator, naming the branch, its base, the filename, the pull request number and any pull request a `Needs pull request:` line names. It names the direction item the plan serves, or that it serves none, as the plan's `Serves:` line reads. A plan with no `Serves:` line is reported as serving none. Attaching the plan document over the channel, and the re-send without it, are the plan-travel bullet's. The record to the coordinator persona goes once the report has posted and says whether the file posted. With no channel attached, that record is the whole report. Answering Records below says why it is never skipped.
 
 Before ending a turn with an ask still open, the seat reports where it got to, to the coordinator persona and the operator, naming the branch and what is left. The controller starts a turn on nothing but an active entry. An ask with no entry waits for nothing.
 
