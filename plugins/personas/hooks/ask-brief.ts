@@ -281,8 +281,9 @@ function unansweredLead(blocking: boolean, waitMs: number, recommend: string): s
 
 // Composes the posts the thread, the entry and the record carry, as an array
 // the caller posts in order. The first is the framing post: a bold title line
-// naming the entry, or carrying the question where the entry title is empty
-// after the fold, the ask id under it as Discord small text, then one bold
+// carrying the ask's title, or the entry title where the ask's title is empty
+// after the fold, or the question where both are, the ask id under it as
+// Discord small text, then one bold
 // label line per part, each followed by its text and a blank line: Situation,
 // Decision, Stakes, Recommendation and If unanswered. Each later post holds
 // one pair of the options, in order, the last post one option where the count
@@ -331,8 +332,10 @@ export function renderAskBrief(entry: AskEntry, parsed: ParsedBrief, waitMs: num
   const unanswered = cap(parsed.unanswered, ASK_BRIEF_CAPS.unanswered);
   const plainCap = (text: string, max: number): string => escapeMarkdown(firstPlainUnits(oneLine(scrubbed(text)).trim(), max));
   const options = parsed.options.map((o) => ({ name: cap(o.name, ASK_BRIEF_CAPS.name).trimEnd(), brings: plainCap(o.brings, ASK_BRIEF_CAPS.brings), costs: plainCap(o.costs, ASK_BRIEF_CAPS.costs) }));
-  // An entry title empty after the fold names no entry, so the question titles the brief.
-  const titleText = oneLine(entry.entryTitle).trim() === "" ? entry.question : entry.entryTitle;
+  // The ask's own title heads the brief. A title empty after the fold gives
+  // way to the entry title, and an entry title empty after the fold names no
+  // entry, so the question titles the brief.
+  const titleText = oneLine(entry.title).trim() !== "" ? entry.title : oneLine(entry.entryTitle).trim() !== "" ? entry.entryTitle : entry.question;
   const title = firstUnits(escapeMarkdown(bracketSafeText(oneLine(scrubbed(titleText)))), ASK_BRIEF_TITLE_MAX).trimEnd();
   const lead = unansweredLead(entry.blocking, waitMs, scrubbed(entry.recommend));
   const opening = `${lead.charAt(0).toUpperCase()}${lead.slice(1)}`;

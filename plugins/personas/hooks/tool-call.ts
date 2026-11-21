@@ -26,7 +26,7 @@
 // harness evaluates it once per process while it loads a fresh
 // hooks/index.ts per case.
 
-import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, ROUTINES_MAX, ROUTINE_HOURS_MAX, ROUTINE_TEXT_MAX_POINTS, activateNext, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isActivationEligible, isAutonomyLevel, isPlanningDue, isRootFinished, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, releaserOf, resumeGoalNode, rootBudgetBlocked, stallPartsText, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
+import { ASKS_OPEN_MAX, ASK_TITLE_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, ROUTINES_MAX, ROUTINE_HOURS_MAX, ROUTINE_TEXT_MAX_POINTS, activateNext, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isActivationEligible, isAutonomyLevel, isPlanningDue, isRootFinished, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, releaserOf, resumeGoalNode, rootBudgetBlocked, stallPartsText, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
 import type { openWorkerAsk as openWorkerAskFromModule } from "./ask-layer";
 import { ASKED_BY_MAX_CHARS, TASK_ID_MAX_CHARS, TASK_TEXT_MAX_CHARS, targetPersonaOf, type ExpectedTurn } from "./channel-text";
 import { claimResource, commonsWinner, readAllClaims, readAllEntries, readHolderMeta, releaseResource, type CommonsStore } from "./commons";
@@ -57,7 +57,7 @@ import { TURN_BUDGET_PAUSED_REASON, TURN_BUDGET_REASON, turnBudgetResumeRefusedT
 import { markStretchApplied, noteStretchShown, stretchShownOfGet } from "./stretch-distillation";
 import { FREE_TEXT_MAX, boundedText, safeErrorText, stripBom } from "./text";
 import { isNudgeCountWork, isWorkTool } from "./turn-state-text";
-import { ASK_TURN_MAX, type WorkerAskRefusal } from "./worker-ask";
+import { ASK_MARKER_LINE_BREAK, ASK_TURN_MAX, type WorkerAskRefusal } from "./worker-ask";
 import type { ToolCallInput, ToolCallResult } from "claude-code";
 
 // The parameters of a module function after its deps argument, so a
@@ -1829,8 +1829,11 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // does, `<question> Recommend: <recommend>`, with a question mark
   // closing the question where the worker wrote none, since
   // askRecommendOf reads the recommendation from after "?" and
-  // "Recommend:". A refusal writes no entry and no commons record, logs
-  // the decision the line route logs for its guard, and names the guard.
+  // "Recommend:". The entry stores the title the call gives, and a call
+  // with no title or one past ASK_TITLE_MAX is refused before the open,
+  // logging no decision. A guard's refusal writes no entry and no commons
+  // record, logs the decision the line route logs for its guard, and names
+  // the guard.
   // A subagent's call is refused, as turn.complete refuses a subagent's
   // closing text, since only the main loop files an ask. The save goes
   // through persistAnswering, so a save that yields or throws takes the
@@ -1853,11 +1856,21 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
       return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
     }
+    // The title is one line: each line break folds to one space, as
+    // openWorkerAsk folds the question, and the ends are trimmed. Spaces
+    // inside are kept as written, and the limit is counted in code points
+    // after the fold.
+    const askTitle = String((e as any).title || "").split(ASK_MARKER_LINE_BREAK).join(" ").trim();
     const askQuestion = String((e as any).question || "").trim();
     const askRecommend = String((e as any).recommend || "").trim();
-    if (askQuestion === "" || askRecommend === "") {
+    if (askTitle === "" || askQuestion === "" || askRecommend === "") {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
-      return { deny: `ask_open: question and recommend must both be given and non-empty.` };
+      return { deny: `ask_open: title, question and recommend must each be given and non-empty.` };
+    }
+    const askTitlePoints = [...askTitle].length;
+    if (askTitlePoints > ASK_TITLE_MAX) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `ask_open: refused, the title runs ${askTitlePoints} characters, past the limit of ${ASK_TITLE_MAX}; write the decision in a few words.` };
     }
     const askBlocking = (e as any).blocking === true;
     // Where no entry holds the turn, the id names the persona that asked.
@@ -1867,7 +1880,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // The rollback below restores the owed list whole, so an owed brief the
     // push evicted from a full queue comes back with the open undone.
     const owedBeforeOpen = sess.state.askBriefOwed.slice();
-    const opened = await openWorkerAsk("tool", sess, nodeId, storedQuestion, askQuestion, askRecommend, askBlocking, askReaskSuppressMs);
+    const opened = await openWorkerAsk("tool", sess, nodeId, askTitle, storedQuestion, askQuestion, askRecommend, askBlocking, askReaskSuppressMs);
     if (typeof opened === "string") {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
       if (opened === "turn-cap" || opened === "cap") {

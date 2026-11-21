@@ -6,7 +6,7 @@
 // engine calls, the two model calls with their scrub, the reply backstop's
 // submit and the register-scope values behind closures, so this module
 // never receives the engine object and holds no state of its own.
-import { ASKS_OPEN_MAX, activateNext, applyTurnToErrors, headPoints, openAsksOnLiveEntries, openBlockingAsks, planHolderOf, reapTurnRecords, stampAskBriefTurnEnd, type GoalNode, type TurnRecordStamp } from "./agent-state";
+import { ASKS_OPEN_MAX, ASK_TITLE_TURN_BUDGET, activateNext, applyTurnToErrors, headPoints, openAsksOnLiveEntries, openBlockingAsks, planHolderOf, reapTurnRecords, stampAskBriefTurnEnd, type GoalNode, type TurnRecordStamp } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, openWorkerAsk as openWorkerAskFromModule, shadowAsk as shadowAskFromModule, shadowAskPlanHealth as shadowAskPlanHealthFromModule, shadowOutcome as shadowOutcomeFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { meterSessionKnown } from "./beat";
 import type { ChannelSender, ExpectedTurn, SubmitOutcome } from "./channel-text";
@@ -725,7 +725,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
       const lineTurn = { asksOpenedThisTurn: asksOpenedAtDelete, endedAt: turnEndedAtDelete };
       for (const askMarkerMatch of askMarkerMatches) {
         const question = askMarkerMatch[1].trim();
-        const opened = await openWorkerAsk("line", lineTurn, nodeId, question, question, askRecommendOf(question), askBlocking, askReaskSuppressMs);
+        const opened = await openWorkerAsk("line", lineTurn, nodeId, "", question, question, askRecommendOf(question), askBlocking, askReaskSuppressMs);
         if (opened === "turn-cap") refusedByTurnCap += 1;
         else if (opened === "cap") refusedByOpenCap += 1;
       }
@@ -1985,7 +1985,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         if (!ownAskStands(sess.state, "turn-budget", root.id)) {
           const askText = turnBudgetAskText(root);
           await withdrawLiftedAskBy(sess.state, sess.persona, "turn-budget", root.id, budgetNow);
-          const opened = await openLedgerAsk(sess.state, sess.persona, sess.mySessionId, root.id, askText, "", "turn-budget", true, budgetNow);
+          const opened = await openLedgerAsk(sess.state, sess.persona, sess.mySessionId, root.id, ASK_TITLE_TURN_BUDGET, askText, "", "turn-budget", true, budgetNow);
           if (typeof opened === "string") {
             sess.state.decisions.push({
               timestamp: budgetNow,

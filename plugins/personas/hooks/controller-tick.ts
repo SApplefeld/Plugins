@@ -27,7 +27,7 @@
 // evaluates it once per process while it loads a fresh hooks/index.ts per
 // case.
 
-import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, headPoints, holdOf, isPlanningDue, isRootFinished, oneLine, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, switchToPlan, QUIET_HELD_MAX, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type QuietHeld, type RunLines, type SentFinding, type SentPlanRecord } from "./agent-state";
+import { ASKS_OPEN_MAX, ASK_TITLE_COST_CAP, ASK_TITLE_ERROR_STREAK, ASK_TITLE_NUDGE_CAP, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, headPoints, holdOf, isPlanningDue, isRootFinished, oneLine, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, switchToPlan, QUIET_HELD_MAX, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type QuietHeld, type RunLines, type SentFinding, type SentPlanRecord } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, shadowAsk as shadowAskFromModule, shadowOutcome as shadowOutcomeFromModule, tickOpenAsk as tickOpenAskFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { stampBeat, stampSupervisorFile, type BeatHost, type HeartbeatEntry } from "./beat";
 import { cacheTick, type CacheClockState } from "./cache-clock";
@@ -1948,7 +1948,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       // this leaf whose hold was lifted is withdrawn first, so the fresh
       // one replaces it rather than standing beside it.
       await ctx.withdrawLiftedAskBy(sess.state, sess.persona, "error-streak", nodeId, streakTs);
-      const opened = await ctx.openLedgerAsk(sess.state, sess.persona, sess.mySessionId, nodeId, streakReason, "", "error-streak", true, streakTs);
+      const opened = await ctx.openLedgerAsk(sess.state, sess.persona, sess.mySessionId, nodeId, ASK_TITLE_ERROR_STREAK, streakReason, "", "error-streak", true, streakTs);
       if (typeof opened === "string") {
         sess.state.decisions.push({
           timestamp: streakTs,
@@ -3245,7 +3245,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         if (!capAskStands) {
           const askQuestion = nudgeCapAskText(sess.persona, g.title, sess.nudgedAnswersWithoutStatus);
           await ctx.withdrawLiftedAskBy(sess.state, sess.persona, "nudge-cap", g.id, capTs);
-          const opened = await ctx.openLedgerAsk(sess.state, sess.persona, sess.mySessionId, g.id, askQuestion, "", "nudge-cap", true, capTs);
+          const opened = await ctx.openLedgerAsk(sess.state, sess.persona, sess.mySessionId, g.id, ASK_TITLE_NUDGE_CAP, askQuestion, "", "nudge-cap", true, capTs);
           if (typeof opened === "string") {
             sess.nudgeCapRefusedFor = g.id;
             sess.state.decisions.push({
@@ -3320,7 +3320,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           if (!ownAskStands(sess.state, "cost-cap", g.id)) {
             const capReason = `cost-cap: nudge budget spent (${effectiveWindowCount(sess.state.monitor.cost.nudgeWindow, now)}/${costMaxNudgesPerHour} per hour)`;
             await ctx.withdrawLiftedAskBy(sess.state, sess.persona, "cost-cap", g.id, tickTs);
-            const opened = await ctx.openLedgerAsk(sess.state, sess.persona, sess.mySessionId, g.id, capReason, "", "cost-cap", true, tickTs);
+            const opened = await ctx.openLedgerAsk(sess.state, sess.persona, sess.mySessionId, g.id, ASK_TITLE_COST_CAP, capReason, "", "cost-cap", true, tickTs);
             if (typeof opened === "string") {
               sess.state.decisions.push({
                 timestamp: tickTs,

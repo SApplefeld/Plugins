@@ -1013,9 +1013,12 @@ export type AskClosedBy = "ask_close" | `record ${string}` | "goal_done" | "goal
 // One question to the operator, on the ledger the persona keeps in its state.
 // The ledger is the owner's truth about its asks; the commons record of the
 // same id is a mirror a reader session answers through. Every field is
-// present on every entry, null where it has no value, save `recommend` and
-// `entryTitle`, which hold the empty string, because the Discord
-// relay reads this file whole and lists an open entry's fields. `question` is
+// present on every entry, null where it has no value, save `title`,
+// `recommend` and `entryTitle`, which hold the empty string, because the
+// Discord relay reads this file whole and lists an open entry's fields.
+// `title` is the ask's short heading, empty for an ask opened by an ASK: line,
+// for an entry stored before the field existed and for the entry seeded from
+// a version 8 store. `question` is
 // the worker's line whole, "Recommend:" included, folded to one line at its
 // line breaks, since the relay renders it. `recommend` is the text after "Recommend:", which is the
 // assumption the work proceeds on. `blocking` is whether the work is stopped
@@ -1029,6 +1032,7 @@ export interface AskEntry {
   nodeId: string;
   planPath: string | null; // the node's, where it has one
   entryTitle: string;
+  title: string;
   question: string;
   recommend: string;
   opener: AskOpener;
@@ -1052,6 +1056,14 @@ export const ASKS_MAX = 64;
 export const ASK_CLOSED_KEEP_MS = 7 * 24 * 60 * 60_000;
 // The longest a close note runs.
 export const ASK_ANSWER_MAX = 300;
+// The longest an ask's title runs, in code points.
+export const ASK_TITLE_MAX = 60;
+// The fixed titles of the four asks the plugin opens by itself, one per
+// opener: error-streak, nudge-cap, cost-cap and turn-budget.
+export const ASK_TITLE_ERROR_STREAK = "Turn Errors Keep Repeating";
+export const ASK_TITLE_NUDGE_CAP = "Answers Carry No Status Line";
+export const ASK_TITLE_COST_CAP = "Nudge Budget Is Spent";
+export const ASK_TITLE_TURN_BUDGET = "Turn Budget Is Spent";
 
 // One ask whose decision brief the controller tick still owes: the ledger
 // entry's id, the node it rose from, the clock it was owed at, and the clock
@@ -1104,6 +1116,7 @@ export interface AskOpening {
   nodeId: string;
   planPath: string | null;
   entryTitle: string;
+  title: string;
   question: string;
   recommend: string;
   opener: AskOpener;
@@ -1157,6 +1170,7 @@ export function openAsk(state: AgentState, opening: AskOpening, now: number): As
     nodeId: opening.nodeId,
     planPath: opening.planPath,
     entryTitle: opening.entryTitle,
+    title: opening.title,
     question: opening.question,
     recommend: opening.recommend,
     opener: opening.opener,
@@ -1271,6 +1285,7 @@ function isAskEntry(value: unknown): value is AskEntry {
     && typeof entry.nodeId === "string"
     && stringOrNull(entry.planPath)
     && typeof entry.entryTitle === "string"
+    && typeof entry.title === "string"
     && typeof entry.question === "string"
     && typeof entry.recommend === "string"
     && (ASK_OPENERS as readonly string[]).includes(entry.opener as string)
@@ -1298,7 +1313,10 @@ function isAskEntry(value: unknown): value is AskEntry {
 // expired. A second load finds the key and seeds nothing, whatever the slot
 // holds. A stored object with no brief key, as every entry a version 9 store
 // wrote is, takes a null brief before the entry check reads it, which is the
-// version 9 to 10 step; a brief already stored, null or a string, is kept.
+// version 9 to 10 step; a brief already stored, null or a string, is kept. A
+// stored object with no title key, as every entry stored before the field
+// existed is, takes the empty title the same way, within version 11; a title
+// already stored, empty or not, is kept.
 function fillAsks(state: AgentState, now: number): void {
   const stored = (state as { asks?: unknown }).asks;
   const slot = (state as { pendingAskId?: unknown }).pendingAskId;
@@ -1310,6 +1328,7 @@ function fillAsks(state: AgentState, now: number): void {
     }
     for (const value of stored) {
       if (value !== null && typeof value === "object" && !("brief" in value)) (value as { brief?: unknown }).brief = null;
+      if (value !== null && typeof value === "object" && !("title" in value)) (value as { title?: unknown }).title = "";
     }
     state.asks = stored.filter(isAskEntry);
     return;
@@ -1329,6 +1348,7 @@ function fillAsks(state: AgentState, now: number): void {
     nodeId,
     planPath: node?.planPath ?? null,
     entryTitle: node?.title ?? "",
+    title: "",
     question: ASK_SEED_QUESTION,
     recommend: "",
     opener: "worker",

@@ -436,6 +436,7 @@ export async function openLedgerAsk(
   persona: string,
   ownerSessionId: string,
   nodeId: string,
+  title: string,
   question: string,
   recommend: string,
   opener: AskOpener,
@@ -449,6 +450,7 @@ export async function openLedgerAsk(
     nodeId,
     planPath: node?.planPath ?? null,
     entryTitle: node?.title ?? "",
+    title,
     question,
     recommend,
     opener,
@@ -574,6 +576,7 @@ export async function tickOpenAsk(
 // and `recommend` the choice alone. Both are folded to one line at
 // ASK_MARKER_LINE_BREAK, which a line already is, so a tool's text reaches
 // the ledger, the [GOAL TREE] block and the card in the shape a line's does.
+// `title` is stored as given, the empty string for a line.
 // `placeholderScope` is the text the placeholder refusal reads: the whole
 // line for a line, and the question alone for the tool, whose recommendation
 // may carry angle brackets of its own, such as a generic type. `turn` holds
@@ -597,6 +600,7 @@ export async function openWorkerAsk(
   route: "line" | "tool",
   turn: { asksOpenedThisTurn: number; endedAt?: number },
   nodeId: string,
+  title: string,
   question: string,
   placeholderScope: string,
   recommend: string,
@@ -642,7 +646,7 @@ export async function openWorkerAsk(
   turn.asksOpenedThisTurn += 1;
   let opened: AskEntry | AskOpenRefusal;
   try {
-    opened = await openLedgerAsk(deps, deps.session.state, deps.session.persona, deps.session.mySessionId, nodeId, storedQuestion, storedRecommend, "worker", blocking, Date.now());
+    opened = await openLedgerAsk(deps, deps.session.state, deps.session.persona, deps.session.mySessionId, nodeId, title, storedQuestion, storedRecommend, "worker", blocking, Date.now());
   } catch (err) {
     turn.asksOpenedThisTurn -= 1;
     throw err;

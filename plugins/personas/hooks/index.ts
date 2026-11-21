@@ -5513,12 +5513,20 @@ export const register: Register = async (on, options) => {
         "File one question to the operator on your ask ledger, where the operator sees it and answers it. " +
         "File only a decision that is the operator's to make: a fork the plan does not settle and that is not yours to settle. " +
         "The ask rises from the entry this turn started on. " +
+        "A call with no title, or with a title longer than 60 characters, is refused. " +
         "One turn opens at most 4 asks, and at most 16 stand open at once. A question still carrying an angle-bracket placeholder, a question already open on the entry, or one closed on the entry recently is refused. " +
         "After the turn ends, a brief drafted from the transcript reaches the operator on the fleet decisions card, so write the question and the recommendation and keep your reasoning in the turn. " +
         "The result is JSON: the new ask's id, whether it blocks, and the ids of every ask still open. Close it with ask_close by that id. Owner only.",
       inputSchema: {
         type: "object",
         properties: {
+          title: {
+            type: "string",
+            description:
+              "title is the decision in a few words, in Title Case, with no closing period and no prefix. " +
+              "It is at most 60 characters on one line. " +
+              "The operator's page shows it as the ask's heading, so it must tell this ask from the others without the question.",
+          },
           question: {
             type: "string",
             description: "question is the question whole, ending in a question mark.",
@@ -5535,7 +5543,7 @@ export const register: Register = async (on, options) => {
               "A blocking ask is paired with a closing text that opens with a BLOCKED: line in the same turn, so the thread shows the stop.",
           },
         },
-        required: ["question", "recommend"],
+        required: ["title", "question", "recommend"],
       },
     }));
 
@@ -6754,7 +6762,7 @@ export const register: Register = async (on, options) => {
       runChild: (argv) => runChild($, argv),
       runHealth: (forNodeId) => runHealth($, forNodeId),
       tickOpenAsk: (state, persona, askCfg, contextId, turns) => tickOpenAsk($, state, persona, askCfg, contextId, turns),
-      openLedgerAsk: (state, persona, ownerSessionId, nodeId, question, recommend, opener, blocking, now) => openLedgerAsk($, state, persona, ownerSessionId, nodeId, question, recommend, opener, blocking, now),
+      openLedgerAsk: (state, persona, ownerSessionId, nodeId, title, question, recommend, opener, blocking, now) => openLedgerAsk($, state, persona, ownerSessionId, nodeId, title, question, recommend, opener, blocking, now),
       withdrawLiftedAskBy: (state, persona, opener, nodeId, now) => withdrawLiftedAskBy($, state, persona, opener, nodeId, now),
       submitKaizen: (expectedTurns, announced) => submitKaizen($, expectedTurns, announced),
       queueMemoryCheck: (expectedTurns, goalId, title, goalIds) => queueMemoryCheck($, expectedTurns, goalId, title, goalIds),
@@ -7974,7 +7982,7 @@ export const register: Register = async (on, options) => {
           await completeRoot($, named.id, note ? `Root ${named.id} marked complete by goal_done: ${headPoints(note, 200)}` : `Root ${named.id} marked complete by goal_done`);
         },
         closeAsksOnCompletedNodes: (nodeIds, closedBy, now) => closeAsksOnCompletedNodes($, nodeIds, closedBy, now),
-        openWorkerAsk: (opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs) => openWorkerAsk($, opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs),
+        openWorkerAsk: (opener, session, nodeId, title, storedQuestion, question, recommend, blocking, reaskSuppressMs) => openWorkerAsk($, opener, session, nodeId, title, storedQuestion, question, recommend, blocking, reaskSuppressMs),
         writeMemoryRecord: (text, meta) => writeMemoryRecord($, text, meta),
         kitInstallPathOf: () => kitInstallPathOf($),
         recognitionAsk: (tool, input, mode, budget) => recognitionAsk($, tool, input, mode, budget),
@@ -8642,7 +8650,7 @@ export const register: Register = async (on, options) => {
             if ((windowCarried && lineOnly) || (sess.repromptLineNotedAt !== null && sess.repromptLineNotedAt >= turnEndedAt)) sess.repromptLineOwed = true;
           }
         },
-        openWorkerAsk: (opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs) => openWorkerAsk($, opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs),
+        openWorkerAsk: (opener, session, nodeId, title, storedQuestion, question, recommend, blocking, reaskSuppressMs) => openWorkerAsk($, opener, session, nodeId, title, storedQuestion, question, recommend, blocking, reaskSuppressMs),
         persist: () => persist($),
         activate: (nextId, reason) => activate($, nextId, reason),
         runHealth: (forNodeId) => runHealth($, forNodeId),
@@ -8710,7 +8718,7 @@ export const register: Register = async (on, options) => {
         setPendingCompactionBank: (value) => { pendingCompactionBank = value; },
         memoryGateDiscardPercent: () => memoryGateDiscardPercent,
         drainInboxNow: () => drainInboxNow,
-        openLedgerAsk: (state, persona, ownerSessionId, nodeId, question, recommend, opener, blocking, now) => openLedgerAsk($, state, persona, ownerSessionId, nodeId, question, recommend, opener, blocking, now),
+        openLedgerAsk: (state, persona, ownerSessionId, nodeId, title, question, recommend, opener, blocking, now) => openLedgerAsk($, state, persona, ownerSessionId, nodeId, title, question, recommend, opener, blocking, now),
         withdrawLiftedAskBy: (state, persona, opener, nodeId, now) => withdrawLiftedAskBy($, state, persona, opener, nodeId, now),
         sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta,
         planningInFlight: () => planningInFlight,
