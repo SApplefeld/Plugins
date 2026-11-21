@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// landing-protection: whether the host protects the branch a plan lands on.
-// The finishing pass asks it at the ending's read, whose word ends the plan,
-// and again at the ready's workflow read, whose word can drop a workflow from
-// the hold.
+// landing-protection: whether the host protects a branch.
+// Its one caller is the ready's workflow read in the finishing pass, which
+// asks it about the trunk. The word picks no ending for a plan.
 //
 //   node landing-protection.js --branch <name> [--remote <name>] [--repo <dir>]
 //
@@ -20,19 +19,20 @@
 // 0. A call with no `--branch` prints its usage to stderr, prints nothing to
 // stdout and exits 2.
 //
-// `open` sends a push to the branch, and that push cannot be taken back, so
-// `open` is printed only on a positive answer from the host. That answer is
-// that the host lists no blocking rule or policy on the branch, not that a
-// push will be accepted: a lock or a denied permission still refuses it, and
-// the finishing pass's ready ending then takes over. Every failure is
-// `unknown`: a branch, remote or address name outside its allowlist, an
-// address on neither host, a host tool that is not installed or not signed
-// in, a read that exits non-zero, runs past 20 seconds or prints what this
-// script cannot read, a branch the host does not hold, and a remote that
-// pushes to another address than the one read, or to several.
+// To the workflow read, `protected` is the one word that can drop a workflow
+// file from the hold on the ready, and `open` and `unknown` both keep the file
+// listed. `open` is printed only on a positive answer from the host. That
+// answer is that the host lists no blocking rule or policy on the branch, not
+// that a push will be accepted: a lock or a denied permission still refuses
+// one. Every failure is `unknown`: a branch, remote or address name outside
+// its allowlist, an address on neither host, a host tool that is not
+// installed or not signed in, a read that exits non-zero, runs past 20
+// seconds or prints what this script cannot read, a branch the host does not
+// hold, and a remote that pushes to another address than the one read, or to
+// several.
 //
-// The remote's address comes from `git remote get-url`. The landing push goes
-// to every address `git remote get-url --push --all` prints, which a push
+// The remote's address comes from `git remote get-url`. A push to the remote
+// goes to every address `git remote get-url --push --all` prints, which a push
 // address or a push rewrite in git's configuration can point at another
 // repository. The host reads cover the first address only, so the word is
 // `unknown` unless the second read prints exactly one address and it is the
