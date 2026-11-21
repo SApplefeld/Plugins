@@ -17,11 +17,11 @@
 // checked for a `.git` entry in it or any folder above it, and one with none is published as
 // `outside`, a folder holding no repository. Per group, no more often than `ROLLOUT_FETCH_MS`,
 // the reader asks the remote which branch its HEAD names with `ls-remote --symref`, then fetches
-// the client branches, the plan branches, that default branch, the rollout tags and the publish
-// tags, then, in a second fetch, every branch head into `refs/open/`, and nothing else; it reads
-// the refs on every cycle. Those are its outward acts on a read. Both fetches prune, so a tag the
-// operator removes from the remote leaves the rows on the next fetch, a branch deleted on the
-// remote leaves `refs/open/`, and a prune reaches only the broker's own refs.
+// the client branches, the plan branches, that default branch and the rollout tags, then, in a
+// second fetch, every branch head into `refs/open/`, and nothing else; it reads the refs on every
+// cycle. Those are its outward acts on a read. Both fetches prune, so a tag the operator removes
+// from the remote leaves the rows on the next fetch, a branch deleted on the remote leaves
+// `refs/open/`, and a prune reaches only the broker's own refs.
 //
 // Each repository with a default branch also publishes its changelog: the entries under
 // `docs/changelog/` at the default branch's commit, read by `readChangelog` in `./changelog.ts`
@@ -37,21 +37,16 @@
 // Each repository with a default branch also publishes its open branches: every branch under
 // `refs/open/` the default branch does not contain, with the start time of the last read whose
 // two fetches both succeeded. Nothing else reads `refs/open/`, so a second fetch that fails holds
-// that record alone: the rows, the publish rows and the taps read the first fetch's refs as they
-// would without it. A remote holding two branch names that differ only in case is one such
-// failure on a file system that ignores case. A review item reads the record to leave once its
-// branch has merged or been deleted. The names come from the remote and serve only as a set to
-// test membership in: none is shown, logged or handed to git.
+// that record alone: the rows and the taps read the first fetch's refs as they would without it.
+// A remote holding two branch names that differ only in case is one such failure on a file system
+// that ignores case. A review item reads the record to leave once its branch has merged or been
+// deleted. The names come from the remote and serve only as a set to test membership in: none is
+// shown, logged or handed to git.
 //
-// A repository that ships by publish tags on its default branch, `publish-*` with no client branch,
-// reads one publish row instead of client rows: the default branch's first-parent commits past its
-// latest publish tag. A repository with client branches reads no publish row, since it ships one way.
-//
-// Mark rolled out, `mark`, and Mark published, `markPublished`, are the reader's two outward
-// writes, each one tag: under the group's lock it fetches, tags `refs/remotes/origin/<client
-// branch>` with the day's `rollout/<client>/<YYYY-MM-DD>`, or the default branch's head with the
-// day's `publish-<YYYYMMDD>`, pushes that one tag ref to `origin` and nothing else, and recomputes
-// the rows, so a second tap finds the first one's tag after its own fetch and never moves it.
+// Mark rolled out, `mark`, is the reader's one outward write, one tag: under the group's lock it
+// fetches, tags `refs/remotes/origin/<client branch>` with the day's `rollout/<client>/<YYYY-MM-DD>`,
+// pushes that one tag ref to `origin` and nothing else, and recomputes the rows, so a second tap
+// finds the first one's tag after its own fetch and never moves it.
 //
 // Every git call runs through `runGit`, so the environment scrub, the no-shell spawn and the stderr
 // drop in `./git.ts` cover every call here. The runner is asynchronous, so a read cycle runs off the
@@ -67,7 +62,7 @@ import { readChangelog } from "./changelog.ts";
 import type { ChangelogEntry, ChangelogRecord, HeldEntries } from "./changelog.ts";
 import { LOCAL_READ, OVERFLOW, REMOTE_CALL, runGit } from "./git.ts";
 import type { GitLimits, GitRunner } from "./git.ts";
-import type { OpenBranches, PublishRow, RolloutCheckout, RolloutCommit, RolloutRow, SharedRow } from "./views.ts";
+import type { OpenBranches, RolloutCheckout, RolloutCommit, RolloutRow, SharedRow } from "./views.ts";
 
 /** How often a repository is fetched at most. */
 export const ROLLOUT_FETCH_MS = 5 * 60 * 1000;
@@ -101,9 +96,6 @@ const REMOTE_PREFIX = "refs/remotes/origin/";
 /** Where the second fetch puts every branch head; only the open branches read it. */
 const OPEN_PREFIX = "refs/open/";
 const TAG_PREFIX = "refs/tags/rollout/";
-const PUBLISH_PREFIX = "refs/tags/publish-";
-const PUBLISH_NAME = /^publish-[A-Za-z0-9._-]+$/;
-const PUBLISH_DATE = /^publish-(\d{4})(\d{2})(\d{2})(?:-|$)/;
 const TAG_DATE = /^(\d{4}-\d{2}-\d{2})(?:-[A-Za-z0-9._-]+)?$/;
 
 /** What `read` hands back: the last cycle's rows and checkouts, and whether the source is held. */
@@ -112,8 +104,6 @@ export type RolloutState = {
   checkouts: readonly RolloutCheckout[];
   /** Every repository's shared rows, in the order its rows come. */
   shared: readonly SharedRow[];
-  /** Every repository's publish row, at most one each, from the repositories with no client branch. */
-  publish: readonly PublishRow[];
   /** The latest time any repository's refs were read well, null before any has been. */
   readAt: string | null;
   /** Every repository's open branches, one record each, from the repositories with a default branch and a successful fetch. */
@@ -135,15 +125,6 @@ export type RolloutMark =
   | { status: "unknown-repo" }
   | { status: "unknown-branch" }
   | { status: "exists"; tag: string }
-  | { status: "pushed"; tag: string; sha: string }
-  | { status: "push-failed"; tag: string; kind: string };
-
-/** What `markPublished` found or did for one repository, after its fetch. */
-export type PublishMark =
-  | { status: "unknown-repo" }
-  | { status: "not-publish" }
-  | { status: "moved"; head: string }
-  | { status: "exists"; tag: string | null }
   | { status: "pushed"; tag: string; sha: string }
   | { status: "push-failed"; tag: string; kind: string };
 
@@ -175,21 +156,6 @@ export type RolloutReader = {
    * where the fetch or the tag command failed, with nothing tagged or pushed.
    */
   mark(repo: string, branch: string, login: string): Promise<RolloutMark>;
-  /**
-   * Mark published: fetches `repo` now under its lock and, with the lock still held, tags the
-   * default branch's head with the day's publish tag, `publishTagName` over the tags the fetch
-   * brought, an annotated tag whose message names `login`, pushes that one tag to `origin`, and
-   * recomputes the rows. `head` is the default branch head the page showed, the publish row's
-   * `head`. Answers `unknown-repo` for a name the reader has not grouped, `not-publish` for a
-   * repository with a client branch, admitted or refused, no default branch, or no publish tag
-   * the reader reads on that branch's first-parent line, `moved` with the head the fetch brought
-   * where that is not `head`, `exists` where the head already carried a tag opening `publish-`
-   * after the fetch, with nothing moved and the tag's name where `publishTagSafe` passes it,
-   * `push-failed` with the runner's kind where the push failed, the local tag deleted, and
-   * `pushed` with the commit sha the tag points at. Rejects with the runner's kind where the fetch
-   * or the tag command failed, with nothing tagged or pushed.
-   */
-  markPublished(repo: string, login: string, head: string): Promise<PublishMark>;
   /**
    * Reads the plan file `plan` and the files `others` from the plan branch `branch` of `repo` with
    * no fetch of its own: the refs are as the last fetch left them. The read takes no repository
@@ -308,50 +274,6 @@ export function latestRolloutTag(tags: readonly string[], client: string): Tag |
   return latest;
 }
 
-/** A publish tag: its name under `refs/tags/`, and the date its name carries as `YYYY-MM-DD`, or null. */
-export type PublishTag = { name: string; date: string | null };
-
-/**
- * Whether `name`, a tag name under `refs/tags/`, is a publish tag the reader reads: `publish-`
- * followed by a non-empty run of ASCII letters, digits, `.`, `_` and `-`. The publish workflow
- * starts on any tag opening `publish-`; the narrower run keeps a name the page prints free of shell
- * syntax, as `clientBranchSafe` does for a client branch.
- */
-export function publishTagSafe(name: string): boolean {
-  return PUBLISH_NAME.test(name);
-}
-
-/**
- * The latest publish tag among `tags`, each a tag name and the commit it points at: the one whose
- * commit has the lowest index in `order`, the default branch's first-parent commits numbered from
- * its head, since that commit is the one the last publish shipped. Two tags on one commit are
- * ordered by name, the later winning; for two names that both carry a `YYYYMMDD` date segment that
- * is the date order too. A tag whose commit `order` does not hold, or whose name `publishTagSafe`
- * refuses, is no candidate. The date segment orders nothing between commits, so a day mixing
- * counter and hash suffixes reads by the commits they sit on.
- */
-export function latestPublishTag(tags: readonly { name: string; sha: string }[], order: ReadonlyMap<string, number>): PublishTag | null {
-  let latest: { name: string; at: number } | null = null;
-  for (const { name, sha } of tags) {
-    if (!publishTagSafe(name)) continue;
-    const at = order.get(sha);
-    if (at === undefined) continue;
-    if (latest === null || at < latest.at || (at === latest.at && name > latest.name)) latest = { name, at };
-  }
-  if (latest === null) return null;
-  return { name: latest.name, date: publishDateOf(latest.name) };
-}
-
-/** The `YYYYMMDD` date segment a publish tag's name opens with, as `YYYY-MM-DD`, or null where it carries none that is a calendar date. */
-function publishDateOf(name: string): string | null {
-  const segment = PUBLISH_DATE.exec(name);
-  if (segment === null) return null;
-  const [year, month, day] = [Number(segment[1]), Number(segment[2]), Number(segment[3])];
-  const at = new Date(Date.UTC(year, month - 1, day));
-  if (at.getUTCFullYear() !== year || at.getUTCMonth() !== month - 1 || at.getUTCDate() !== day) return null;
-  return `${segment[1] ?? ""}-${segment[2] ?? ""}-${segment[3] ?? ""}`;
-}
-
 /**
  * The rollout tag for `client` made on the day `at` falls on in the host's local time,
  * `rollout/<client>/<YYYY-MM-DD>`: the date the operator declares by tapping that day.
@@ -360,21 +282,6 @@ export function rolloutTagName(client: string, at: number): string {
   const day = new Date(at);
   const pad = (part: number): string => String(part).padStart(2, "0");
   return `rollout/${client}/${String(day.getFullYear())}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
-}
-
-/**
- * The publish tag for the day `at` falls on in the host's local time, `publish-<YYYYMMDD>`, or
- * where `taken` holds that name, the first of `publish-<YYYYMMDD>-2`, `-3` and so on it does not
- * hold. `taken` is the tag names the fetch brought, so a name the remote has is never made twice;
- * a name with another suffix, such as the workflow's own `-<sha>`, takes no counter.
- */
-export function publishTagName(at: number, taken: ReadonlySet<string>): string {
-  const day = new Date(at);
-  const pad = (part: number): string => String(part).padStart(2, "0");
-  const base = `publish-${String(day.getFullYear())}${pad(day.getMonth() + 1)}${pad(day.getDate())}`;
-  let name = base;
-  for (let counter = 2; taken.has(name); counter += 1) name = `${base}-${String(counter)}`;
-  return name;
 }
 
 /**
@@ -477,7 +384,6 @@ type Group = {
   fetchedWellAt: number | null;
   rows: RolloutRow[];
   shared: SharedRow[];
-  publish: PublishRow[];
   /**
    * The open branches and the successful fetch they stand on, null with no default branch or no
    * successful fetch. It is kept until `fetchedWellAt` moves, so its names and its time always
@@ -544,7 +450,7 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
   const unfetchedOpen = new Set<string>();
   const refusedClients = new Set<string>();
   const unreadChangelog = new Set<string>();
-  let state: RolloutState = { rows: [], checkouts: [], shared: [], publish: [], readAt: null, branches: [], changelog: [], outside: [], attempted: false, held: true, reachedGit: false };
+  let state: RolloutState = { rows: [], checkouts: [], shared: [], readAt: null, branches: [], changelog: [], outside: [], attempted: false, held: true, reachedGit: false };
   /** The latest cycle's roots that hold no repository, published beside its checkouts. */
   let outsideRoots: readonly string[] = [];
   let inFlight: Promise<void> | null = null;
@@ -631,10 +537,10 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
   /**
    * The remote's HEAD query, the fetch into the group's bare repository, then `set-head` naming the
    * branch the remote's HEAD named, so `refs/remotes/origin/HEAD` names the default branch. The
-   * fetch names five ref families: the client branches, the plan branches, the default branch, the
-   * rollout tags and the publish tags, each under the same prune, so a plan branch deleted on the
-   * remote leaves the bare repository on the next fetch, and no dynamic spec ever names a branch
-   * the prune would then stop covering. The first
+   * fetch names four ref families: the client branches, the plan branches, the default branch and
+   * the rollout tags, each under the same prune, so a plan branch deleted on the remote leaves the
+   * bare repository on the next fetch, and no dynamic spec ever names a branch the prune would then
+   * stop covering. The first
    * fetch into an empty repository brings the whole history and takes `FIRST_FETCH`, and every later
    * one takes `REMOTE_CALL`. `set-head` with a branch named contacts no remote, so it is a local
    * read; the `--` before the branch keeps a name the remote chose from reading as an option.
@@ -647,7 +553,6 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     const specs = [`+refs/heads/${CLIENT_PREFIX}*:${REMOTE_PREFIX}${CLIENT_PREFIX}*`, `+refs/heads/${PLAN_PREFIX}*:${REMOTE_PREFIX}${PLAN_PREFIX}*`];
     if (branch !== null) specs.push(`+refs/heads/${branch}:${REMOTE_PREFIX}${branch}`);
     specs.push(`+${TAG_PREFIX}*:${TAG_PREFIX}*`);
-    specs.push(`+${PUBLISH_PREFIX}*:${PUBLISH_PREFIX}*`);
     await git(
       group.bare,
       ["fetch", "--no-tags", "--prune", "--no-write-fetch-head", "--no-auto-maintenance", "--no-recurse-submodules", "origin", ...specs],
@@ -781,82 +686,6 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     return rows;
   }
 
-  /** The commit `<defaultRef>~<count>` names, the default branch's first-parent commit `count` back from its head, or null past its root. */
-  async function firstParentAt(root: string, defaultRef: string, count: number): Promise<string | null> {
-    try {
-      return (await git(root, ["rev-parse", "--verify", "--quiet", `${defaultRef}~${String(count)}^{commit}`], LOCAL_READ)).trim();
-    } catch (error) {
-      // Exit 1 is git's answer for a name that resolves to nothing; anything else is the read failing.
-      if (kindOf(error) !== "exit 1") throw error;
-      return null;
-    }
-  }
-
-  /**
-   * The first-parent position of the newest default-branch commit a publish tag sits on: the
-   * commit's index from the head, which is also the exact first-parent count past it, keyed by its
-   * sha. One counted `rev-list` excluding every publish tag's history finds the first first-parent
-   * commit any publish tag reaches; where that commit carries a candidate tag, it is the newest
-   * tagged one. Where it does not, a tag off the first-parent line reached it first, and each
-   * candidate commit is counted on its own and kept where the commit that far back is itself, the
-   * smallest count winning. Every read prints a number or a sha, so none grows with the branch.
-   */
-  async function newestTagged(root: string, defaultRef: string, candidates: ReadonlySet<string>): Promise<Map<string, number>> {
-    const stop = Number((await git(root, ["rev-list", "--first-parent", "--count", defaultRef, "--not", `--glob=${PUBLISH_PREFIX}*`], LOCAL_READ)).trim());
-    const reached = await firstParentAt(root, defaultRef, stop);
-    if (reached !== null && candidates.has(reached)) return new Map([[reached, stop]]);
-    const counted: { sha: string; count: number }[] = [];
-    for (const sha of candidates) {
-      counted.push({ sha, count: Number((await git(root, ["rev-list", "--first-parent", "--count", `${sha}..${defaultRef}`], LOCAL_READ)).trim()) });
-    }
-    counted.sort((left, right) => left.count - right.count);
-    for (const { sha, count } of counted) {
-      if ((await firstParentAt(root, defaultRef, count)) === sha) return new Map([[sha, count]]);
-    }
-    return new Map();
-  }
-
-  /**
-   * The publish row of a repository with no client branch: its latest publish tag by
-   * `latestPublishTag`, on the newest default-branch commit `newestTagged` finds, and the
-   * first-parent commits past it, every one on the default branch. No row where the repository has
-   * no publish tag the reader reads on that branch's first-parent line. The tags are listed with
-   * each one's commit, peeled where the tag is annotated. `toPublish` is the exact count however
-   * old the tag, and the log reads only the `ROLLOUT_COMMIT_CAP` the row carries.
-   */
-  async function publishOf(root: string, repo: string, defaultRef: string, readAt: string): Promise<PublishRow[]> {
-    const listed = lines(await git(root, ["for-each-ref", "--format=%(refname)%09%(objectname)%09%(*objectname)", `${PUBLISH_PREFIX}*`], LOCAL_READ));
-    const tags = listed
-      .map((line) => {
-        const [refname = "", object = "", peeled = ""] = line.split("\t");
-        return { name: refname.slice("refs/tags/".length), sha: peeled === "" ? object : peeled };
-      })
-      .filter((tag) => publishTagSafe(tag.name));
-    if (tags.length === 0) return [];
-    const order = await newestTagged(root, defaultRef, new Set(tags.map((tag) => tag.sha)));
-    const tag = latestPublishTag(tags, order);
-    if (tag === null) return [];
-    const toPublish = order.values().next().value ?? 0;
-    const head = (await git(root, ["rev-parse", "--verify", defaultRef], LOCAL_READ)).trim();
-    const commits = (await commitsOf(root, `refs/tags/${tag.name}..${defaultRef}`, [`--max-count=${String(ROLLOUT_COMMIT_CAP)}`])).map((commit) => ({ ...commit, fromDefault: true }));
-    // The oldest commit waiting is the one just past the tag, read on its own where the log stops short of it.
-    const oldest = toPublish > commits.length ? (await commitsOf(root, `${defaultRef}~${String(toPublish - 1)}`, ["--max-count=1"]))[0] : commits[commits.length - 1];
-    return [
-      {
-        repo,
-        branch: defaultRef.slice(REMOTE_PREFIX.length),
-        head,
-        lastTag: tag.name,
-        lastTagDate: tag.date,
-        toPublish,
-        oldestAt: oldest?.at ?? null,
-        newestAt: commits[0]?.at ?? null,
-        commits,
-        readAt,
-      },
-    ];
-  }
-
   /**
    * The open branches: every branch under `refs/open/` whose tip the default branch does not
    * contain, from one `for-each-ref --no-merged`, by name past `refs/open/`, without `HEAD` or the
@@ -922,8 +751,6 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     for (const branch of refs.clients) rows.push(await rowOf(group.bare, group.name, refs, tags, branch, readAt));
     // Every list is read before any is stored, so a failed read leaves the last set standing.
     const shared = await sharedOf(group.bare, group.name, refs, tags);
-    // A repository ships one way: one with client branches, admitted or refused, reads no publish row.
-    const publishRows = refs.clients.length === 0 && refs.refused === 0 && refs.defaultRef !== null ? await publishOf(group.bare, group.name, refs.defaultRef, readAt) : [];
     // The record stands on the last successful fetch's start, never on this read's time, and is
     // read again only once that start has moved; with no default branch or no such fetch there is
     // no record. A read of the open branches that fails keeps the record the group had, so it never
@@ -949,7 +776,6 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     else if (group.changelog !== null && !group.changelog.stale) group.changelog = { ...group.changelog, stale: true };
     group.rows = rows;
     group.shared = shared;
-    group.publish = publishRows;
     group.branches = branches;
     group.readAt = readAt;
   }
@@ -1070,60 +896,6 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
   }
 
   /**
-   * Mark published's own step, run with the group's lock held and its fetch done. The repository
-   * must be one that ships by publish tags, a default branch and no client branch, admitted or
-   * refused, as `computeGroup` gates the publish row, and one already published this way: a
-   * publish tag the reader reads on the default branch's first-parent line, as `newestTagged`
-   * finds the row's, so a repository never published is never first published from the page. The
-   * publish tags the fetch brought are read once, by name and by the commit each points at, peeled
-   * where annotated. The head the fetch brought must be `shown`, the one the page sent back, else
-   * `moved` answers the current head and nothing is tagged. A tag of any name on the head means
-   * nothing to publish, and its name is answered only where `publishTagSafe` passes it, since the
-   * page prints the answer. Else the day's name past the names taken is made as an annotated tag
-   * at the head and that one ref is pushed. A push that fails has its local tag deleted, so the
-   * next tap does not read it as taken; where the delete fails too, the next fetch's prune removes
-   * it, since the remote never took it.
-   */
-  async function publishTagAndPush(group: Group, login: string, shown: string): Promise<PublishMark> {
-    const refs = await refsOf(group.bare);
-    if (refs.defaultRef === null || refs.clients.length > 0 || refs.refused > 0) return { status: "not-publish" };
-    const head = refs.defaultRef;
-    const sha = (await git(group.bare, ["rev-parse", "--verify", head], LOCAL_READ)).trim();
-    const listed = lines(await git(group.bare, ["for-each-ref", "--format=%(refname)%09%(objectname)%09%(*objectname)", `${PUBLISH_PREFIX}*`], LOCAL_READ));
-    const taken = new Set<string>();
-    const published = new Set<string>();
-    let onHead = false;
-    let named: string | null = null;
-    for (const line of listed) {
-      const [refname = "", object = "", peeled = ""] = line.split("\t");
-      const name = refname.slice("refs/tags/".length);
-      const at = peeled === "" ? object : peeled;
-      taken.add(name);
-      if (publishTagSafe(name)) published.add(at);
-      if (at !== sha) continue;
-      onHead = true;
-      if (publishTagSafe(name) && (named === null || name > named)) named = name;
-    }
-    if (published.size === 0 || (await newestTagged(group.bare, head, published)).size === 0) return { status: "not-publish" };
-    if (sha !== shown) return { status: "moved", head: sha };
-    if (onHead) return { status: "exists", tag: named };
-    const tag = publishTagName(now(), taken);
-    const ref = `refs/tags/${tag}`;
-    await git(group.bare, ["tag", "-a", "-m", `Published by ${login} from the Channels page`, tag, sha], LOCAL_READ);
-    try {
-      await git(group.bare, ["push", "origin", ref], REMOTE_CALL);
-    } catch (error) {
-      try {
-        await git(group.bare, ["tag", "-d", tag], LOCAL_READ);
-      } catch {
-        // Left for the next fetch's prune.
-      }
-      return { status: "push-failed", tag, kind: kindOf(error) };
-    }
-    return { status: "pushed", tag, sha };
-  }
-
-  /**
    * The branch read's own step, run with no lock and no fetch of its own, beside any fetch or tap
    * on the same repository. It holds no lock because it reads nothing a fetch can tear: the one ref
    * read sees the ref's old tip or its new one, every file is then read by that sha, and the fetch
@@ -1190,7 +962,6 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
       rows: listed.flatMap((group) => group.rows),
       checkouts,
       shared: listed.flatMap((group) => group.shared),
-      publish: listed.flatMap((group) => group.publish),
       readAt,
       branches: listed.flatMap((group) => (group.branches === null ? [] : [group.branches])),
       changelog: listed.flatMap((group) => (group.changelog === null ? [] : [group.changelog])),
@@ -1279,7 +1050,6 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
             fetchedWellAt: null,
             rows: [],
             shared: [],
-            publish: [],
             branches: null,
             changelog: null,
             changelogHeld: new Map(),
@@ -1332,18 +1102,6 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
         const marked = await tagAndPush(group, branch, login);
         // The step's answer stands whatever the rows do next: a read that fails here holds the
         // group as any failed read does, and is no reason to answer that the tag was not pushed.
-        await recompute(group);
-        return marked;
-      }).finally(() => publish(state.checkouts));
-    },
-    markPublished(repo, login, head) {
-      const group = groups.get(repo.toLowerCase());
-      if (group === undefined) return Promise.resolve({ status: "unknown-repo" });
-      return underRepoLock(group.folded, async () => {
-        const kind = await fetchDue(group, now(), true, false);
-        if (kind !== null) throw new Error(kind);
-        const marked = await publishTagAndPush(group, login, head);
-        // As in `mark`: the step's answer stands whatever the rows do next.
         await recompute(group);
         return marked;
       }).finally(() => publish(state.checkouts));

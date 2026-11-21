@@ -94,7 +94,6 @@ import {
   registerAgreeHandlers,
   registerFileHandlers,
   registerPermissionHandler,
-  registerPublishHandler,
   registerQuestionHandler,
   registerRolloutHandler,
   registerSayHandler,
@@ -2858,9 +2857,6 @@ export async function startBroker(
     // a session. After a push the pass runs once, so its rollout reading takes the rows the reader
     // recomputed and the next view read counts from the new tag.
     registerRolloutHandler(webServer.register, { reader: sources.rollout, afterMark: () => pass.run(), log: logger });
-    // Mark published, the same shape for a repository that ships by publish tags on its trunk: one
-    // tag to the remote, which starts that repository's publish workflow, then one pass run.
-    registerPublishHandler(webServer.register, { reader: sources.rollout, afterMark: () => pass.run(), log: logger });
     // Steer, outside the Discord block: the line goes to the machine's direction ledger, the file the
     // kit's sessions read as the operator's standing word, never to a session. After a write the pass
     // runs once, so its direction reading takes the new item and the next view read draws it.

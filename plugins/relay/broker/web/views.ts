@@ -94,27 +94,6 @@ export type RolloutRow = {
 };
 
 /**
- * One repository that ships by publish tags on its default branch: its latest publish tag, the one
- * on the newest first-parent commit, and the first-parent commits on that branch past it. `branch`
- * is the default branch's name. `commits` holds at most `ROLLOUT_COMMIT_CAP` of them, each one from
- * the default branch; `toPublish` is the count.
- */
-export type PublishRow = {
-  repo: string;
-  branch: string;
-  /** The default branch's head as the reader read it, the commit Mark published sends back so the tap ships only what the page showed. */
-  head: string;
-  lastTag: string;
-  /** The tag's date segment as `YYYY-MM-DD`, null where the name carries none. */
-  lastTagDate: string | null;
-  toPublish: number;
-  oldestAt: string | null;
-  newestAt: string | null;
-  commits: RolloutCommit[];
-  readAt: string;
-};
-
-/**
  * One first-parent commit on a repository's default branch from the shared window, with how far it
  * has fanned out: `fannedOut` client branches contain it and `atClients` have a latest rollout tag
  * that does, each by ancestry. `clients` is the number of client branches the repository has, a
@@ -147,8 +126,6 @@ export type RolloutReading = {
   checkouts: readonly RolloutCheckout[];
   /** Every repository's shared rows, in the order its rows come. */
   shared: readonly SharedRow[];
-  /** Every repository's publish row, from the repositories with no client branch. */
-  publish: readonly PublishRow[];
   /** The latest time any repository's refs were read, null where none has been. */
   readAt: string | null;
   /** Every repository's open branches, one record each, from the repositories with a default branch and a successful fetch. */
@@ -162,11 +139,9 @@ export type RolloutReading = {
 /** The standup page's rollout card: every row, with the counts the card's heading draws. */
 export type RolloutSummary = {
   rows: RolloutRow[];
-  /** Every publish row. */
-  publish: PublishRow[];
-  /** Client rows with something to roll out, plus publish rows with something to publish. */
+  /** Client rows with something to roll out. */
   waiting: number;
-  /** The sum of `toRollOut` over the client rows and `toPublish` over the publish rows. */
+  /** The sum of `toRollOut` over the client rows. */
   changes: number;
   oldestAt: string | null;
   readAt: string | null;
@@ -326,8 +301,6 @@ export type NeedsMeView = {
   sandbox: string;
   groups: { blocked: Item[]; ask: Item[]; hands: Item[]; review: ReviewItem[] };
   rollout: RolloutRow[] | null;
-  /** The publish rows with something to publish, null while the source has never read. */
-  publish: PublishRow[] | null;
   asOf: AsOf;
   held: readonly SourceName[];
 };
@@ -372,8 +345,6 @@ export type RepoView = {
   heading: Heading | null;
   /** The row of the client branch the persona's checkout is on; null off a client branch. */
   rollout: RolloutRow | null;
-  /** The publish row of the repository the persona's checkout reads, on any branch; null where it has none. */
-  publish: PublishRow | null;
   changed: PlanRow[] | null;
   upNext: PlanRow[];
   worker: Worker;
@@ -1598,8 +1569,8 @@ function verdictOver(readings: Readings, repos: readonly Repo[]): Verdict {
 
 /**
  * The standup card over every row the reader holds, or null while the source has never read. A
- * publish row counts as a client row does: waiting where it has commits, its commits among the
- * changes, and its oldest commit among the oldest.
+ * row is waiting where it has commits, its commits are among the changes, and its oldest commit
+ * is among the oldest.
  */
 function rolloutSummary(readings: Readings): RolloutSummary | null {
   const reading = readings.rollout.value;
@@ -1607,18 +1578,14 @@ function rolloutSummary(readings: Readings): RolloutSummary | null {
   let oldest: number | null = null;
   let changes = 0;
   let waiting = 0;
-  const counted = [
-    ...reading.rows.map((row) => ({ count: row.toRollOut, oldestAt: row.oldestAt })),
-    ...reading.publish.map((row) => ({ count: row.toPublish, oldestAt: row.oldestAt })),
-  ];
-  for (const row of counted) {
-    changes += row.count;
-    if (row.count > 0) waiting += 1;
+  for (const row of reading.rows) {
+    changes += row.toRollOut;
+    if (row.toRollOut > 0) waiting += 1;
     if (row.oldestAt === null) continue;
     const at = Date.parse(row.oldestAt);
     if (Number.isFinite(at) && (oldest === null || at < oldest)) oldest = at;
   }
-  return { rows: [...reading.rows], publish: [...reading.publish], waiting, changes, oldestAt: iso(oldest), readAt: reading.readAt };
+  return { rows: [...reading.rows], waiting, changes, oldestAt: iso(oldest), readAt: reading.readAt };
 }
 
 /**
@@ -1639,26 +1606,6 @@ function rolloutWaiting(readings: Readings): RolloutRow[] | null {
   const reading = readings.rollout.value;
   if (reading === null) return null;
   return reading.rows.filter((row) => row.toRollOut > 0);
-}
-
-/** The publish rows with something to publish, the Needs-me view's, or null while the source has never read. */
-function publishWaiting(readings: Readings): PublishRow[] | null {
-  const reading = readings.rollout.value;
-  if (reading === null) return null;
-  return reading.publish.filter((row) => row.toPublish > 0);
-}
-
-/**
- * The publish row of the repository a persona's checkout reads, on whatever branch it is on, or
- * null: where the source has never read, where the checkout was not read, or where its repository
- * reads no publish row.
- */
-function publishOf(readings: Readings, workdir: string): PublishRow | null {
-  const reading = readings.rollout.value;
-  if (reading === null) return null;
-  const checkout = reading.checkouts.find((candidate) => sameFolder(candidate.root, workdir));
-  if (checkout === undefined) return null;
-  return reading.publish.find((row) => row.repo === checkout.repo) ?? null;
 }
 
 /**
@@ -1808,7 +1755,6 @@ export function needsMeView(readings: Readings): NeedsMeView {
       review: repos.flatMap((repo) => reviewsOf(readings, repo, timelineOf(readings, repo.persona.name))),
     },
     rollout: rolloutWaiting(readings),
-    publish: publishWaiting(readings),
     asOf: asOf(readings),
     held: readings.held,
   };
@@ -2068,7 +2014,6 @@ export function repoView(readings: Readings, name: string): RepoView | null {
     name: repo.persona.name,
     heading: repoHeading(readings, workdir),
     rollout: rolloutOf(readings, workdir),
-    publish: publishOf(readings, workdir),
     changed,
     upNext,
     worker: workerOf(readings, repo),

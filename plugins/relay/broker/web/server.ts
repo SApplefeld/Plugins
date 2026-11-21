@@ -58,7 +58,7 @@ import type { TalkRing, TalkViewInput } from "./talk.ts";
 import type { WebFiles } from "../routing/attachments.ts";
 import type { WebAnswerStatus, WebDeliveryStatus } from "../routing/inbound.ts";
 import { CLIENT_PREFIX, planBranchFault, repoNameFault } from "./rollout.ts";
-import type { BranchRead, PublishMark, RolloutMark, RolloutReader } from "./rollout.ts";
+import type { BranchRead, RolloutMark, RolloutReader } from "./rollout.ts";
 import { planStem } from "../board/plans.ts";
 import { appendDirection, calendarDate, steerText } from "./direction.ts";
 import type { SteerOutcome } from "./direction.ts";
@@ -1874,104 +1874,6 @@ export function registerRolloutHandler(register: WebHandler["register"], options
         case "pushed":
           options.log?.info(`web rollout: ${marked.tag} at ${marked.sha.slice(0, 7)} by ${peer.login}`);
           sendJson(response, { tag: marked.tag, sha: marked.sha, undo: `git push origin :refs/tags/${marked.tag}` });
-          options.afterMark?.();
-      }
-    },
-    { operatorWord: true },
-  );
-}
-
-/**
- * What a publish push starts, sent with every 200 so the page shows it beside the undo command:
- * the repository's publish workflow runs on any `publish-*` tag, and a run begun is not stopped by
- * deleting the tag.
- */
-const PUBLISH_STARTS = "The push starts this repository's publish workflow, which ships the plugin to the public marketplace, and deleting the tag stops no run already started.";
-
-export type PublishHandlerOptions = {
-  /** The pass's own rollout reader, so a tap and the timed fetch take one lock per repository. */
-  reader: Pick<RolloutReader, "markPublished">;
-  /** Runs after the answer is sent, once a tag is pushed or the head moved: the pass's own run, so the next view read counts from the new tag or carries the moved head. */
-  afterMark?: () => void;
-  /** Where each tap's one line goes: the tag, the sha and the login, an existing tag, a moved head, a 404, or a failure's kind. */
-  log?: Logger;
-};
-
-/** A commit sha as the page sends it back: the forty lowercase hex characters the row's `head` carries. */
-const COMMIT_SHA = /^[0-9a-f]{40}$/;
-
-/**
- * Registers `POST /web/publish` with `{repo, head}`, Mark published. The route carries the
- * operator's word, so the gate has already refused the broker host's own node and required the
- * same-origin JSON headers, and the login the tag's message names is the peer's. `head` is the
- * default branch head the page showed, the publish row's `head`, so a tap ships only the commit
- * the operator saw. A body that is not the expected object, a `repo` that is not a non-empty
- * string, or a `head` that is not a forty-character hex sha answers 400 with an empty body and no
- * fetch. A `repo` the reader has not grouped, one with a client branch or no default branch, or
- * one with no publish tag on its default branch's first-parent line answers 404 before anything is
- * tagged. The reader fetches the repository under its lock, so two taps run one after the other.
- * A head the fetch brought that is not `head` answers 409 `{head}` with the one it brought, and
- * tags nothing, so the page can show it and the operator tap again. The second of two taps finds
- * the first one's tag on the head and answers 409 `{tag}`, the body empty where the tag's name is
- * one the page may not print. Otherwise the day's publish tag is made at the default branch head
- * and pushed, and the answer is `{tag, sha, undo, starts}`: `undo` the one command that removes
- * the tag from the remote, and `starts` the one sentence saying what the push starts. A fetch, a
- * tag or a push that fails answers 502 `{kind}` with the runner's kind, a push's local tag deleted
- * first. Every tap past the 400s logs one line. Nothing of the body reaches a log, and nothing of
- * git's stderr or the remote URL can.
- */
-export function registerPublishHandler(register: WebHandler["register"], options: PublishHandlerOptions): void {
-  register(
-    "publish",
-    async (request, response, peer) => {
-      if (request.method !== "POST") {
-        request.resume();
-        response.writeHead(405, { allow: "POST", "content-length": 0 });
-        response.end();
-        return;
-      }
-      const body = await readJsonObject(request, MAX_ROLLOUT_BODY_BYTES);
-      if (body === null) return empty(response, 400);
-      const { repo, head } = body;
-      if (typeof repo !== "string" || repo === "") return empty(response, 400);
-      if (typeof head !== "string" || !COMMIT_SHA.test(head)) return empty(response, 400);
-      let marked: PublishMark;
-      try {
-        marked = await options.reader.markPublished(repo, peer.login, head);
-      } catch (error) {
-        // The fetch or a local git command failed: the runner's kind alone, which never quotes the remote.
-        const kind = error instanceof Error ? error.message : "unknown";
-        options.log?.warn(`web publish: failed ${kind} before the push`);
-        sendJson(response, { kind }, 502);
-        return;
-      }
-      switch (marked.status) {
-        case "unknown-repo":
-        case "not-publish":
-          // The name is not logged: it is the post's own text.
-          options.log?.info("web publish: refused, unknown repository, one with client branches, or one never published");
-          empty(response, 404);
-          return;
-        case "moved":
-          // The fetched head is the reader's own, never the post's, and one static line says why.
-          options.log?.info("web publish: refused, the trunk head moved since the page read it");
-          sendJson(response, { head: marked.head }, 409);
-          // The reader recomputed the rows under the lock; the pass run puts the moved head into the
-          // view the page reads next, so the tap the toast asks for sends that head.
-          options.afterMark?.();
-          return;
-        case "exists":
-          // A tag whose name the reader refuses is named nowhere: not in the line, not in the body.
-          options.log?.info(marked.tag === null ? "web publish: a publish tag exists at the head" : `web publish: ${marked.tag} exists`);
-          sendJson(response, marked.tag === null ? {} : { tag: marked.tag }, 409);
-          return;
-        case "push-failed":
-          options.log?.warn(`web publish: push failed ${marked.kind} for ${marked.tag}`);
-          sendJson(response, { kind: marked.kind }, 502);
-          return;
-        case "pushed":
-          options.log?.info(`web publish: ${marked.tag} at ${marked.sha.slice(0, 7)} by ${peer.login}`);
-          sendJson(response, { tag: marked.tag, sha: marked.sha, undo: `git push origin :refs/tags/${marked.tag}`, starts: PUBLISH_STARTS });
           options.afterMark?.();
       }
     },

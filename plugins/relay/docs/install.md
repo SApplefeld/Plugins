@@ -605,10 +605,9 @@ that key's value as it is. It writes `CHANNEL_WEB_READERS` and `CHANNEL_WEB_READ
 `CHANNEL_DIRECTION_LEDGER` stay hand-set.
 
 The pages' rollout cards, which show what each `clients/*` branch has merged since its last
-deploy, or what a repository that ships by `publish-*` tags has on its default branch since its
-newest one, need git 2.37 or later on the scheduled task account's `PATH`. The reader finds repositories
+deploy, need git 2.37 or later on the scheduled task account's `PATH`. The reader finds repositories
 through the `CHANNEL_BOARD_PROJECTS` roots and the roster personas' working directories, and fetches
-over https under the task account's stored git credential. Mark rolled out and Mark published also need a committer
+over https under the task account's stored git credential. Mark rolled out also needs a committer
 identity, `user.name` and `user.email`, in that account's git config. The Changelog screen reads
 each repository's changelog entries through the same reader, so it needs git too. A host without
 git draws no rollout card and no changelog entries, and every other page works as before. [`operations.md`](operations.md) names the tag

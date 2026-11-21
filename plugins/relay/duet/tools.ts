@@ -327,7 +327,7 @@ export function createRegisterTools(options: ToolsOptions): RegisterTools {
       "repo",
       {
         description:
-          "Read-only. One repository's page: its heading, what waits to roll out or publish, its worker, and its plan list, where `changed` holds the plans that moved and `upNext` the plans queued next. `name` is the repository's name as the standup lists it. Changes nothing.",
+          "Read-only. One repository's page: its heading, what waits to roll out, its worker, and its plan list, where `changed` holds the plans that moved and `upNext` the plans queued next. `name` is the repository's name as the standup lists it. Changes nothing.",
         inputSchema: { name: z.string().min(1) },
         annotations: READ_ONLY,
       },

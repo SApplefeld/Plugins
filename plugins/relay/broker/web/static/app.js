@@ -574,32 +574,6 @@
     return txt(row.client) || txt(row.branch);
   }
 
-  /** A publish row Mark published can act on: a row the button can act on that carries the trunk head it read. */
-  function publishRowOf(value) {
-    return rolloutRowOf(value) && txt(value.head) !== "";
-  }
-
-  /**
-   * A publish tag's age from its `YYYY-MM-DD` date, in whole local days: "today", else "3d ago". Null where the tag's name
-   * carried no date, so the row is drawn without an age.
-   */
-  function tagAge(value, now) {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(txt(value));
-    if (match === null) return null;
-    const day = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-    if (Number.isNaN(day.getTime())) return null;
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    const days = Math.round((today.getTime() - day.getTime()) / 86400000);
-    return days <= 0 ? "today" : span(days * 86400000) + " ago";
-  }
-
-  /** A publish row's line: "2 commits on trunk since publish-20261020, 2d ago", the age left out where the tag has none. */
-  function publishSince(row, now) {
-    const age = tagAge(row.lastTagDate, now);
-    return plural(num(row.toPublish) ?? 0, "commit", "commits") + " on trunk since " + txt(row.lastTag) + (age === null ? "" : ", " + age);
-  }
-
   /**
    * The one toast the pages share: a line, and an optional command the operator can select and copy. Its live region is in the
    * page empty before the first message, so a screen reader announces that message. Focus moves to Dismiss where the tapped
@@ -721,80 +695,6 @@
     return button;
   }
 
-  /**
-   * Posts Mark published for a publish row and shows the broker's answer in the toast; nothing is thrown. The post carries
-   * the trunk head the row showed, so the broker tags only that commit and answers 409 with the head it fetched where the
-   * trunk has moved since. The broker's answer to a tag carries the tag, what the push starts and the undo command, and
-   * the toast shows all three as the broker sent them.
-   */
-  async function postPublish(row) {
-    let response;
-    try {
-      response = await fetch("/web/publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo: row.repo, head: txt(row.head) }),
-        signal: AbortSignal.timeout(ROLLOUT_POST_MS),
-      });
-    } catch (error) {
-      const again = " Tapping again answers \"Already published\" if the tag landed.";
-      if (error instanceof Error && error.name === "TimeoutError") showToast("The broker did not answer in 15 minutes, so the tag is not confirmed." + again);
-      else showToast("The broker could not be reached, so the tag is not confirmed." + again);
-      return;
-    }
-    heardPageVersion(response.headers.get("x-page-version"));
-    let answer = null;
-    let readable = true;
-    try {
-      answer = await response.json();
-    } catch (error) {
-      readable = false;
-    }
-    const body = isObject(answer) ? answer : {};
-    if (response.status === 200) {
-      if (!readable) showToast("The broker's answer was not JSON, so the tag is not confirmed.");
-      else if (txt(body.tag) === "") showToast("The broker's answer named no tag, so the tag is not confirmed.");
-      else if (txt(body.undo) === "") showToast("Tagged " + txt(body.tag) + ".");
-      else showToast("Tagged " + txt(body.tag) + "." + (txt(body.starts) === "" ? "" : " " + txt(body.starts)) + " To undo it, run:", txt(body.undo));
-    } else if (response.status === 409) {
-      // A head in the answer is the trunk's now, past the one the row showed; the view read after this tap shows it.
-      if (txt(body.head) !== "") showToast("Not published: new commits landed on the trunk since the page read it. Tap Mark published again to publish the head shown now.");
-      else showToast(txt(body.tag) === "" ? "Already published: the trunk head carries a publish tag." : "Already published: " + txt(body.tag));
-    } else if (response.status === 502) {
-      // A timeout is the one kind where the push may have gone through after the broker stopped waiting.
-      const kind = txt(body.kind);
-      const landed = kind === "timeout" ? " The tag may have landed. Tapping again answers \"Already published\" if it did." : "";
-      showToast("Mark published failed" + (kind === "" ? "" : " (" + kind + ")") + "." + landed);
-    } else {
-      showToast("Mark published failed: the broker answered HTTP " + response.status + ".");
-    }
-  }
-
-  /** Marks one publish row published. The button stays disabled until the answer, and the page reads its view again after it. */
-  async function sendPublish(row) {
-    const key = rolloutKey(row);
-    if (rolloutBusy.has(key)) return;
-    rolloutBusy.add(key);
-    redrawNeeds();
-    try {
-      await postPublish(row);
-    } finally {
-      rolloutBusy.delete(key);
-      await refreshView();
-    }
-  }
-
-  /** The Mark published button for a publish row, which sits where a client row carries Mark rolled out. */
-  function publishButton(row, cls) {
-    const button = h("button", "ro-button " + cls, "Mark published");
-    button.type = "button";
-    button.setAttribute("aria-label", "Mark published, " + txt(row.repo));
-    button.disabled = rolloutBusy.has(rolloutKey(row));
-    button.dataset.key = "publish|" + rolloutKey(row);
-    listen(button, "click", () => sendPublish(row));
-    return button;
-  }
-
   /** The footer line of a card: what the counts are, and when the tags were read. */
   function rolloutFooter(words, readAt) {
     const at = parse(readAt);
@@ -818,12 +718,10 @@
     card.setAttribute("aria-labelledby", "rollout-heading");
     const rows = objects(summary.rows);
     const waiting = rows.filter((row) => num(row.toRollOut) > 0);
-    const publishing = objects(summary.publish).filter((row) => num(row.toPublish) > 0);
     const held = rolloutHeld(view);
 
-    // The count names clients only where every row waiting is a client branch; a publish row is a repository, so a mix reads "waiting" alone.
-    const count = num(summary.waiting) ?? waiting.length + publishing.length;
-    const head = cardHead("Rollout", held ? null : (publishing.length === 0 ? plural(count, "client", "clients") : count) + " waiting", "h2", "rollout-heading");
+    const count = num(summary.waiting) ?? waiting.length;
+    const head = cardHead("Rollout", held ? null : plural(count, "client", "clients") + " waiting", "h2", "rollout-heading");
     head.classList.add("ro-head");
     const oldest = dayOf(summary.oldestAt, now);
     if (held) head.append(h("div", "ro-sub held", "tags unread"));
@@ -835,20 +733,13 @@
     }
 
     const shared = isObject(view.shared) ? objects(view.shared.rows) : [];
-    if (waiting.length === 0 && publishing.length === 0 && shared.length === 0) return null;
+    if (waiting.length === 0 && shared.length === 0) return null;
     const full = h("div", "ro-full");
     for (const row of waiting) {
       const line = h("div", "ro-line", null, "client:" + rolloutKey(row));
       const text = h("span");
       const since = tagDay(row.lastTagDate) === "" ? ", no rollout tag yet" : " since " + tagDay(row.lastTagDate);
       text.append(h("b", null, rolloutClient(row)), " · " + num(row.toRollOut) + " merged" + since);
-      line.append(text, h("span", "ro-day", dayOf(row.oldestAt, now) ?? ""));
-      full.append(line);
-    }
-    for (const row of publishing) {
-      const line = h("div", "ro-line", null, "publish:" + txt(row.repo));
-      const text = h("span");
-      text.append(h("b", null, txt(row.repo)), " · " + publishSince(row, now));
       line.append(text, h("span", "ro-day", dayOf(row.oldestAt, now) ?? ""));
       full.append(line);
     }
@@ -876,11 +767,6 @@
       });
       condensed.append(line);
     }
-    for (const row of publishing) {
-      const line = h("div", "ro-flow", null, "publish:" + txt(row.repo));
-      line.append(h("b", null, txt(row.repo)), " ", h("span", "muted", "· " + publishSince(row, now)));
-      condensed.append(line);
-    }
     for (const [index, one] of shared.entries()) {
       const line = h("div", "ro-flow", null, sharedKey(one, index));
       const clients = num(one.clients) ?? 0;
@@ -890,8 +776,7 @@
       condensed.append(line);
     }
     card.append(condensed);
-    const counted = publishing.length === 0 ? "commits on each branch past its last rollout tag" : "commits past each branch's last rollout tag or the trunk's last publish tag";
-    card.append(rolloutFooter(counted, summary.readAt));
+    card.append(rolloutFooter("commits on each branch past its last rollout tag", summary.readAt));
     return card;
   }
 
@@ -936,50 +821,6 @@
       card.append(action);
     }
     card.append(rolloutFooter("records a tag at the branch head; the deploy itself is yours", null));
-    return card;
-  }
-
-  /** The repo page's card for the repository the persona's checkout reads where it ships by publish tags, or nothing where the slot is null. */
-  function publishRepoCard(view) {
-    const row = view.publish;
-    if (!isObject(row)) return null;
-    const now = nowOf(view);
-    const card = h("section", "card pad attn ro-repo", null, "rollout");
-    // The repo detail sits beside the standup list, whose rollout card holds the plain id, so this one takes its own.
-    card.setAttribute("aria-labelledby", "repo-rollout-heading");
-    const head = cardHead("Rollout", null, "h2", "repo-rollout-heading");
-    head.classList.add("ro-head");
-    const held = rolloutHeld(view);
-    if (held) head.append(h("div", "ro-sub held", "tags unread"));
-    else head.append(h("div", "ro-tag", txt(row.lastTag)));
-    card.append(head);
-    if (held) {
-      card.append(rolloutFooter("the rows from the last read are not shown", row.readAt));
-      return card;
-    }
-
-    const toPublish = num(row.toPublish) ?? 0;
-    card.append(h("div", "ro-lead", publishSince(row, now) + (toPublish > 0 ? ":" : ".")));
-    const commits = objects(row.commits);
-    if (commits.length > 0) {
-      const grid = h("div", "ro-commits");
-      // A commit row's key is its sha, and its place in the list where the view carries none.
-      for (const [index, commit] of commits.entries()) {
-        const key = "commit:" + (txt(commit.sha) || "#" + String(index));
-        const mark = h("span", "ro-check", "✓", key + ":mark");
-        mark.setAttribute("aria-hidden", "true");
-        grid.append(mark, h("span", null, txt(commit.title), key), h("span", "ro-day", dayOf(commit.at, now) ?? "", key + ":day"));
-      }
-      card.append(grid);
-    }
-    // Keyed, since it comes and goes between readings and the button's row after it must not pair with it by place.
-    if (toPublish > commits.length) card.append(h("div", "ro-more", "and " + (toPublish - commits.length) + " more", "more"));
-    if (publishRowOf(row)) {
-      const action = h("div", "ro-action");
-      action.append(publishButton(row, "ro-button-repo"));
-      card.append(action);
-    }
-    card.append(rolloutFooter("tags the trunk head; the tag starts the publish workflow", null));
     return card;
   }
 
@@ -1416,10 +1257,9 @@
     left.append(changedSection);
 
     // The worker page leads with what is queued, then what changed, then the Heading and Rollout cards.
-    // A repository ships one way, so at most one of the two slots holds a row.
     const headingBox = headingCard(view, true);
     if (headingBox !== null) left.append(headingBox);
-    const rolloutBox = rolloutRepoCard(view) ?? publishRepoCard(view);
+    const rolloutBox = rolloutRepoCard(view);
     if (rolloutBox !== null) left.append(rolloutBox);
 
     const worker = view.worker || {};
