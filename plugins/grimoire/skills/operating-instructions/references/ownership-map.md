@@ -56,6 +56,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Lane mechanics, the red protocol, the clock and fixture time, the layer map, the mutation audit | `test-gates` |
 | Which lane each gate moment takes, and the delta against its baseline | doctrine (After each step, run the lane) |
 | Starting a heavy process on a shared machine | doctrine (One heavy process at a time is a per-machine budget) |
+| Setting how many suite slots a machine has | `coordinator` |
 | Hunting one thing in a large file | doctrine (When you are hunting for something in a large file) |
 | C# and T-SQL house style and their outline recipes | `csharp-style`, `sql-style` |
 

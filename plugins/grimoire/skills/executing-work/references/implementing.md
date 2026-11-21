@@ -139,9 +139,14 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
        The standing box-budget clause, an act at the spawn step rather than a
        preamble constraint, because a brief is minutes stale by its first
        spawn. Immediately before each spawn, poll the process list for a
-       foreign test runner or build, whatever its engine, then wait on it or
-       name the contention in the report. Its owner is the doctrine's bullet
-       led "One heavy process at a time is a per-machine budget, not a
+       foreign test runner, build or other process holding the box's memory
+       or CPU, whatever its engine, then wait on it or name the contention in
+       the report. Where the poll finds one live, an agent whose spawn is a
+       whole gate (the full suite) and whose brief names no slot waits.
+       Where the brief names a suite slot the orchestrator holds from the
+       machine's coordinator for the whole gate this agent spawns, the brief
+       names the live run that slot sits beside, and the agent does not wait on that run. Its owner is the doctrine's
+       bullet led "One heavy process at a time is a per-machine budget, not a
        per-directory one."
      - [section whose files in scope include a settings permissions block, a
        hook that emits an allow or deny decision, or any other surface that
