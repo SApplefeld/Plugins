@@ -1345,6 +1345,19 @@ export function setRedactorOn(on: boolean): void {
   redactorOn = on;
 }
 
+// The vault's reading of a text: each placeholder the vault holds replaced
+// by what it stands for, in the detector's one pass, so a LITERAL one gives
+// the placeholder text it stands for. The same text where the vault holds
+// none of its placeholders or the switch is off. A reading can hold a real
+// secret. Its one caller is the lookup of agentic_resolve in tool-call.ts,
+// which compares a reading with the ids of records and hands it to nothing
+// else, so a refused tool still receives no real value. That caller reads
+// twice at most, so a LITERAL placeholder's second reading is the secret itself;
+// two reads are safe only where the reading reaches an equality test alone.
+export function vaultReading(text: string): string {
+  return redactorOn ? restore(text) : text;
+}
+
 // One text with its secrets replaced by placeholders, the vault's and the
 // detector's, and the count of values hidden; the same text, zero hidden,
 // where nothing changed or the switch is off. It never throws: a scan that

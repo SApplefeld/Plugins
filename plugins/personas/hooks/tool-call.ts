@@ -47,6 +47,7 @@ import { isPlanEntry, planLeftOpenText, planStatusText, reactivateAskedEntry } f
 import type { recognitionAsk as recognitionAskFromModule, settleRecognitionOutcomes as settleRecognitionOutcomesFromModule } from "./recall";
 import { memqGetsOf, memqTouchesOf } from "./recall-text";
 import { shellCommandOf } from "./recognition";
+import { vaultReading } from "./redactor";
 import { ROUTINE_WEEKDAYS, localTimeText, newRoutineId, routineListText, routineNextDueAt, sameSchedule, scheduleWords, type Routine, type RoutineSchedule } from "./routines";
 import { runLineRefusalOf } from "./run-lines";
 import { asciiLower, rosterNameTaken, rosterPathWithin, rosterRepoTaken, validateRosterEntry, writeRoster } from "./roster";
@@ -3380,7 +3381,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // gone, so neither has anything to resolve.
   if ((e as any).tool === "mcp__personas__agentic_resolve") {
     const persona = sess.persona;
-    const id = String((e as any).id || "").trim();
+    const given = String((e as any).id || "").trim();
     const outcome = (e as any).outcome as string | undefined;
     const note = typeof (e as any).note === "string" ? (e as any).note : "";
     if (!sess.isOwner) {
@@ -3393,7 +3394,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
       return { deny: `agentic_resolve note is ${note.length} characters; the bound is ${FREE_TEXT_MAX}. Shorten it.` };
     }
-    if (!id) {
+    if (!given) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
       return { deny: "agentic_resolve requires a non-empty 'id'." };
     }
@@ -3402,11 +3403,27 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return { deny: "agentic_resolve requires 'outcome' of done or declined." };
     }
     const store = commonsStore();
-    const target = (await listInboxRecords(store, persona)).find((rec) => rec.id === id);
+    const addressed = await listInboxRecords(store, persona);
+    let target = addressed.find((rec) => rec.id === given);
+    // A caller whose redactor hid the id holds a placeholder for it, so where
+    // the id as given names no record, the vault's reading of it is tried,
+    // and then the reading of that reading, since a placeholder read back
+    // from a tool's output stands for the placeholder's own text. Two reads
+    // at most. A reading can hold a real secret: it is compared here with the
+    // ids of the records addressed to this persona and goes nowhere else,
+    // into no store, log, notice, answer or record. Everything below names
+    // the record by its own id, and the refusal names the id as given.
+    for (let reading = given, reads = 0; !target && reads < 2; reads++) {
+      const deeper = vaultReading(reading);
+      if (deeper === reading) break;
+      reading = deeper;
+      target = addressed.find((rec) => rec.id === reading);
+    }
     if (!target) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
-      return { deny: `no record '${id}' addressed to persona ${persona}.` };
+      return { deny: `no record '${given}' addressed to persona ${persona}.` };
     }
+    const id = target.id;
     if (target.status === "pending") {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
       return { deny: `record '${id}' is still pending (not delivered yet); nothing to resolve.` };

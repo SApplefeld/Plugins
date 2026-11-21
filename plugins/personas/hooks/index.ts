@@ -6201,7 +6201,7 @@ export const register: Register = async (on, options) => {
         properties: {
           id: {
             type: "string",
-            description: "The record id, <persona>-<sender session id>-<seq>, the same id the sender sees in agentic_inbox.",
+            description: "The record id, <persona>-<sender session id>-<seq>, the same id the sender sees in agentic_inbox. Where the delivery label shows a placeholder in the id, pass the id as the label shows it, whole and as written, its placeholder included.",
           },
           outcome: {
             type: "string",

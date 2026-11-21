@@ -1785,13 +1785,37 @@ function lettersLookRandom(token: string, named: boolean, h: number): boolean {
 // a session name is an identifier, not a credential; a real session cookie is
 // random text, and the cookie rules hide it on their own. A name ending in
 // `id` (`sessionId`, `session_id`, `X-Session-Id`, `sessid`) counts wherever
-// it stands. The bare `session`, `sess` or `sid` counts only where no letter,
-// digit, `_` or `-` stands before it, so `Session:`, `session=` and `sid=`
-// pass while `X-Session:`, `client_session=`, `account_sid=` and `assess:`
-// are judged as any other named token, as is a UUID after a key, token,
-// secret or password name.
+// it stands. The bare `session`, `sess` or `sid` counts in three places. One
+// is where no letter, digit, `_` or `-` stands before it, so `Session:`,
+// `session=` and `sid=` pass. The other two are behind the prefix a search
+// tool puts on a context line, which ends in a dash, and the set is closed at
+// these two. The first is a file extension, a dash, a line number and a
+// dash, as in `.md-5-`: a dot, one to eight letters or digits, a dash, one to
+// seven digits and a dash. The second is a line number and a dash at the
+// start of a line or of the text: one to seven digits and a dash. Behind
+// anything else the name does not count, so `X-Session:`, `client_session=`,
+// `account_sid=` and `assess:` are judged as any other named token. So are a
+// compound name behind a prefix (`notes.txt-12-X-Session:`), a name and a
+// number with no extension (`client-2-session=`, `v2-session:`,
+// `Makefile-5-Session:`), an extension of nine characters or more, a line
+// number after spaces, and a UUID after a key, token, secret or password
+// name wherever that name stands. A dotted key name shaped as the first
+// prefix, such as `app.client-2-session=`, reads as a context line and its
+// UUID is shown, since a file name and such a key name have one shape, and a
+// dotted name shaped as a version, such as `pkg.v1-2-session=`, is shown too.
 const SESSION_UUID = new RegExp(`^${UUID}$`, 'i')
-const SESSION_ID_NAME = new RegExp(String.raw`(?:sess(?:ion)?[_-]?id|(?<![A-Za-z0-9_-])sess(?:ion)?|(?<![A-Za-z0-9_-])sid)(?:${Q}|\s){0,6}[:=]{1,2}(?:${Q}|\s){0,4}$`, 'i')
+const BARE_NAME_START = String.raw`(?:(?<![A-Za-z0-9_-])|(?<=\.[A-Za-z0-9]{1,8}-\d{1,7}-|\n\d{1,7}-))`
+const SESSION_ID_NAME = new RegExp(String.raw`(?:sess(?:ion)?[_-]?id|${BARE_NAME_START}sess(?:ion)?|${BARE_NAME_START}sid)(?:${Q}|\s){0,6}[:=]{1,2}(?:${Q}|\s){0,4}$`, 'i')
+
+// Whether a session name ends `before`, the text looksSecret is handed: at
+// most the 64 characters before a token. `opensLine` says that `before` opens
+// at a line's start, the start of the text or right after a line break, so a
+// line number that opens it is read as one at a line's start. scrubTokens
+// sets it from where its cut falls. The callers that pass a fixed `key=` pass
+// no flag, and a window with no flag is read as opening mid-line.
+function endsInSessionName(before: string, opensLine: boolean): boolean {
+  return SESSION_ID_NAME.test(opensLine ? `\n${before}` : before)
+}
 
 // A persona record id has the shape of the id operator.ts mints for an inbox
 // record: `<persona>-<session uuid>-<seq>`, a name, a lowercase session UUID
@@ -2120,7 +2144,7 @@ function isNodeId(token: string): boolean {
   return at === bytes.length
 }
 
-function looksSecret(token: string, before: string, cfg: Config): boolean {
+function looksSecret(token: string, before: string, cfg: Config, opensLine = false): boolean {
   if (token.startsWith('REDACTED-')) return false
   if (cfg.allow.has(token) || DIGITS_ONLY.test(token)) return false
   const named = NAMED.test(before)
@@ -2128,7 +2152,7 @@ function looksSecret(token: string, before: string, cfg: Config): boolean {
   // `invoice+statements+acct_<id>`: a mail sender address made of words and
   // a public id. Each `+` part has to be one, so base64 is still judged.
   if (token.includes('+') && token.split('+').every((p) => p === '' || WORD_PART.test(p) || isPublicId(p, named, cfg))) return false
-  if (named && SESSION_UUID.test(token) && SESSION_ID_NAME.test(before)) return false
+  if (named && SESSION_UUID.test(token) && endsInSessionName(before, opensLine)) return false
   if (!named && isRecordId(token)) return false
   if (!named && isFedName(token)) return false
   if (!named && isNodeId(token)) return false
@@ -2754,7 +2778,8 @@ function scrubTokens(text: string, cfg: Config): string {
       if (!NAMED.test(beforeAt(whole, offset))) return token
     }
     const before = beforeAt(whole, offset)
-    return looksSecret(token, before, cfg) ? mint('SECRET', token, scanEvidence(whole, offset, offset + token.length)) : token
+    const opensLine = offset <= 64 || whole[offset - 65] === '\n'
+    return looksSecret(token, before, cfg, opensLine) ? mint('SECRET', token, scanEvidence(whole, offset, offset + token.length)) : token
   }
   return clocked(text).replace(SCAN, (m: string, slashed: string | undefined, offset: number, whole: string) => {
     if (slashed === undefined) return judge(m, offset, whole)
