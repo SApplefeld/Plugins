@@ -726,6 +726,8 @@ $script:ChannelBrokerEnvAllowlist = @(
     'CHANNEL_WEB_SIBLINGS',
     # The path of the file the local door's key is read from, never the key.
     'CHANNEL_DOOR_KEY_FILE',
+    # The standing of what the local door hands in, participant or operator: a word, never a key.
+    'CHANNEL_DOOR_STANDING',
     # The Duet server's seven, read by Start-Duet.ps1 from the same file. The switch, two ports, the
     # node's public URL, a redirect allowlist, source ranges and the state file's path: none is a
     # credential, since the server's tokens live hashed in the state file and never in this one.

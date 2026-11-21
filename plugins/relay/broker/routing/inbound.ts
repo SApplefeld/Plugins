@@ -34,7 +34,7 @@ import type { CallOutcome } from "../discord/transport.ts";
 import { questionOf } from "../decisions/ledger.ts";
 import { boundedAuthor, clean, oneLine, withoutInvisible } from "../sanitize.ts";
 import { parseVerdict } from "../security/permission.ts";
-import type { PermissionDesk } from "../security/permission.ts";
+import type { PermissionDesk, Verdict } from "../security/permission.ts";
 import { SNOWFLAKE } from "../security/senders.ts";
 import type { SenderClass, SenderGate } from "../security/senders.ts";
 import type { RestartAnswer } from "../index.ts";
@@ -277,8 +277,11 @@ export type WebDeliveryStatus =
 /**
  * What a line handed in through the local door became: each status with the meaning
  * `WebDeliveryStatus` gives it. A door line names no file, so no file of one can be unknown.
+ * `board-act` is the door's own refusal: at operator standing the line's words open as a
+ * workers-board act does, and the door carries no board act, so nothing reached the session, its
+ * thread or the talk ring.
  */
-export type DoorDeliveryStatus = Exclude<WebDeliveryStatus, "unknown-file">;
+export type DoorDeliveryStatus = Exclude<WebDeliveryStatus, "unknown-file"> | "board-act";
 
 /**
  * What a typed answer from the page did. `answered` resolved the session's held question with the
@@ -287,6 +290,23 @@ export type DoorDeliveryStatus = Exclude<WebDeliveryStatus, "unknown-file">;
  * is not.
  */
 export type WebAnswerStatus = "answered" | "no-session" | "ended" | "no-thread" | "empty" | "too-long" | "no-question";
+
+/**
+ * What a typed answer handed in through the local door did: each status with the meaning
+ * `WebAnswerStatus` gives it. `refused` is the router's own answer on a host that does not give the
+ * door operator standing: nothing was read and no desk was called. The door serves its answer path
+ * only at operator standing, so no caller of the door reads `refused`.
+ */
+export type DoorAnswerStatus = WebAnswerStatus | "refused";
+
+/**
+ * What a verdict handed in through the local door did. `resolved` is the permission desk applied it
+ * to the request it names, in the thread of the lineage's live session and under that request's own
+ * nonce. `closed` is the desk holds no such request there under that nonce, and nothing was applied,
+ * posted or shown to the talk ring. `no-session`, `ended` and `no-thread` name why no desk was asked.
+ * `refused` is as `DoorAnswerStatus` gives it.
+ */
+export type DoorVerdictStatus = "resolved" | "closed" | "no-session" | "ended" | "no-thread" | "refused";
 
 /**
  * The id a web line's event carries where its Discord post failed, so the line still reaches the
@@ -329,6 +349,18 @@ const BOARD_ACT_PREFIXES: readonly string[] = ["[PAUSE]", "[RESUME]"];
 /** Whether a page line is a board act: its bounded, trimmed words open with a board act's prefix and it carries no file. */
 function isBoardAct(words: string, fileIds: readonly string[]): boolean {
   return fileIds.length === 0 && BOARD_ACT_PREFIXES.some((prefix) => words.startsWith(prefix));
+}
+
+/**
+ * Whether a session's plugin would read `words` as a workers-board act where they reach it alone in
+ * an operator's event. The reader that owns the rule is the personas plugin's operator-line reader,
+ * which trims the event's text and tests how it opens against these prefixes, case and all. The test
+ * here copies that rule by hand, so it is never narrower than that reader only while the plugin's
+ * prefixes and their reading stay as they are.
+ */
+function opensAsBoardAct(words: string): boolean {
+  const opening = words.trim();
+  return BOARD_ACT_PREFIXES.some((prefix) => opening.startsWith(prefix));
 }
 
 /** The name a web line is attributed to: the login's part before `@`, bounded as the gateway bounds a name. */
@@ -385,6 +417,13 @@ type TypedLine = {
   boardActs: boolean;
   surface: "web" | "door";
 };
+
+/**
+ * What tells the page from the door on the one path a typed answer takes, and on the copy a door
+ * verdict leaves: who the act is attributed to, the class its ring line carries, how its thread copy
+ * is rendered, and the word a log line names its surface by.
+ */
+type TypedAct = Pick<TypedLine, "name" | "author" | "senderId" | "senderClass" | "render" | "surface">;
 
 /** A message the router built, carrying the paths saved from it, or no field where there are none. */
 function withFiles(message: BufferedMessage, files: readonly string[]): BufferedMessage {
@@ -546,6 +585,11 @@ export type InboundRouterOptions = {
     /** True when this text answered the session's held question, and is therefore spent. */
     answerTyped: (sessionId: string, response: string) => boolean;
     /**
+     * The id of the question entry the session is held on, or null where none is held. Read only
+     * for a door answer that names an entry. Absent, such an answer reads `no-question`.
+     */
+    heldEntry?: (sessionId: string) => string | null;
+    /**
      * The recommended choice of the session's held question where `messageId` is that question's
      * alert and its stored question carries a recommendation, else null. Read by an operator's
      * thumbs-up on that alert. Absent, no thumbs-up answers a question.
@@ -619,9 +663,18 @@ export type InboundRouterOptions = {
   webOperators?: readonly string[];
   /**
    * Whether the local door is on. Read only where a door line held across a restart is restored:
-   * true, the line is a participant's again, and absent or false it is dropped.
+   * true, the line is delivered again at the standing `doorStanding` names, and absent or false it
+   * is dropped.
    */
   door?: boolean;
+  /**
+   * The standing the host gives the local door, its `CHANNEL_DOOR_STANDING` setting: `operator`
+   * makes every door line the operator's, and `participant` or absent a participant's. It is the
+   * only thing that decides a door line's class, at the delivery and at a restore alike, and the
+   * broker passes it only where the door's routes exist. `answerDoor` and `settleDoor` act only
+   * where it names `operator`.
+   */
+  doorStanding?: "participant" | "operator";
   /**
    * The attachment intake, which fetches a delivered message's files and saves them under the
    * broker's state directory. Absent, a message's attachments are ignored, and a message with no
@@ -678,13 +731,20 @@ export type InboundRouter = {
   /**
    * Hands a line `name` wrote, handed in through the local door, to the live session carrying
    * `lineage`, on the path a page line takes: the same bound on the text, the same rate window, and
-   * a copy posted into the session's thread first. The line is a participant's whoever the caller
-   * says wrote it, since the door's key is a file any session under the broker's account can read:
-   * it is delivered as words, so it approves no tool call and answers no held question, and it is
-   * never a workers-board act. It carries no file. `name` is a display name the caller chose, bounded
-   * as the gateway bounds one. `truncated` is true where the text ran past the inbound ceiling and
-   * was cut. It does not read the router's `door` option: the door's routes, and so the calls to
-   * this, exist only while the door is on. Never throws.
+   * a copy posted into the session's thread first. The line's class is the standing the host gives
+   * the door, the router's `doorStanding` option: a participant's unless the host names `operator`,
+   * whoever the caller says wrote it, and nothing the caller sends reaches the class. The door's key
+   * is a file any session under the broker's account can read, so on a host that names `operator`
+   * such a session can write a line the receiving session reads as the operator's. At either
+   * standing the line is delivered as words, so it approves no tool call and answers no held
+   * question. It is never a workers-board act either: the session's plugin reads one off an
+   * operator's event by how its text opens, so at operator standing a line whose bounded words,
+   * trimmed, open with `[PAUSE]` or `[RESUME]` is refused as `board-act`, unchanged and with
+   * nothing handed over, held, posted or shown to the talk ring, and at participant standing the
+   * same line is delivered, since no reader acts on a participant's. It carries no file. `name` is
+   * a display name the caller chose, bounded as the gateway bounds one. `truncated` is true where
+   * the text ran past the inbound ceiling and was cut. It does not read the router's `door` option:
+   * the door's routes, and so the calls to this, exist only while the door is on. Never throws.
    */
   deliverDoor: (lineage: string, name: string, text: string) => Promise<{ status: DoorDeliveryStatus; truncated: boolean }>;
   /**
@@ -696,6 +756,35 @@ export type InboundRouter = {
    * answer is its tool result. A line the desk refuses posts nothing. Never throws.
    */
   answerWeb: (lineage: string, login: string, text: string) => Promise<WebAnswerStatus>;
+  /**
+   * Answers the question the live session carrying `lineage` is held on with a line `name` wrote,
+   * handed in through the local door, on the path `answerWeb` takes: the same bound on the text, the
+   * same desk seam, the same thread's turn, and no rate window spent and no relay pipe read. The
+   * router's `doorStanding` option gates it: where the host does not name `operator` the answer is
+   * `refused`, and nothing is read and no desk is called. An answered line is posted into the
+   * session's thread and shown to the talk ring under `<name> (portal)`, with the sender id
+   * `portal:<name>`, the operator's class and the door's mark. `name` is a display name the caller
+   * chose, bounded as `deliverDoor` bounds it, so the copy shows that the answer came through the
+   * door and never who gave it. The words go to the held hook as the question's answer and never to
+   * the session's channel as an event, so no reader of an operator's event sees them. Where
+   * `entryId` is given and is not the id of the entry the session holds, nothing is answered and
+   * the status is `no-question`. Never throws.
+   */
+  answerDoor: (lineage: string, name: string, text: string, entryId?: string) => Promise<DoorAnswerStatus>;
+  /**
+   * Settles a tool call the live session carrying `lineage` is waiting on with a verdict `name`
+   * gave, handed in through the local door. The verdict goes to the permission desk's `resolve` for
+   * that session's thread with `nonce`, the nonce of the request it names, inside the thread's turn.
+   * The nonce is never null here: the desk skips its nonce check for a caller that states it has
+   * none, and a door verdict always names the one its pending read carried. No sender gate stands
+   * in front of this path. The router's `doorStanding` option gates it as it gates `answerDoor`, and
+   * `refused` calls no desk. It spends no rate window. A resolved verdict is posted into the thread
+   * and shown to the talk ring as a door line of the operator's class under `<name> (portal)`, its
+   * text `y <requestId>` for allow and `n <requestId>` for deny, the words an operator types. A
+   * failed thread post is logged and changes no verdict. A verdict the desk does not take reads
+   * `closed`, and nothing is posted or shown. Never throws.
+   */
+  settleDoor: (lineage: string, name: string, verdict: Verdict, nonce: string) => Promise<DoorVerdictStatus>;
   /**
    * Drops the held buffer, and its timer, of every thread whose session has ended or left the
    * registry, delivering nothing. Called with the full record set on every registry mutation, the
@@ -1479,6 +1568,27 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       : null;
 
   /**
+   * The class of every door line: the operator's where the host's `CHANNEL_DOOR_STANDING` setting
+   * names `operator`, and a participant's otherwise, the setting unset included. The class is the
+   * broker's one authority mark, so this is the only code that decides a door line's, at its
+   * delivery and at its restore, and it reads the router's own option alone: no request field, no
+   * held file and no roster entry reaches it.
+   */
+  function doorClass(): SenderClass {
+    return options.doorStanding === "operator" ? "operator" : "participant";
+  }
+
+  /**
+   * Whether a door line of these bounded words is refused as a workers-board act: the door's class
+   * is the operator's, the one class whose events a session's plugin reads a board act off, and
+   * the words open as one. The door carries no board act at either standing, so such a line is
+   * refused whole and never rewritten. This is the one test for it, at a delivery and at a restore.
+   */
+  function doorBoardAct(words: string): boolean {
+    return doorClass() === "operator" && opensAsBoardAct(words);
+  }
+
+  /**
    * A restored line classed again through the list that admitted it, as that list stands now, or
    * null for a sender it no longer admits. The class in the file is the list's answer at
    * admission, and a list change takes effect at a restart, so a line held across one is
@@ -1488,17 +1598,22 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
    * listener's login list and is the operator's again only where that login is still on it. Its
    * device is not checked again, since the held file carries no node: the line passed the device
    * list and the host-node refusal when it was written. A door line, whose sender is a name under
-   * `DOOR_SENDER_PREFIX`, is a participant's again while the door is on and dropped while it is off.
-   * It is read ahead of the roster and never from the class in the file, so neither a roster entry
-   * of that shape nor a rewritten file restores one as an operator's. Its author label is built
-   * again from the name in its sender id, since the loader cuts the label in the file at the author
-   * bound and the label runs past it.
+   * `DOOR_SENDER_PREFIX`, is dropped while the door is off, and while it is on takes the class
+   * `doorClass` gives, the standing the host gives the door today. It is read ahead of the roster
+   * and never from the class in the file, so neither a roster entry of that shape nor a rewritten
+   * file decides its class, and a line held under a standing the host has since withdrawn restores
+   * as a participant's. A door line that `doorBoardAct` refuses at today's standing is dropped as
+   * well, since a door line that would be a board act at the class it takes is never handed to a
+   * session, whatever shape the restored event has. Its author label is built again from the name
+   * in its sender id, since the loader cuts the label in the file at the author bound and the label
+   * runs past it.
    */
   function reclassed(message: BufferedMessage): BufferedMessage | null {
     if (message.senderId.startsWith(DOOR_SENDER_PREFIX)) {
       if (options.door !== true) return null;
+      if (doorBoardAct(message.text)) return null;
       const author = doorAuthorLabel(message.senderId.slice(DOOR_SENDER_PREFIX.length));
-      return { ...message, author, senderClass: "participant" };
+      return { ...message, author, senderClass: doorClass() };
     }
     if (message.senderId.startsWith(WEB_SENDER_PREFIX)) {
       const login = message.senderId.slice(WEB_SENDER_PREFIX.length).toLowerCase();
@@ -1552,15 +1667,18 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         continue;
       }
       // Each dropped line is counted under what stopped admitting it, the roster, the web listener's
-      // list or the local door being off, so the log says which changed. No count names a login, an
-      // account, a name or any of the text.
+      // list, the local door being off or the door's refusal of a board act, so the log says which
+      // changed. With the door on, that refusal is the only cause a door line is dropped for. No
+      // count names a login, an account, a name or any of the text.
       const messages: BufferedMessage[] = [];
       let fromRoster = 0;
       let fromPage = 0;
       let fromDoor = 0;
+      let doorBoardActs = 0;
       for (const message of entry.messages) {
         const classed = reclassed(message);
         if (classed !== null) messages.push(classed);
+        else if (message.senderId.startsWith(DOOR_SENDER_PREFIX) && options.door === true) doorBoardActs += 1;
         else if (message.senderId.startsWith(DOOR_SENDER_PREFIX)) fromDoor += 1;
         else if (message.senderId.startsWith(WEB_SENDER_PREFIX)) fromPage += 1;
         else fromRoster += 1;
@@ -1581,6 +1699,12 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         log(
           `routing: dropped ${String(fromDoor)} of ${count} buffered messages held for session ` +
             `${entry.sessionId}, door lines written through the local door, which is off`,
+        );
+      }
+      if (doorBoardActs > 0) {
+        log(
+          `routing: dropped ${String(doorBoardActs)} of ${count} buffered messages held for session ` +
+            `${entry.sessionId}, door lines that open as a workers-board act at the door's standing`,
         );
       }
       if (messages.length > 0) kept.push({ entry: { ...entry, messages }, record });
@@ -1966,7 +2090,8 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
    * alike, from finding the live session to the hand-over: `line` carries everything that tells
    * the two apart. The answer is the line's status and whether its text was cut at the inbound
    * ceiling, which reads false where the line was refused before its text was bounded. A line that
-   * names no file is never answered `unknown-file`. Never throws.
+   * names no file is never answered `unknown-file`, and only a door line is answered `board-act`.
+   * Never throws.
    */
   function deliverTyped(
     lineage: string,
@@ -1985,7 +2110,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     text: string,
     fileIds: readonly string[],
     line: TypedLine,
-  ): Promise<{ status: WebDeliveryStatus; truncated: boolean }> {
+  ): Promise<{ status: WebDeliveryStatus | DoorDeliveryStatus; truncated: boolean }> {
     /** A refusal made before the text was bounded, or of a text with nothing to cut. */
     const short = (status: WebDeliveryStatus): { status: WebDeliveryStatus; truncated: boolean } => ({ status, truncated: false });
     // The session is found by lineage, never by thread: the caller names the persona, and the
@@ -2001,6 +2126,14 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     // file is nothing to hand a session.
     const { text: words, truncated } = bounded(text);
     if (words === "" && fileIds.length === 0) return short("empty");
+
+    // A door line that would be a workers-board act at the door's standing is refused here, read
+    // off the bounded words the session would be handed, before anything is posted, spent, held or
+    // shown to the talk ring. The log line names the session and none of the words.
+    if (line.surface === "door" && doorBoardAct(words)) {
+      log(`routing: refused a door line for session ${record.sessionId}, which opens as a workers-board act`);
+      return { status: "board-act", truncated };
+    }
 
     // Each id must name a file the page sent for this very session: an id the store never handed
     // out, and one saved for another session, deliver nothing, before anything is posted or spent.
@@ -2121,6 +2254,84 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     });
     await after;
     return { status: channel && written ? "delivered" : "no-channel", truncated };
+  }
+
+  /**
+   * The copy an act a desk has taken leaves, a typed answer and a door verdict alike: `words`
+   * posted into the session's thread as the surface renders a line, then shown to the talk ring as
+   * an inbound line under the act's author and class. The ring line's id is the first post's, or an
+   * unposted id where no post landed. A refused or failed post is logged with the session and never
+   * the words, stops the posts after it, and changes nothing the desk did.
+   */
+  async function copyTaken(
+    record: SessionRecord,
+    threadId: string,
+    words: string,
+    line: TypedAct,
+    act: "answer" | "verdict",
+  ): Promise<void> {
+    let messageId: string | null = null;
+    if (options.page !== undefined) {
+      for (const part of line.render(line.name, words)) {
+        try {
+          const outcome = await options.page.post({ threadId, text: part });
+          if (outcome.status !== "ok") {
+            log(`routing: the thread refused the ${line.surface} ${act}'s post for session ${record.sessionId}: ${outcome.status}`);
+            break;
+          }
+          if (messageId === null && outcome.value.messageId !== null) messageId = outcome.value.messageId;
+        } catch {
+          log(`routing: posting the ${line.surface} ${act} for session ${record.sessionId} failed`);
+          break;
+        }
+      }
+    }
+    unposted += 1;
+    const id = messageId ?? `${UNPOSTED_WEB_ID_PREFIX}${String(now())}-${String(unposted)}`;
+    tapTalk(record, threadId, {
+      id,
+      senderId: line.senderId,
+      author: line.author,
+      senderClass: line.senderClass,
+      text: words,
+      truncated: false,
+    });
+  }
+
+  /**
+   * The one path a typed answer takes to the question desk, the page's and the door's alike:
+   * `line` carries everything that tells the two apart. Never throws.
+   */
+  async function answerHeld(lineage: string, text: string, line: TypedAct, entryId?: string): Promise<WebAnswerStatus> {
+    const records = options.registry.list();
+    const record = liveByLineage(records, lineage);
+    if (record === null) return records.some((held) => held.lineage === lineage) ? "ended" : "no-session";
+    const threadId = options.threadFor(record.sessionId);
+    if (threadId === null) return "no-thread";
+
+    // Bounded exactly as a Discord line is. A cut line is no answer on any surface: it would put
+    // words its writer did not finish into the session's tool result.
+    const { text: words, truncated } = bounded(text);
+    if (words === "") return "empty";
+    if (truncated) return "too-long";
+
+    let answered = false;
+    // In the thread's turn, as a typed Discord answer is, so the answer and its thread copy land in
+    // order against the thread's own messages. No rate window is spent and no pipe is read: the
+    // answer goes to the held hook, never to the session's channel.
+    const { after } = await inTurn(threadId, async () => {
+      // An answer that names the entry its writer read is applied only to that entry, so a late
+      // answer never lands on a newer question. Read in the turn, with no await before the desk.
+      if (entryId !== undefined && (options.questions.heldEntry?.(record.sessionId) ?? null) !== entryId) {
+        return { after: Promise.resolve() };
+      }
+      if (!options.questions.answerTyped(record.sessionId, words)) return { after: Promise.resolve() };
+      answered = true;
+      await copyTaken(record, threadId, words, line, "answer");
+      return { after: Promise.resolve() };
+    });
+    await after;
+    return answered ? "answered" : "no-question";
   }
 
   return {
@@ -2418,67 +2629,86 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         name: person,
         author: doorAuthorLabel(person),
         senderId: `${DOOR_SENDER_PREFIX}${person}`,
-        // Every door line is a participant's, by this literal and by nothing a caller sends: the
-        // door's key is a file any session under the broker's account can read, so an operator's
-        // class here would let a session approve its own tool calls.
-        senderClass: "participant",
+        // The standing the host gives the door, and nothing a caller sends. This path parses no
+        // verdict and answers no held question at either standing, and `deliverTyped` refuses a door
+        // line that opens as a workers-board act at operator standing, as `doorBoardAct` reads it.
+        senderClass: doorClass(),
         render: renderDoorLine,
+        // At either standing: a door line never skips the response gate as a page's board act does.
         boardActs: false,
         surface: "door",
       });
     },
 
     async answerWeb(lineage, login, text) {
+      return answerHeld(lineage, text, {
+        name: webAuthorName(login),
+        author: webAuthorLabel(login),
+        senderId: `${WEB_SENDER_PREFIX}${login}`,
+        senderClass: "operator",
+        render: renderPageLine,
+        surface: "web",
+      });
+    },
+
+    async answerDoor(lineage, name, text, entryId) {
+      // The class is decided here, where every door class is, so the rule holds whatever serves the
+      // door's paths: a host that does not give the door operator standing answers no question.
+      const senderClass = doorClass();
+      if (senderClass !== "operator") return "refused";
+      // Bounded as `deliverDoor` bounds the caller's name for the writer.
+      const person = boundedAuthor(name) || "portal";
+      return answerHeld(lineage, text, {
+        name: person,
+        author: doorAuthorLabel(person),
+        senderId: `${DOOR_SENDER_PREFIX}${person}`,
+        senderClass,
+        render: renderDoorLine,
+        surface: "door",
+      }, entryId);
+    },
+
+    async settleDoor(lineage, name, verdict, nonce) {
+      // Gated as `answerDoor` is: a host that does not give the door operator standing settles no
+      // tool call through it, and the desk is never asked.
+      const senderClass = doorClass();
+      if (senderClass !== "operator") return "refused";
       const records = options.registry.list();
       const record = liveByLineage(records, lineage);
       if (record === null) return records.some((held) => held.lineage === lineage) ? "ended" : "no-session";
       const threadId = options.threadFor(record.sessionId);
       if (threadId === null) return "no-thread";
 
-      // Bounded exactly as a Discord line is. A cut line is no answer on either surface: it would put
-      // words the operator did not finish into the session's tool result.
-      const { text: words, truncated } = bounded(text);
-      if (words === "") return "empty";
-      if (truncated) return "too-long";
-
-      const name = webAuthorName(login);
-      let answered = false;
-      // In the thread's turn, as a typed Discord answer is, so the answer and its thread copy land in
-      // order against the thread's own messages. No rate window is spent and no pipe is read: the
-      // answer goes to the held hook, never to the session's channel.
+      const person = boundedAuthor(name) || "portal";
+      let resolved = false;
+      // In the thread's turn, so the verdict and its thread copy land in order against the thread's
+      // own messages. No rate window is spent: the verdict goes to the desk, never to the session's
+      // channel as a message. The desk is keyed by this thread and the request id and checks the
+      // nonce, so a request another session holds, and one under another nonce, resolve nothing.
       const { after } = await inTurn(threadId, async () => {
-        if (!options.questions.answerTyped(record.sessionId, words)) return { after: Promise.resolve() };
-        answered = true;
-        let messageId: string | null = null;
-        if (options.page !== undefined) {
-          for (const part of renderPageLine(name, words)) {
-            try {
-              const outcome = await options.page.post({ threadId, text: part });
-              if (outcome.status !== "ok") {
-                log(`routing: the thread refused the web answer's post for session ${record.sessionId}: ${outcome.status}`);
-                break;
-              }
-              if (messageId === null && outcome.value.messageId !== null) messageId = outcome.value.messageId;
-            } catch {
-              log(`routing: posting the web answer for session ${record.sessionId} failed`);
-              break;
-            }
-          }
-        }
-        unposted += 1;
-        const id = messageId ?? `${UNPOSTED_WEB_ID_PREFIX}${String(now())}-${String(unposted)}`;
-        tapTalk(record, threadId, {
-          id,
-          senderId: `${WEB_SENDER_PREFIX}${login}`,
-          author: webAuthorLabel(login),
-          senderClass: "operator",
-          text: words,
-          truncated: false,
-        });
+        if (!options.permissions.resolve(threadId, verdict, nonce)) return { after: Promise.resolve() };
+        resolved = true;
+        // The words an operator types for the same verdict, so the thread and the ring read a door
+        // verdict as they read a typed one.
+        const words = `${verdict.behavior === "allow" ? "y" : "n"} ${verdict.requestId}`;
+        await copyTaken(
+          record,
+          threadId,
+          words,
+          {
+            name: person,
+            author: doorAuthorLabel(person),
+            senderId: `${DOOR_SENDER_PREFIX}${person}`,
+            senderClass,
+            render: renderDoorLine,
+            surface: "door",
+          },
+          "verdict",
+        );
         return { after: Promise.resolve() };
       });
       await after;
-      return answered ? "answered" : "no-question";
+      return resolved ? "resolved" : "closed";
     },
 
     reconcile(sessions) {

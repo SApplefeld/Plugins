@@ -5,7 +5,9 @@
 // so treating the room as the credential would let any of them steer a session and approve its
 // tool calls. The author's ID is the only thing an inbound message carries that says who wrote it.
 //
-// It is also the only authority for anything inbound. A process token identifies which Claude Code
+// It is the only authority for anything inbound from Discord. The web listener's login list admits
+// the page's lines, and the local door's key admits a door line, which takes operator standing only
+// on a host that sets it. A process token identifies which Claude Code
 // process a pipe belongs to and is inherited by every subprocess a session spawns; it authenticates
 // reports about a session and never instructions to one.
 //

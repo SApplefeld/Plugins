@@ -843,7 +843,7 @@ const DRAIN_LIMIT_FACTOR = 4;
  * the drain limit the connection is destroyed instead. Only the byte count comes back on the
  * over-ceiling paths: the caller logs the count, never the text.
  *
- * The hook intake's two routes and the local door's line route read through this one function.
+ * The hook intake's two routes and the local door's post routes read through this one function.
  * Their ceilings differ, and nothing else about the read does. For the hook routes the drain keeps
  * the quiet answer: a post over either ceiling is a post from an installed hook that fires in every
  * session on the machine, and refusing one puts a visible error inside that session at the end of

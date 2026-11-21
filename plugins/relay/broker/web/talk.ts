@@ -236,11 +236,12 @@ export type TalkViewInput = {
 };
 
 /**
- * A held entry as the page draws it, its text stripped of invisibles and uncut, since nothing is
- * posted. An option whose label strips to nothing is left out, as the thread's picker leaves it out,
- * and every other one keeps its position in the ask.
+ * A held entry as the page draws it and as the local door's pending read answers it, its text
+ * stripped of invisibles and uncut, since nothing is posted. An option whose label strips to nothing
+ * is left out, as the thread's picker leaves it out, and every other one keeps its position in the
+ * ask.
  */
-function viewQuestion(entry: QuestionEntryView): TalkQuestion {
+export function viewQuestion(entry: QuestionEntryView): TalkQuestion {
   return {
     entryId: entry.id,
     answerable: answerableFromThread(entry.questions, entry.questionsInput),
@@ -280,8 +281,11 @@ function chosenPositions(options: readonly { label: string }[], picks: readonly 
   return chosen;
 }
 
-/** An open request as the page draws it: invisibles stripped, line breaks kept, and nothing cut. */
-function viewPermission(request: PendingPermission): TalkPermission {
+/**
+ * An open request as the page draws it and as the local door's pending read answers it: invisibles
+ * stripped, line breaks kept, and nothing cut.
+ */
+export function viewPermission(request: PendingPermission): TalkPermission {
   return {
     ...request,
     toolName: visible(request.toolName),

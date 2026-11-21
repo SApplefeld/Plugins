@@ -1,6 +1,8 @@
-// The local door: three loopback routes a program on the broker's own host uses to read the talk
-// ring and to hand a session a line a named person wrote. They sit on the loopback listener between
-// the relay routes and the hook intake, and exist only while a door key is loaded.
+// The local door: loopback routes a program on the broker's own host uses to read the talk ring, to
+// hand a session a line a named person wrote and, on a host that gives the door operator standing,
+// to read what a session waits on and settle it. They sit on the loopback listener between the
+// relay routes and the hook intake, and exist only while a door key is loaded. Three are served at
+// either standing and three more at operator standing alone, six in all.
 //
 //   Every request carries the header X-Channels-Door: the door key file's contents.
 //
@@ -25,15 +27,61 @@
 //     Content-Type: application/json
 //     body: {"lineage": "...", "name": "...", "text": "...", "lineId": "..."}, at most 64 KiB
 //     -> 200 {"status": "delivered" | "no-session" | "ended" | "no-thread" | "no-channel" | "rate" |
-//        "empty", "truncated": false, "duplicate": false}, the status and the cut the inbound router
-//        answered. A lineage no registry record carries is a good body and answers no-session, so
-//        every delivery outcome is read from one field.
+//        "empty" | "board-act", "truncated": false, "duplicate": false}, the status and the cut the
+//        inbound router answered. A lineage no registry record carries is a good body and answers
+//        no-session, so every delivery outcome is read from one field. board-act is a line refused
+//        on a host whose door runs at operator standing because its text, trimmed, opens with
+//        [PAUSE] or [RESUME]: a session reads such an operator's line as a workers-board act, and
+//        the door carries none. Nothing was delivered, and the same text is refused again.
 //     -> 400 on a body that is not a JSON object of that shape, 415 on another type
 //     -> 413 on a declared Content-Length past 64 KiB, before the body is read, which a caller that
 //        keeps its connection open reads; and on any other body past 64 KiB that ends within 256 KiB.
 //        Past 256 KiB that body's connection is dropped with no answer.
 //
-//   On each of the three
+//   The three below are served only on a host whose door runs at operator standing. On any other
+//   host a request to one is not the door's, and gets the answer any unknown path on the loopback
+//   listener gets.
+//
+//   GET /door/pending?lineage=<l>
+//     -> 200 {"lineage": "...", "live": true, "questions": [...], "permissions": [...]}
+//        What the lineage's live session waits on, as the talk page's view carries it. `live` is
+//        whether a session not yet ended carries the lineage, and both lists are empty where none
+//        does. A question is {"entryId", "answerable", "alerted", "questions": [{"header",
+//        "question", "multiSelect", "options": [{"index", "label", "description", "chosen"}]}]}. A
+//        typed answer is taken only once `alerted` is true. `answerable` is the rule for the
+//        thread's picker and does not bound a typed answer. A permission is {"requestId",
+//        "toolName", "description", "inputPreview", "nonce", "at"}, a tool call waiting on a
+//        verdict, and its nonce is the one a verdict must carry.
+//     -> 400 on a missing or empty lineage
+//     -> 404 on a lineage no registry record carries
+//
+//   POST /door/answer
+//     Content-Type: application/json
+//     body: {"lineage": "...", "name": "...", "text": "...", "entryId": "..."}, at most 64 KiB;
+//     entryId is optional and names the entry GET /door/pending showed
+//     -> 200 {"status": "answered" | "no-question" | "no-session" | "ended" | "no-thread" | "empty" |
+//        "too-long"}. answered is the held question took the text as its typed answer. no-question
+//        is no question is held, the held one's alert has not landed, or the held entry is not the
+//        one entryId names, and nothing was answered. too-long is a text past the inbound ceiling,
+//        which is never an answer, since a cut one would put unfinished words into a session. A
+//        second answer naming one entry reads no-question. An answer with no entryId goes to
+//        whichever entry is held when it arrives.
+//     -> 400, 413 and 415 as POST /door/line answers them
+//
+//   POST /door/permission
+//     Content-Type: application/json
+//     body: {"lineage": "...", "name": "...", "requestId": "...", "behavior": "allow" | "deny",
+//     "nonce": "..."}, at most 64 KiB
+//     -> 200 {"status": "resolved" | "closed" | "no-session" | "ended" | "no-thread"}. resolved is
+//        the verdict was applied to the request. closed is the session's thread holds no open
+//        request of that id under that nonce, and nothing was applied. A second verdict on one
+//        request reads closed.
+//     -> 400 on a body that is not a JSON object of that shape: a requestId that is not five letters
+//        of a to z without l, a behavior outside allow and deny, and a nonce that is missing or is
+//        not 1 to 64 lowercase hex digits. The nonce is never optional.
+//     -> 413 and 415 as POST /door/line answers them
+//
+//   On each of the six
 //     -> 403 {"error": "loopback only"} where the peer or the Host header is not loopback
 //     -> 401 {"error": "door key required"} where the header is missing or is not the key
 //     -> 405 with an `allow` header on any other method, OPTIONS included
@@ -46,12 +94,28 @@
 // that outcome, and one repeating a delivered id is answered with that outcome, each with
 // `duplicate` true and nothing delivered. An outcome other than `delivered` is forgotten as it
 // settles, so the line can be sent again, and a delivered id is forgotten after
-// DOOR_LINE_MEMORY_MS. The memory is this process's alone and is never written to disk.
+// DOOR_LINE_MEMORY_MS. The memory is this process's alone and is never written to disk. An answer
+// and a verdict carry no id: the desk that takes one holds nothing for a second.
 //
 // The key is the door's whole defense, and it is a file any session under the broker's account can
-// read. So every line handed in here is a participant's, by a literal in the inbound router's
-// `deliverDoor`, and nothing a request carries can change that. No answer carries a CORS header,
-// and no log line carries the key, the header's value or any part of a body.
+// read. What a holder of the key can do is the standing the host gives the door, its
+// CHANNEL_DOOR_STANDING setting, and nothing a request carries can change that. With the setting
+// unset or `participant`, every line handed in here is a participant's and the door settles
+// nothing. At `operator`, every line is the operator's, and the door answers a held question and
+// allows or denies a waiting tool call in whatever name the caller sends, so a session on that host
+// can do each of those, its own tool calls included, and the control is the boundary around the
+// host. The inbound router decides the class, in one function, and refuses an answer and a verdict
+// at any other standing. At either standing the door takes no other act: no workers-board act, no
+// broker restart, no voice command, no pick or submit of a question's options, no release of a
+// question to the console and none of the page's item acts. A line, an answer and a verdict each
+// leave a copy in the session's thread and a line in the talk ring under `<name> (portal)`, which
+// shows that the act came through the door and never who took it.
+//
+// No answer carries a CORS header, and no door log line carries the key, the header's value or any
+// part of a body but one: the line for a verdict names `allow` or `deny`. The permission desk's
+// own line for a settled verdict names the request id, as it does for a verdict from the page. An
+// answer or a verdict that names a live session is logged as one line naming the path, the session,
+// the act and the status.
 //
 // Both guards the hook intake applies are applied here too, ahead of the key: the socket peer must
 // be loopback and the Host header must name a loopback name, which closes DNS rebinding. They are
@@ -59,29 +123,39 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAllowedHost, isLoopback, readCappedBody } from "./intake.ts";
+import type { QuestionEntryView } from "./question-desk.ts";
 import { liveByLineage } from "./registry.ts";
 import type { SessionRecord } from "./registry.ts";
 import { createRepeatLog } from "./repeat-log.ts";
 import type { RepeatLogSurface } from "./repeat-log.ts";
-import type { DoorDeliveryStatus } from "./routing/inbound.ts";
-import { RING_CAPACITY } from "./web/talk.ts";
+import type { DoorAnswerStatus, DoorDeliveryStatus, DoorVerdictStatus } from "./routing/inbound.ts";
+import type { PendingPermission, Verdict } from "./security/permission.ts";
+import { RING_CAPACITY, viewPermission, viewQuestion } from "./web/talk.ts";
 import type { HeldLine, TalkRing } from "./web/talk.ts";
 
 /** How long a delivered line id is remembered, so a repeat of it delivers nothing. */
 export const DOOR_LINE_MEMORY_MS = 10 * 60 * 1000;
 
 /**
- * The largest line route body read. A body past it is refused unparsed: on its declared length
+ * The largest body a door post reads. A body past it is refused unparsed: on its declared length
  * before any read, and otherwise by the read once it passes this.
  */
 const MAX_LINE_BODY_BYTES = 64 * 1024;
 
-/** The bounds on a line body's fields, in code points. */
+/** The bounds on a post body's lineage and name, in code points. */
 const MAX_LINEAGE_LENGTH = 256;
 const MAX_NAME_LENGTH = 100;
 
 /** A line id: 1 to 64 letters, digits and hyphens. */
 const LINE_ID = /^[A-Za-z0-9-]{1,64}$/;
+
+/**
+ * A permission request's id and its prompt's nonce, the two shapes the page's `POST
+ * /web/permission` checks a verdict by: five letters of the alphabet Claude Code builds an id from,
+ * which has no `l`, and hex that is never empty, so a verdict always names a nonce.
+ */
+const PERMISSION_REQUEST_ID = /^[a-km-z]{5}$/;
+const PERMISSION_NONCE = /^[0-9a-f]{1,64}$/;
 
 /** How long a run of one refusal is counted before its next log line. */
 const REFUSAL_WINDOW_MS = 60_000;
@@ -110,12 +184,49 @@ export type DoorRoutesOptions = {
   ring: Pick<TalkRing, "since" | "newestSeq" | "startedAt">;
   /** The inbound router's door delivery, or a stand-in answering `no-session` where no router exists. */
   deliverDoor: (lineage: string, name: string, text: string) => Promise<DoorOutcome>;
+  /**
+   * What a session waits on: the question desk's held entries and the permission desk's open
+   * requests for it. Present only on a host whose door runs at operator standing, and
+   * `/door/pending` is served only where it is.
+   */
+  pending?: (sessionId: string) => {
+    questions: readonly QuestionEntryView[];
+    permissions: readonly PendingPermission[];
+  };
+  /**
+   * The inbound router's door answer, or a stand-in answering `no-session` where no router exists.
+   * Present only on a host whose door runs at operator standing, and `/door/answer` is served only
+   * where it is.
+   */
+  answerDoor?: (lineage: string, name: string, text: string, entryId?: string) => Promise<DoorAnswerStatus>;
+  /**
+   * The inbound router's door verdict, or a stand-in answering `no-session` where no router exists.
+   * Present only on a host whose door runs at operator standing, and `/door/permission` is served
+   * only where it is.
+   */
+  settleDoor?: (lineage: string, name: string, verdict: Verdict, nonce: string) => Promise<DoorVerdictStatus>;
   log?: (message: string) => void;
   /** The clock the line id memory and the refusal log read, in milliseconds. */
   now?: () => number;
 };
 
-type DoorRoute = "/door/lineages" | "/door/lines" | "/door/line";
+type DoorRoute =
+  | "/door/lineages"
+  | "/door/lines"
+  | "/door/line"
+  | "/door/pending"
+  | "/door/answer"
+  | "/door/permission";
+
+/** The one method each route takes. */
+const ROUTE_METHOD: Readonly<Record<DoorRoute, "GET" | "POST">> = {
+  "/door/lineages": "GET",
+  "/door/lines": "GET",
+  "/door/line": "POST",
+  "/door/pending": "GET",
+  "/door/answer": "POST",
+  "/door/permission": "POST",
+};
 
 function send(response: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   const text = JSON.stringify(body);
@@ -150,7 +261,9 @@ function shown(line: HeldLine): Record<string, unknown> {
 /**
  * Returns a handler that reports whether it took the request, so the caller can fall through to the
  * hook intake for everything else. It takes a request whose path before any `?` is exactly one of
- * the three door paths, compared as the raw string with no decoding, and no other.
+ * the door paths it serves, compared as the raw string with no decoding, and no other: the three
+ * every door serves, and each of `/door/pending`, `/door/answer` and `/door/permission` whose
+ * callback the options hold.
  */
 export function createDoorRoutes(
   options: DoorRoutesOptions,
@@ -234,11 +347,48 @@ export function createDoorRoutes(
     });
   }
 
-  async function line(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  function pending(
+    response: ServerResponse,
+    query: URLSearchParams,
+    waitingOn: NonNullable<DoorRoutesOptions["pending"]>,
+  ): void {
+    const lineage = query.get("lineage");
+    if (lineage === null || lineage === "") {
+      refuse(response, "/door/pending", 400, "lineage is missing");
+      return;
+    }
+    const records = options.records();
+    if (!records.some((record) => record.lineage === lineage)) {
+      refuse(response, "/door/pending", 404, "no session carries that lineage");
+      return;
+    }
+    // The two lists the talk page's view carries for the same session, built by the view's own two
+    // functions, so the door and the page cannot show one desk two ways. No desk is read where no
+    // session is live.
+    const live = liveByLineage(records, lineage);
+    const held = live === null ? { questions: [], permissions: [] } : waitingOn(live.sessionId);
+    send(response, 200, {
+      lineage,
+      live: live !== null,
+      questions: held.questions.map(viewQuestion),
+      permissions: held.permissions.map(viewPermission),
+    });
+  }
+
+  /**
+   * The JSON object a post's body holds, with the lineage and the name every door post carries, or
+   * null where the request was refused, which is answered and logged here. The checks run in one
+   * order on every post: the content type, the size, the JSON, the object, the lineage, the name.
+   */
+  async function posted(
+    request: IncomingMessage,
+    response: ServerResponse,
+    route: DoorRoute,
+  ): Promise<{ lineage: string; name: string; fields: Record<string, unknown> } | null> {
     const type = request.headers["content-type"];
     if (typeof type !== "string" || type.split(";")[0].trim().toLowerCase() !== "application/json") {
-      refuse(response, "/door/line", 415, "the body is not application/json");
-      return;
+      refuse(response, route, 415, "the body is not application/json");
+      return null;
     }
     // A declared length past the cap is refused before any read, so the answer goes out while the
     // caller is still sending. Node discards the unread body, and a caller that keeps its connection
@@ -246,8 +396,8 @@ export function createDoorRoutes(
     // closed on once the answer is sent, and can see a reset in its place.
     const declared = request.headers["content-length"];
     if (declared !== undefined && /^\d+$/.test(declared) && Number(declared) > MAX_LINE_BODY_BYTES) {
-      refuse(response, "/door/line", 413, "body too large");
-      return;
+      refuse(response, route, 413, "body too large");
+      return null;
     }
     // Any other body is read through the hook intake's reader. Past the cap it drains and discards
     // up to its drain limit, so a caller whose body ends inside the limit reads the 413. Past the
@@ -255,30 +405,39 @@ export function createDoorRoutes(
     // only logged.
     const read = await readCappedBody(request, MAX_LINE_BODY_BYTES);
     if (!("body" in read)) {
-      if (read.destroyed) refused("/door/line: body too large");
-      else refuse(response, "/door/line", 413, "body too large");
-      return;
+      if (read.destroyed) refused(`${route}: body too large`);
+      else refuse(response, route, 413, "body too large");
+      return null;
     }
     let payload: unknown;
     try {
       payload = JSON.parse(read.body);
     } catch {
-      refuse(response, "/door/line", 400, "body is not valid JSON");
-      return;
+      refuse(response, route, 400, "body is not valid JSON");
+      return null;
     }
     if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-      refuse(response, "/door/line", 400, "body is not a JSON object");
-      return;
+      refuse(response, route, 400, "body is not a JSON object");
+      return null;
     }
-    const { lineage, name, text, lineId } = payload as Record<string, unknown>;
+    const fields = payload as Record<string, unknown>;
+    const { lineage, name } = fields;
     if (!bounded(lineage, MAX_LINEAGE_LENGTH)) {
-      refuse(response, "/door/line", 400, `lineage is not 1 to ${String(MAX_LINEAGE_LENGTH)} characters`);
-      return;
+      refuse(response, route, 400, `lineage is not 1 to ${String(MAX_LINEAGE_LENGTH)} characters`);
+      return null;
     }
     if (!bounded(name, MAX_NAME_LENGTH)) {
-      refuse(response, "/door/line", 400, `name is not 1 to ${String(MAX_NAME_LENGTH)} characters`);
-      return;
+      refuse(response, route, 400, `name is not 1 to ${String(MAX_NAME_LENGTH)} characters`);
+      return null;
     }
+    return { lineage, name, fields };
+  }
+
+  async function line(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const body = await posted(request, response, "/door/line");
+    if (body === null) return;
+    const { lineage, name } = body;
+    const { text, lineId } = body.fields;
     if (typeof text !== "string") {
       refuse(response, "/door/line", 400, "text is not a string");
       return;
@@ -319,12 +478,100 @@ export function createDoorRoutes(
     send(response, 200, { ...(await entry.outcome), duplicate: false });
   }
 
+  /**
+   * The id of the live session a post names, read ahead of the act, or null where the lineage has
+   * none. It is what a post's log line names, and a post naming no live session writes no line.
+   */
+  function liveSession(lineage: string): string | null {
+    return liveByLineage(options.records(), lineage)?.sessionId ?? null;
+  }
+
+  async function answer(
+    request: IncomingMessage,
+    response: ServerResponse,
+    answerDoor: NonNullable<DoorRoutesOptions["answerDoor"]>,
+  ): Promise<void> {
+    const body = await posted(request, response, "/door/answer");
+    if (body === null) return;
+    const { lineage, name } = body;
+    const { text, entryId } = body.fields;
+    if (typeof text !== "string") {
+      refuse(response, "/door/answer", 400, "text is not a string");
+      return;
+    }
+    // Optional. Where present it names the entry the caller read from /door/pending, and an answer
+    // whose entry is no longer the one held reads no-question rather than answering a newer one.
+    if (entryId !== undefined && (typeof entryId !== "string" || entryId === "")) {
+      refuse(response, "/door/answer", 400, "entryId is not a string");
+      return;
+    }
+    const sessionId = liveSession(lineage);
+    const status = await answerDoor(lineage, name, text, entryId);
+    // The path, the session, the act and the status, and neither the person nor the text.
+    if (sessionId !== null) log(`door: /door/answer: answer for session ${sessionId}: ${status}`);
+    send(response, 200, { status });
+  }
+
+  async function permission(
+    request: IncomingMessage,
+    response: ServerResponse,
+    settleDoor: NonNullable<DoorRoutesOptions["settleDoor"]>,
+  ): Promise<void> {
+    const body = await posted(request, response, "/door/permission");
+    if (body === null) return;
+    const { lineage, name } = body;
+    const { requestId, behavior, nonce } = body.fields;
+    if (typeof requestId !== "string" || !PERMISSION_REQUEST_ID.test(requestId)) {
+      refuse(response, "/door/permission", 400, "requestId is not five letters of a request id");
+      return;
+    }
+    if (behavior !== "allow" && behavior !== "deny") {
+      refuse(response, "/door/permission", 400, "behavior is not allow or deny");
+      return;
+    }
+    // Never absent and never null: the desk skips its nonce check for a caller that states it has
+    // none, and a verdict here always carries the one the pending read gave.
+    if (typeof nonce !== "string" || !PERMISSION_NONCE.test(nonce)) {
+      refuse(response, "/door/permission", 400, "nonce is not 1 to 64 hex digits");
+      return;
+    }
+    const sessionId = liveSession(lineage);
+    const status = await settleDoor(lineage, name, { requestId, behavior }, nonce);
+    // The path, the session, the verdict and the status. `allow` or `deny` is the one body value a
+    // door log line carries, and the line names neither the person nor the request.
+    if (sessionId !== null) log(`door: /door/permission: ${behavior} for session ${sessionId}: ${status}`);
+    send(response, 200, { status });
+  }
+
+  // The three every door serves, and each of the other three whose callback this door holds. A
+  // path with no handler here is not the door's, and its request is left for the hook intake to
+  // answer as it answers any path it does not know.
+  const { pending: waitingOn, answerDoor, settleDoor } = options;
+  const handlers: Partial<
+    Record<DoorRoute, (request: IncomingMessage, response: ServerResponse, query: URLSearchParams) => void | Promise<void>>
+  > = {
+    "/door/lineages": (_request, response) => lineages(response),
+    "/door/lines": (_request, response, query) => lines(response, query),
+    "/door/line": line,
+    ...(waitingOn === undefined
+      ? {}
+      : { "/door/pending": (_request, response, query) => pending(response, query, waitingOn) }),
+    ...(answerDoor === undefined
+      ? {}
+      : { "/door/answer": (request, response) => answer(request, response, answerDoor) }),
+    ...(settleDoor === undefined
+      ? {}
+      : { "/door/permission": (request, response) => permission(request, response, settleDoor) }),
+  };
+
   return (request, response) => {
     const url = request.url ?? "/";
     const mark = url.indexOf("?");
     const path = mark < 0 ? url : url.slice(0, mark);
-    if (path !== "/door/lineages" && path !== "/door/lines" && path !== "/door/line") return false;
-    const route: DoorRoute = path;
+    if (!Object.hasOwn(handlers, path)) return false;
+    const route = path as DoorRoute;
+    const handle = handlers[route];
+    if (handle === undefined) return false;
 
     if (!isLoopback(request.socket.remoteAddress) || !isAllowedHost(request.headers.host)) {
       refuse(response, route, 403, "loopback only");
@@ -334,27 +581,24 @@ export function createDoorRoutes(
       refuse(response, route, 401, "door key required");
       return true;
     }
-    const allow = route === "/door/line" ? "POST" : "GET";
+    const allow = ROUTE_METHOD[route];
     if (request.method !== allow) {
       refuse(response, route, 405, "method not allowed", { allow });
       return true;
     }
 
-    if (route === "/door/lineages") {
-      lineages(response);
-      return true;
-    }
-    if (route === "/door/lines") {
-      lines(response, new URLSearchParams(mark < 0 ? "" : url.slice(mark + 1)));
-      return true;
-    }
-    line(request, response).catch((error: unknown) => {
-      // A response still open is answered, so a caller is not left waiting on a request that is
-      // over. The log line names the error's kind and never its message, which nothing here
-      // guarantees is free of the body.
+    // A response still open is answered, so a caller is not left waiting on a request that is
+    // over, whether the handler throws at once or its promise rejects later. The log line names the
+    // error's kind and never its message, which nothing here guarantees is free of the body.
+    const failed = (error: unknown): void => {
       if (!response.headersSent && !response.destroyed) send(response, 500, { error: "the request failed" });
-      log(`door: the /door/line route failed: ${error instanceof Error ? error.name : "a thrown value"}`);
-    });
+      log(`door: the ${route} route failed: ${error instanceof Error ? error.name : "a thrown value"}`);
+    };
+    try {
+      handle(request, response, new URLSearchParams(mark < 0 ? "" : url.slice(mark + 1)))?.catch(failed);
+    } catch (error) {
+      failed(error);
+    }
     return true;
   };
 }

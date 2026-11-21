@@ -80,7 +80,7 @@ import {
   createAlertVolume,
   createPermissionDesk,
 } from "./security/permission.ts";
-import type { PermissionDesk } from "./security/permission.ts";
+import type { PermissionDesk, Verdict } from "./security/permission.ts";
 import { loadSenderGate } from "./security/senders.ts";
 import type { SenderGate } from "./security/senders.ts";
 import { createQuestionDesk, recommendedAnswer } from "./question-desk.ts";
@@ -1738,7 +1738,8 @@ export async function startBroker(
     relays,
     outbound,
     // The asking half only. Answering a prompt belongs to the Discord side, behind the sender
-    // gate, and this layer is reachable by any local process that holds a pipe.
+    // gate, and to the local door on a host that gives it operator standing; this layer is
+    // reachable by any local process that holds a pipe.
     permissions: { request: (processToken, request) => permissions.request(processToken, request) },
     // The reason names who asked, so the restart's log line does. It is built here because this is
     // where a process token resolves to a session; the route never learns the session. The session
@@ -1779,6 +1780,28 @@ export async function startBroker(
             inbound === null
               ? Promise.resolve({ status: "no-session", truncated: false })
               : inbound.deliverDoor(lineage, name, text),
+          // The door's three other paths, which read what a session waits on and settle it, are
+          // served only where the host gives the door operator standing: the door serves a path
+          // only where it holds that path's callback, so on any other host a request to one is the
+          // hook intake's to answer. The desks are read through their bindings, since the Discord
+          // block replaces the stand-in permission desk, and with no router there is no session an
+          // answer or a verdict could reach, which `no-session` says.
+          ...(config.doorStanding !== "operator"
+            ? {}
+            : {
+                pending: (sessionId: string) => ({
+                  questions: questionDesk.heldFor(sessionId),
+                  permissions: permissions.pendingFor(sessionId),
+                }),
+                answerDoor: (lineage: string, name: string, text: string, entryId?: string) =>
+                  inbound === null
+                    ? Promise.resolve("no-session" as const)
+                    : inbound.answerDoor(lineage, name, text, entryId),
+                settleDoor: (lineage: string, name: string, verdict: Verdict, nonce: string) =>
+                  inbound === null
+                    ? Promise.resolve("no-session" as const)
+                    : inbound.settleDoor(lineage, name, verdict, nonce),
+              }),
           log: note,
           now: Date.now,
         });
@@ -2387,6 +2410,7 @@ export async function startBroker(
       // through the same seam, read by the message the reaction sat on.
       questions: {
         answerTyped: questionDesk.answerTyped,
+        heldEntry: (sessionId) => questionDesk.heldFor(sessionId)[0]?.id ?? null,
         recommendedAt: (sessionId, messageId) => recommendedAnswer(questionDesk.heldFor(sessionId), messageId),
       },
       // The ask a reaction sat on, read off the decisions card's own records: its card message or a
@@ -2434,9 +2458,11 @@ export async function startBroker(
       ...(web === null ? {} : { webOperators: web.operators }),
       receipts: { delivered: (threadId, messageId, at) => receipts?.delivered(threadId, messageId, at) },
       ...(talkRing === null ? {} : { talkTap: talkRing }),
-      // On exactly where the door's routes exist, so a door line held across the restart is a
-      // participant's again only on a broker that would take that line today.
-      ...(doorRoutes === null ? {} : { door: true }),
+      // On exactly where the door's routes exist, so a door line held across the restart is
+      // delivered again only on a broker that would take that line today. The standing rides with
+      // the switch: it is the host's `CHANNEL_DOOR_STANDING` setting, the one thing that decides a
+      // door line's class, and a broker with no door is passed none.
+      ...(doorRoutes === null ? {} : { door: true, doorStanding: config.doorStanding }),
       // A web page's line and a local door's line each go into the thread as the bot through the
       // conversation writer's reply, the budget-paced post the mirrored replies take, so a burst of
       // them is metered with the rest of the conversation volume and a block it earns never refuses
@@ -2755,10 +2781,16 @@ export async function startBroker(
 
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : config.port;
-  // Said once, where the listener that serves it is bound. The line names the three paths and
-  // neither the key nor the file it was read from.
+  // Said once, where the listener that serves it is bound. The line names the paths the door
+  // serves, three at participant standing and all six at operator standing, and the standing the
+  // host gives the door, as the token `participant` or `operator`, and neither the key nor the file
+  // it was read from. It is where a host's operator reads the standing the door is running at.
   if (doorRoutes !== null) {
-    note("broker: the local door is on, serving /door/lineages, /door/lines and /door/line on the loopback listener");
+    const doorPaths =
+      config.doorStanding === "operator"
+        ? "/door/lineages, /door/lines, /door/line, /door/pending, /door/answer and /door/permission"
+        : "/door/lineages, /door/lines and /door/line";
+    note(`broker: the local door is on, serving ${doorPaths} on the loopback listener, at ${config.doorStanding} standing`);
   }
 
   // The web surface is a sibling of the Discord surfaces: with `CHANNEL_WEB_BIND` unset there is

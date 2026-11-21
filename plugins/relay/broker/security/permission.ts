@@ -21,8 +21,13 @@
 // still sits. So each open request holds a nonce, the prompt's own components carry it, and a press
 // whose nonce does not match resolves to nothing. That is what a recycled request ID cannot defeat.
 //
-// Nothing here consults a process token for authorization. The sender gate on the Discord user ID
-// has already run by the time a verdict reaches this file, and it is the only authority for it.
+// Nothing here consults a process token for authorization. A verdict reaches this file by one of
+// three ways, and each has its own authority. For one typed or pressed in Discord, the sender gate
+// on the Discord user ID has already run. For one from the operator's page, the web listener's gate
+// has. For one through the local door, which carries one only on a host whose
+// `CHANNEL_DOOR_STANDING` is `operator`, no sender gate stands in front of it: the door key is the
+// authority, and it is a file any session under the broker's account can read, so on such a host a
+// session can settle a tool call, its own included.
 import { randomBytes } from "node:crypto";
 import {
   permissionControls,
@@ -362,9 +367,10 @@ export type PermissionDesk = {
   waiting: () => ReadonlySet<string>;
   /**
    * The requests a session has open, oldest first, each with the nonce its prompt's buttons carry,
-   * for the operator's page to draw and answer. The nonce leaves this desk here as it leaves in a
-   * button's `custom_id`, and a verdict from the page carries it back through `resolve` on the same
-   * terms a press does.
+   * for the operator's page to draw and answer and, on a host whose door runs at operator standing,
+   * for the local door's pending read. The nonce leaves this desk here as it leaves in a button's
+   * `custom_id`, and a verdict from the page or through the door carries it back through `resolve`
+   * on the same terms a press does. On such a host any process that holds the door key reads it.
    */
   pendingFor: (sessionId: string) => PendingPermission[];
 };
@@ -390,8 +396,9 @@ export type PermissionDeskOptions = {
   threadFor: (sessionId: string) => string | null;
   writer: ThreadWriter;
   /**
-   * Every operator, in roster order: the users a prompt mentions, and the only senders whose
-   * verdicts reach this desk, since the routers refuse anyone else's before calling it.
+   * Every operator, in roster order: the users a prompt mentions, and the only Discord senders whose
+   * verdicts reach this desk, since the routers refuse anyone else's before calling it. On a host
+   * whose local door runs at operator standing, a door verdict reaches it too, with no sender gate.
    */
   operatorIds: readonly string[];
   /** Injected so a test drives the alert ceiling without sleeping. */

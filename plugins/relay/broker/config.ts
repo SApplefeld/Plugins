@@ -360,6 +360,15 @@ export type BrokerConfig = {
    */
   doorKeyFile: string | null;
   /**
+   * The standing of what the local door hands in, as `CHANNEL_DOOR_STANDING` names it:
+   * `participant` when unset or blank, and `operator` only where the host says so. The value is
+   * parsed at every start, so one outside the vocabulary refuses the start even with the door off,
+   * and it is used only while the door is on. A host turns it on, and no default does, since a
+   * process that can read the door key then acts with the operator's standing and only a boundary
+   * around the host contains that.
+   */
+  doorStanding: "participant" | "operator";
+  /**
    * The gating keys the environment leaves unset whose switch, where one applies, is on, in catalog
    * order (`settings.ts` owns the rule). A feature or surface stays off for each of them, and the
    * broker's start-up names them in one line. Empty on a host that sets every gating key.
@@ -791,6 +800,18 @@ const ATTACHMENT_MODES: ReadonlyArray<"off" | "operator" | "all"> = ["off", "ope
  */
 function attachmentMode(raw: string | undefined): "off" | "operator" | "all" {
   return strictEnum(raw, ATTACHMENT_MODES, "operator");
+}
+
+const DOOR_STANDINGS: ReadonlyArray<"participant" | "operator"> = ["participant", "operator"];
+
+/**
+ * The standing of what the local door hands in, defaulting to a participant's: a typo like
+ * `CHANNEL_DOOR_STANDING=operater` is refused by the reading above rather than landing on a
+ * standing the host did not name, either an operator's door nobody asked for or a participant's
+ * door its operator believes is an operator's.
+ */
+function doorStanding(raw: string | undefined): "participant" | "operator" {
+  return strictEnum(raw, DOOR_STANDINGS, "participant");
 }
 
 // A Windows path names the same place from every process only when it leads with a drive letter or a
@@ -1254,6 +1275,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     // The path alone, and null where none is named: the local door has no default key file, so a
     // host that names none serves no door path.
     doorKeyFile: env.CHANNEL_DOOR_KEY_FILE?.trim() || null,
+    doorStanding: doorStanding(env.CHANNEL_DOOR_STANDING),
     settingsUnset: unsetGatingKeys(env),
   };
   return config;

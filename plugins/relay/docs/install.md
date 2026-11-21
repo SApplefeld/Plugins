@@ -843,14 +843,20 @@ image or template exists. In order:
 
 ### The local door (optional)
 
-`CHANNEL_DOOR_KEY_FILE` turns on the local door: three routes on the broker's loopback listener
+`CHANNEL_DOOR_KEY_FILE` turns on the local door: three routes on the broker's loopback listener,
+or six at operator standing,
 that a program on this host uses to read each persona's recent conversation lines and to hand in
 a line a named person wrote. It is off by default, and the installer never writes it. To turn it
 on, set it by hand in `broker.env` to the path of a key file inside the state root, protected as
-the bot token file is and holding a key of at least 32 visible ASCII characters. Every line handed
-in through the door is a participant's, so it never approves a tool call or answers a held
-question. The section "The local door" in `operations.md` sets out how to make the key file
-and how to turn the door off.
+the bot token file is and holding a key of at least 32 visible ASCII characters. With
+`CHANNEL_DOOR_STANDING` unset, every line handed in through the door is a participant's, so it
+never approves a tool call or answers a held question. With `CHANNEL_DOOR_STANDING=operator`, the
+door hands in lines with the operator's standing and can also answer held questions and allow or
+deny tool calls, so any process that reads the key, a session on the host included, can do those
+three things as the operator. Use the value `operator` only on a host inside a boundary that
+contains its sessions, so that what any of them can do with the operator's standing stays inside
+it. The section "The local door" in
+`operations.md` sets out how to make the key file and how to turn the door off.
 
 ### Claude Duet (optional)
 
