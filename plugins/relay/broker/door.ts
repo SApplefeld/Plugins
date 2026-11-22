@@ -1,8 +1,9 @@
 // The local door: loopback routes a program on the broker's own host uses to read the talk ring, to
 // hand a session a line a named person wrote and, on a host that gives the door operator standing,
-// to read what a session waits on and settle it. They sit on the loopback listener between the
-// relay routes and the hook intake, and exist only while a door key is loaded. Three are served at
-// either standing and three more at operator standing alone, six in all.
+// to read what a session waits on and settle it, and to read a persona's open asks and answer one.
+// They sit on the loopback listener between the relay routes and the hook intake, and exist only
+// while a door key is loaded. Three are served at either standing and four more at operator
+// standing alone, seven in all.
 //
 //   Every request carries the header X-Channels-Door: the door key file's contents.
 //
@@ -38,20 +39,28 @@
 //        keeps its connection open reads; and on any other body past 64 KiB that ends within 256 KiB.
 //        Past 256 KiB that body's connection is dropped with no answer.
 //
-//   The three below are served only on a host whose door runs at operator standing. On any other
+//   The four below are served only on a host whose door runs at operator standing. On any other
 //   host a request to one is not the door's, and gets the answer any unknown path on the loopback
 //   listener gets.
 //
 //   GET /door/pending?lineage=<l>
-//     -> 200 {"lineage": "...", "live": true, "questions": [...], "permissions": [...]}
-//        What the lineage's live session waits on, as the talk page's view carries it. `live` is
-//        whether a session not yet ended carries the lineage, and both lists are empty where none
-//        does. A question is {"entryId", "answerable", "alerted", "questions": [{"header",
-//        "question", "multiSelect", "options": [{"index", "label", "description", "chosen"}]}]}. A
+//     -> 200 {"lineage": "...", "live": true, "questions": [...], "permissions": [...],
+//        "asks": [...]}
+//        What the lineage's live session waits on, as the talk page's view carries it, and the open
+//        asks of the persona the lineage names. `live` is whether a session not yet ended carries
+//        the lineage, and `questions` and `permissions` are empty where none does. A question is
+//        {"entryId", "answerable", "alerted", "questions": [{"header", "question", "multiSelect",
+//        "options": [{"index", "label", "description", "chosen"}]}]}. A
 //        typed answer is taken only once `alerted` is true. `answerable` is the rule for the
 //        thread's picker and does not bound a typed answer. A permission is {"requestId",
 //        "toolName", "description", "inputPreview", "nonce", "at"}, a tool call waiting on a
-//        verdict, and its nonce is the one a verdict must carry.
+//        verdict, and its nonce is the one a verdict must carry. `asks` is the open asks of the
+//        roster persona whose name is exactly the lineage, less each one a handled mark hides
+//        until its persona raises it again. It is listed with or without a live session, since an
+//        ask outlives the session that filed it, and is empty on a host with no roster. An ask is
+//        {"id", "title", "question", "recommend", "blocking", "openedAt", "reraisedAt", "brief"}:
+//        `question` is the text the operator's page draws for the ask, each time is an ISO 8601
+//        string or null, and `title`, `recommend` and `brief` are null where the ask has none.
 //     -> 400 on a missing or empty lineage
 //     -> 404 on a lineage no registry record carries
 //
@@ -81,7 +90,42 @@
 //        not 1 to 64 lowercase hex digits. The nonce is never optional.
 //     -> 413 and 415 as POST /door/line answers them
 //
-//   On each of the six
+//   POST /door/ask
+//     Content-Type: application/json
+//     body: {"lineage": "...", "name": "...", "askId": "...", "action": "agree" | "answer",
+//     "question": "...", "openedAt": "..." | null, "reraisedAt": "..." | null,
+//     "recommend": "..." | null, "words": "..."}, at most 64 KiB
+//     One answer to one open ask of the persona the lineage names: agreement with the ask's
+//     recommendation, or an answer in words. `question`, `openedAt`, `reraisedAt` and `recommend`
+//     are the ask's fields as GET /door/pending listed them, sent back so the answer is held to
+//     the ask its sender read. `words` is read on an `answer` alone.
+//     -> 200 {"status": "..."}, the first of these that holds:
+//        empty: an answer whose words, trimmed, are empty.
+//        too-long: an answer whose words pass 3,500 code points. A longer line would be cut, and
+//        a cut one would put unfinished words into a session.
+//        closed: no registry record carries the lineage, or a reading of the ask ledgers taken
+//        for this request, never a reused one, holds no open ask of that id for the roster
+//        persona the lineage names. Where a persona's ledger file cannot be read then, the last
+//        good reading of it is the one judged.
+//        already-acted: a line for this version of the ask was delivered, through the door or on
+//        the operator's page, or is being delivered now. A delivered line whose handled mark could
+//        not be written leaves the ask open to a repeat, as on the page.
+//        no-recommendation: an agree to an ask that recommends nothing.
+//        changed: the four fields are not the ask's, byte for byte. A missing or mistyped one
+//        reads so too, and is no malformed body.
+//        delivered | no-session | ended | no-thread | no-channel | rate: what the inbound router
+//        answered for the line, as POST /door/line answers it, and any other status of the
+//        router's as it is.
+//        Only delivered hands the session a line, and only it records the ask as handled, so GET
+//        /door/pending and the operator's page stop listing the ask until its persona raises it
+//        again. An agreement reads `Agree: proceed on your recommendation on ask "<id>",
+//        "<recommendation>". Decided <YYYY-MM-DD HH:mm> from the portal.` and an answer in words
+//        `Answer on ask "<id>", "<question>": <words>`.
+//     -> 400 on a body that is not a JSON object of that shape: an askId that is not 1 to 1,000
+//        code points, an action outside agree and answer, and an answer whose words is no string
+//     -> 413 and 415 as POST /door/line answers them
+//
+//   On each of the seven
 //     -> 403 {"error": "loopback only"} where the peer or the Host header is not loopback
 //     -> 401 {"error": "door key required"} where the header is missing or is not the key
 //     -> 405 with an `allow` header on any other method, OPTIONS included
@@ -95,33 +139,43 @@
 // `duplicate` true and nothing delivered. An outcome other than `delivered` is forgotten as it
 // settles, so the line can be sent again, and a delivered id is forgotten after
 // DOOR_LINE_MEMORY_MS. The memory is this process's alone and is never written to disk. An answer
-// and a verdict carry no id: the desk that takes one holds nothing for a second.
+// and a verdict carry no id: the desk that takes one holds nothing for a second. An answer to an
+// ask carries none either: the ask version is its key, and a repeat reads already-acted.
 //
 // The key is the door's whole defense, and it is a file any session under the broker's account can
 // read. What a holder of the key can do is the standing the host gives the door, its
 // CHANNEL_DOOR_STANDING setting, and nothing a request carries can change that. With the setting
 // unset or `participant`, every line handed in here is a participant's and the door settles
-// nothing. At `operator`, every line is the operator's, and the door answers a held question and
-// allows or denies a waiting tool call in whatever name the caller sends, so a session on that host
-// can do each of those, its own tool calls included, and the control is the boundary around the
-// host. The inbound router decides the class, in one function, and refuses an answer and a verdict
-// at any other standing. At either standing the door takes no other act: no workers-board act, no
-// broker restart, no voice command, no pick or submit of a question's options, no release of a
-// question to the console and none of the page's item acts. A line, an answer and a verdict each
-// leave a copy in the session's thread and a line in the talk ring under `<name> (portal)`, which
-// shows that the act came through the door and never who took it.
+// nothing. At `operator`, every line is the operator's, and the door answers a held question,
+// allows or denies a waiting tool call and answers an open ask in whatever name the caller sends,
+// so a session on that host can do each of those, its own tool calls and its own asks included,
+// and the control is the boundary around the host. The inbound router decides the class, in one
+// function, and refuses an answer and a verdict at any other standing. At either standing the door
+// takes no other act: no workers-board act, no broker restart, no voice command, no pick or submit
+// of a question's options and no release of a question to the console. Of the page's item acts it
+// takes one, at operator standing: an answer to an open ask, which is the page's Agree or its
+// Answer. It takes no Dismiss, no Agree to several asks at once, no Steer, no Rollout and no
+// Publish. A line, an answer, a verdict and an answer to an ask each leave a copy in the session's
+// thread and a line in the talk ring under `<name> (portal)`, which shows that the act came through
+// the door and never who took it.
 //
 // No answer carries a CORS header, and no door log line carries the key, the header's value or any
-// part of a body but one: the line for a verdict names `allow` or `deny`. The permission desk's
-// own line for a settled verdict names the request id, as it does for a verdict from the page. An
-// answer or a verdict that names a live session is logged as one line naming the path, the session,
-// the act and the status.
+// part of a body but these: the line for a verdict names `allow` or `deny`, and the line for an
+// answer to an ask names `agree` or `answer`. That line also names the ask's id and the persona's
+// name, each as the broker's own reading holds it and written as JSON, never a string of the body
+// that matched nothing: `door agree: ask <id> for <persona>: <status>`, or `door answer: ...`. It
+// is written through the ask checks for a request that found an open ask, and one that found none
+// writes no line. The permission desk's own line for a settled verdict names the request id, as it
+// does for a verdict from the page. An answer or a verdict that names a live session is logged as
+// one line naming the path, the session, the act and the status.
 //
 // Both guards the hook intake applies are applied here too, ahead of the key: the socket peer must
 // be loopback and the Host header must name a loopback name, which closes DNS rebinding. They are
 // re-checked because these routes are composed in front of the intake's own checks.
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { AskEntry } from "./decisions/ledger.ts";
+import type { DoorAsk } from "./door-asks.ts";
 import { isAllowedHost, isLoopback, readCappedBody } from "./intake.ts";
 import type { QuestionEntryView } from "./question-desk.ts";
 import { liveByLineage } from "./registry.ts";
@@ -130,6 +184,15 @@ import { createRepeatLog } from "./repeat-log.ts";
 import type { RepeatLogSurface } from "./repeat-log.ts";
 import type { DoorAnswerStatus, DoorDeliveryStatus, DoorVerdictStatus } from "./routing/inbound.ts";
 import type { PendingPermission, Verdict } from "./security/permission.ts";
+import {
+  MAX_ASK_ID_LENGTH,
+  MAX_DOOR_ANSWER_WORDS_LENGTH,
+  doorAgreeLine,
+  doorAnswerLine,
+  drawnOf,
+  drawnRecommendOf,
+} from "./web/ask-act.ts";
+import type { AskActs } from "./web/ask-act.ts";
 import { RING_CAPACITY, viewPermission, viewQuestion } from "./web/talk.ts";
 import type { HeldLine, TalkRing } from "./web/talk.ts";
 
@@ -194,6 +257,12 @@ export type DoorRoutesOptions = {
     permissions: readonly PendingPermission[];
   };
   /**
+   * The open asks of the roster persona a lineage names, as the door's own reading lists them.
+   * Present only on a host whose door runs at operator standing. `/door/pending` answers them
+   * under `asks`, and an empty list where this is absent.
+   */
+  asks?: (lineage: string) => readonly DoorAsk[];
+  /**
    * The inbound router's door answer, or a stand-in answering `no-session` where no router exists.
    * Present only on a host whose door runs at operator standing, and `/door/answer` is served only
    * where it is.
@@ -205,6 +274,18 @@ export type DoorRoutesOptions = {
    * only where it is.
    */
   settleDoor?: (lineage: string, name: string, verdict: Verdict, nonce: string) => Promise<DoorVerdictStatus>;
+  /**
+   * What an answer to an open ask is judged by and handed in through. `openAsk` is the door's own
+   * reading: the open ask of that id of the roster persona a lineage names, from a reading taken
+   * for the call and never a reused one, or null; where a ledger file cannot be read, its last
+   * good reading is the one searched. `askAct` is the one copy of the ask checks, over the acted
+   * set and the handled marks the operator's page shares. Present only on a host whose door runs
+   * at operator standing, and `/door/ask` is served only where it is.
+   */
+  askDoor?: {
+    openAsk: (lineage: string, askId: string) => Readonly<AskEntry> | null;
+    askAct: AskActs["askAct"];
+  };
   log?: (message: string) => void;
   /** The clock the line id memory and the refusal log read, in milliseconds. */
   now?: () => number;
@@ -216,7 +297,8 @@ type DoorRoute =
   | "/door/line"
   | "/door/pending"
   | "/door/answer"
-  | "/door/permission";
+  | "/door/permission"
+  | "/door/ask";
 
 /** The one method each route takes. */
 const ROUTE_METHOD: Readonly<Record<DoorRoute, "GET" | "POST">> = {
@@ -226,6 +308,7 @@ const ROUTE_METHOD: Readonly<Record<DoorRoute, "GET" | "POST">> = {
   "/door/pending": "GET",
   "/door/answer": "POST",
   "/door/permission": "POST",
+  "/door/ask": "POST",
 };
 
 function send(response: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -262,8 +345,8 @@ function shown(line: HeldLine): Record<string, unknown> {
  * Returns a handler that reports whether it took the request, so the caller can fall through to the
  * hook intake for everything else. It takes a request whose path before any `?` is exactly one of
  * the door paths it serves, compared as the raw string with no decoding, and no other: the three
- * every door serves, and each of `/door/pending`, `/door/answer` and `/door/permission` whose
- * callback the options hold.
+ * every door serves, and each of `/door/pending`, `/door/answer`, `/door/permission` and
+ * `/door/ask` whose callback the options hold.
  */
 export function createDoorRoutes(
   options: DoorRoutesOptions,
@@ -372,6 +455,8 @@ export function createDoorRoutes(
       live: live !== null,
       questions: held.questions.map(viewQuestion),
       permissions: held.permissions.map(viewPermission),
+      // Listed with or without a live session, since an ask outlives the session that filed it.
+      asks: options.asks === undefined ? [] : options.asks(lineage),
     });
   }
 
@@ -543,10 +628,87 @@ export function createDoorRoutes(
     send(response, 200, { status });
   }
 
-  // The three every door serves, and each of the other three whose callback this door holds. A
+  /**
+   * One answer to one open ask. The body's own checks run first, then `empty` and `too-long` on an
+   * answer in words, before any file is read. The rest is one call of the ask checks, handed the
+   * open ask a new reading holds or none, so `closed`, `already-acted`, `no-recommendation` and
+   * `changed` are answered there, in the order the operator's page answers them. A lineage no
+   * registry record carries is handed none without a reading, since the pending read lists
+   * nothing for it. The checks deliver the line through `deliverDoor`, write the handled mark of
+   * a delivered one and log the request by the ask's id and the persona's name as the reading
+   * holds them. A delivery that throws rejects here, and is answered as any failed route is.
+   */
+  async function ask(
+    request: IncomingMessage,
+    response: ServerResponse,
+    askDoor: NonNullable<DoorRoutesOptions["askDoor"]>,
+  ): Promise<void> {
+    const body = await posted(request, response, "/door/ask");
+    if (body === null) return;
+    const { lineage, name, fields } = body;
+    const { askId, action, words } = fields;
+    if (!bounded(askId, MAX_ASK_ID_LENGTH)) {
+      refuse(response, "/door/ask", 400, `askId is not 1 to ${String(MAX_ASK_ID_LENGTH)} code points`);
+      return;
+    }
+    if (action !== "agree" && action !== "answer") {
+      refuse(response, "/door/ask", 400, "action is not agree or answer");
+      return;
+    }
+    // The words of an answer, and null on an agree, whose `words` is never read.
+    let said: string | null = null;
+    if (action === "answer") {
+      if (typeof words !== "string") {
+        refuse(response, "/door/ask", 400, "words is not a string");
+        return;
+      }
+      if (words.trim() === "") {
+        send(response, 200, { status: "empty" });
+        return;
+      }
+      if (!bounded(words, MAX_DOOR_ANSWER_WORDS_LENGTH)) {
+        send(response, 200, { status: "too-long" });
+        return;
+      }
+      said = words;
+    }
+    const known = options.records().some((record) => record.lineage === lineage);
+    const shared = {
+      // The lineage that matched is the persona's roster name, which the marks are held under.
+      repo: lineage,
+      entry: known ? askDoor.openAsk(lineage, askId) : null,
+      drawn: drawnOf(fields),
+      // The cut the router reports is dropped: neither line is long enough to be cut.
+      deliver: async (text: string): Promise<DoorDeliveryStatus> => (await options.deliverDoor(lineage, name, text)).status,
+      label: (found: AskEntry): string => `door ${action}: ask ${JSON.stringify(found.id)} for ${JSON.stringify(lineage)}`,
+    };
+    // Held as a constant, so the answer line's composer reads a string and never the null.
+    const answered = said;
+    const status =
+      answered === null
+        ? await askDoor.askAct({
+            ...shared,
+            act: "agree",
+            // As the page's Agree reads it: no string is no recommendation drawn, and is `changed`.
+            recommend: typeof fields.recommend === "string" ? fields.recommend : null,
+            inBatch: false,
+            line: (found, recommended, at) => doorAgreeLine(found.id, recommended, at),
+            how: "agreed",
+          })
+        : await askDoor.askAct({
+            ...shared,
+            act: "answer",
+            recommend: drawnRecommendOf(fields),
+            line: (found) => doorAnswerLine(found.id, found.question, answered),
+            how: "corrected",
+          });
+    send(response, 200, { status });
+  }
+
+  // The three every door serves, and each of the other four whose callback this door holds. A
   // path with no handler here is not the door's, and its request is left for the hook intake to
   // answer as it answers any path it does not know.
-  const { pending: waitingOn, answerDoor, settleDoor } = options;
+  const { pending: waitingOn, answerDoor, settleDoor, askDoor } = options;
   const handlers: Partial<
     Record<DoorRoute, (request: IncomingMessage, response: ServerResponse, query: URLSearchParams) => void | Promise<void>>
   > = {
@@ -562,6 +724,7 @@ export function createDoorRoutes(
     ...(settleDoor === undefined
       ? {}
       : { "/door/permission": (request, response) => permission(request, response, settleDoor) }),
+    ...(askDoor === undefined ? {} : { "/door/ask": (request, response) => ask(request, response, askDoor) }),
   };
 
   return (request, response) => {

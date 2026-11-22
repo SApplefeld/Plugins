@@ -1,7 +1,12 @@
-// The web surface's three marks: two the operator sets, a per-repo "caught up" time and a per-plan
-// "seen" snapshot of the plan's status and chapter count, and a per-item "handled" mark the act
-// routes write when an Agree, Correct or Dismiss line from the pages was delivered to the item's
-// session, or when a review was dismissed from the page, which delivers nothing. A handled mark
+// The operator's three marks: two the operator sets on the web surface, a per-repo "caught up" time
+// and a per-plan "seen" snapshot of the plan's status and chapter count, and a per-item "handled"
+// mark. The acts in `./ask-act.ts` write a handled mark when an Agree, Correct or Dismiss line from
+// the pages, or an agreement or answer through the local door's `POST /door/ask`, was delivered to
+// the item's session, and the page's review Dismiss writes one with no line sent. The broker opens
+// one store, wherever the web surface is on or the local door runs at operator standing, and both
+// read it: the pages' views, and the door's list of open asks in `../door-asks.ts`. One reading
+// prunes it: the web pass's, through `withMarks`, which judges every kind of mark, where the web
+// surface is on, and the door's, which judges an ask's mark alone, where it is off. A handled mark
 // hides an open ask until the persona closes it or raises it again, a blocked queue entry while
 // it still reads blocked for the same reason, a review while a queue entry under the repo
 // carries its pull request number, and an entry's review ready no later than the line the mark was
@@ -206,10 +211,25 @@ export type WatermarkStore = {
    * each entry review mark whose entry id no queue entry under its persona has in `entries`. A
    * persona the reading does not cover, one off the roster among them, or whose ledger reading cannot
    * answer, keeps its marks: one with no ledger, no good file read, or an open list at the reader's
-   * cap, since an ask missing there may still be open. Never throws: a write that fails is logged
-   * once, is not retried on the same readings, and the marks stand.
+   * cap, since an ask missing there may still be open. A kind of mark whose reading is null stands
+   * whole, so a caller that holds ledger readings alone, as the local door's reading of asks does,
+   * passes null for `blocked` and drops only the marks of closed asks. `ledgerAt` is the start of
+   * the pass that took the ledger reading, on the clock a mark's `markedAt` is read from. Less a
+   * persona's `fileAge`, it gives the file's modification time, a little early, and so the age of
+   * the content the reading holds, whether read this pass or left held by a failed read. An ask's
+   * mark written after that time stands, since content older than the mark cannot show the ask
+   * closed since, and so does a mark of an ask the content already shows closed, until the
+   * persona next writes its file. Where `ledgerAt` is null or not given, as from the door's
+   * reading, no ask mark stands by its time. Never throws: a write that fails is logged once, is
+   * not retried on the same readings, and the marks stand.
    */
-  pruneHandled: (ledger: readonly LedgerReading[] | null, blocked: BlockedReasons, reviews?: ReviewNumbers, entries?: ReviewEntries) => void;
+  pruneHandled: (
+    ledger: readonly LedgerReading[] | null,
+    blocked: BlockedReasons,
+    reviews?: ReviewNumbers,
+    entries?: ReviewEntries,
+    ledgerAt?: number | null,
+  ) => void;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -350,21 +370,26 @@ function answers(reading: LedgerReading): boolean {
  * persona carries, and of entry review marks whose id no entry under the persona has, then carries
  * the marks as they stand. `blocked` is `blockedReasons` from `./views.ts`, handed in so this module
  * needs no import of the views; the review numbers and entry ids are read here from the queues reading. The one merge the broker and the tests share.
+ * The ledger reading's `at` goes with it, so an ask's mark written after the persona's file content
+ * the reading holds stands.
  */
-export function withMarks<T extends { ledger: { value: readonly LedgerReading[] | null }; queues: QueuesWithNumbers }>(
+export function withMarks<T extends { ledger: { value: readonly LedgerReading[] | null; at: number | null }; queues: QueuesWithNumbers }>(
   base: T,
   store: WatermarkStore,
   blocked: (base: T) => BlockedReasons,
 ): T & { marks: Marks } {
-  store.pruneHandled(base.ledger.value, blocked(base), reviewNumbersOf(base.queues), reviewEntriesOf(base.queues));
+  const { ledger, queues } = base;
+  store.pruneHandled(ledger.value, blocked(base), reviewNumbersOf(queues), reviewEntriesOf(queues), ledger.at);
   return { ...base, marks: store.marks() };
 }
 
 /**
- * Whether a handled mark still stands against the readings: an ask's while the ledger cannot say the
- * ask closed, a blocked entry's while the queues reading cannot say the block ended or changed, and a
- * review's while the queues reading cannot say no entry under the persona carries the number, and an
- * entry review mark while it cannot say no entry under the persona has the id.
+ * Whether a handled mark still stands against the readings. An ask's stands while the ledger cannot
+ * say the ask closed, or while the mark is later than the file content the persona's reading holds,
+ * `ledgerAt` less the reading's `fileAge`. A blocked entry's stands while the queues reading cannot
+ * say the block ended or changed. A review's stands while the queues reading cannot say no entry
+ * under the persona carries the number. An entry review mark stands while it cannot say no entry
+ * under the persona has the id.
  */
 function stands(
   mark: HandledMark,
@@ -372,6 +397,7 @@ function stands(
   blocked: BlockedReasons,
   reviews: ReviewNumbers,
   entries: ReviewEntries,
+  ledgerAt: number | null,
 ): boolean {
   if (mark.kind === "blocked") {
     const reasons = blocked?.get(mark.repo);
@@ -386,7 +412,10 @@ function stands(
     return ids === undefined || ids.has(mark.entryId);
   }
   const reading = covered?.get(mark.repo);
-  return reading === undefined || !answers(reading) || reading.open.some((ask) => ask.id === mark.askId);
+  if (reading === undefined || !answers(reading)) return true;
+  // A file stamped later than the reader's clock reads as content of the reading's own time.
+  if (ledgerAt !== null && reading.fileAge !== null && mark.markedAt > ledgerAt - Math.max(0, reading.fileAge)) return true;
+  return reading.open.some((ask) => ask.id === mark.askId);
 }
 
 /** The file for a broker whose state file is `stateFile`. */
@@ -431,14 +460,14 @@ export function openWatermarks(file: string, log: (message: string) => void = ()
     markHandled(mark) {
       commit({ ...current, handled: new Map(current.handled).set(keyOf(mark), mark) });
     },
-    pruneHandled(ledger, blocked, reviews = null, entries = null) {
+    pruneHandled(ledger, blocked, reviews = null, entries = null, ledgerAt = null) {
       if (current.handled.size === 0) return;
       // Readings that failed to write are not retried until the next pass brings new ones.
       if (failedOn !== null && failedOn.ledger === ledger && failedOn.blocked === blocked && failedOn.reviews === reviews && failedOn.entries === entries) return;
       const covered = ledger === null ? null : new Map(ledger.map((reading) => [reading.name, reading]));
       const kept = new Map<string, HandledMark>();
       for (const [key, mark] of current.handled) {
-        if (stands(mark, covered, blocked, reviews, entries)) kept.set(key, mark);
+        if (stands(mark, covered, blocked, reviews, entries, ledgerAt)) kept.set(key, mark);
       }
       if (kept.size === current.handled.size) return;
       try {

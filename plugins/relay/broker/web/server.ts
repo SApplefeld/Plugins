@@ -44,10 +44,10 @@ import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { MAX_ASKS_PER_LIST, MAX_ASK_FIELD_LENGTH, questionOf } from "../decisions/ledger.ts";
+import { MAX_ASKS_PER_LIST, questionOf } from "../decisions/ledger.ts";
 import type { AskEntry } from "../decisions/ledger.ts";
 import type { Logger } from "../log.ts";
-import { fit, oneLine } from "../sanitize.ts";
+import { oneLine } from "../sanitize.ts";
 import { READER_KEY_HEADER, foldRootName } from "./config.ts";
 import type { WebConfig } from "./config.ts";
 import type { TailnetPeer, WebIdentity } from "./identity.ts";
@@ -68,9 +68,11 @@ import type { QuestionDesk, QuestionEntryView } from "../question-desk.ts";
 import { jumpLink } from "../discord/links.ts";
 import { answerableFromThread } from "../discord/question-message.ts";
 import type { Verdict } from "../security/permission.ts";
-import { askView, blockKey, blockedReasons, branchPlanView, changelogView, checkoutRepoOf, drawnAsk, healthView, listedReview, needsMeView, planView, repoView, rootName, standupView, todayView, workersView } from "./views.ts";
+import { askView, blockKey, blockedReasons, branchPlanView, changelogView, checkoutRepoOf, healthView, listedReview, needsMeView, planView, repoView, rootName, standupView, todayView, workersView } from "./views.ts";
 import type { Readings } from "./views.ts";
-import type { HandledHow, HandledMark, WatermarkStore } from "./watermarks.ts";
+import type { WatermarkStore } from "./watermarks.ts";
+import { MAX_ASK_ID_LENGTH, decidedAt, drawnOf, drawnRecommendOf, quoted } from "./ask-act.ts";
+import type { AskActs, DrawnAsk, DrawnRecommend } from "./ask-act.ts";
 
 /**
  * A `/web/<name>` handler, run after the gate; it owns its own body read and its own response. `peer`
@@ -1293,9 +1295,6 @@ export function registerPermissionHandler(register: WebHandler["register"], opti
 /** The most items one batch Agree may carry: the ledger reader's own cap on a persona's open asks. */
 export const MAX_AGREE_BATCH = MAX_ASKS_PER_LIST;
 
-/** An ask id is the ledger's own string, cut there to this many code points; a longer one names no ask. */
-const MAX_ASK_ID_LENGTH = MAX_ASK_FIELD_LENGTH;
-
 /**
  * A single Agree or an ask's Dismiss names an id, a lineage and the text the page drew: the question,
  * the two times and the recommendation. The id, the question and the recommendation are each at most
@@ -1318,17 +1317,14 @@ const MAX_AGREE_BATCH_BODY_BYTES = MAX_AGREE_BATCH * MAX_AGREE_BODY_BYTES;
  */
 const MAX_CORRECT_WORDS_LENGTH = 4000;
 
-/** A question or a block's reason quoted in a line is cut to this many code points, so the line stays short. */
-const MAX_QUOTED_LENGTH = 200;
-
 /**
  * What an act became: the router's word for a line it was handed, or why none was handed. `closed` is
  * an ask the ledger does not hold open for the lineage, or a queue entry the status reading does not
- * read as blocked; `already-acted` an item this broker already delivered a line for; `no-recommendation`
- * an ask with no recommendation to agree to; `changed` an ask whose question, version or
- * recommendation, or a block whose reason, is no longer the text the page drew; `refused: blocking`
- * a blocking ask in a batch; `handled` a review whose mark was written, since a review's Dismiss sends
- * no line.
+ * read as blocked; `already-acted` an item this broker already delivered a line for, or an ask
+ * whose version a handled mark hides; `no-recommendation` an ask with no recommendation to agree
+ * to; `changed` an ask whose question, version or recommendation, or a block whose reason, is no
+ * longer the text the page drew; `refused: blocking` a blocking ask in a batch; `handled` a review
+ * whose mark was written, since a review's Dismiss sends no line.
  */
 export type ActStatus =
   | WebDeliveryStatus
@@ -1338,23 +1334,6 @@ export type ActStatus =
   | "changed"
   | "refused: blocking"
   | "handled";
-
-const pad2 = (n: number): string => String(n).padStart(2, "0");
-
-/**
- * A question, a reason or an item's id as a line quotes it: one line, cut with `fit` to
- * `MAX_QUOTED_LENGTH`, so a cut ends in its ellipsis. Every text a worker wrote rides quoted this way,
- * the ids included, so none can read as the operator's own words around it.
- */
-function quoted(text: string): string {
-  return fit(oneLine(text), MAX_QUOTED_LENGTH);
-}
-
-/** The decision time in the broker host's local time, `YYYY-MM-DD HH:mm`, zero padded. */
-function decidedAt(at: number): string {
-  const when = new Date(at);
-  return `${String(when.getFullYear())}-${pad2(when.getMonth() + 1)}-${pad2(when.getDate())} ${pad2(when.getHours())}:${pad2(when.getMinutes())}`;
-}
 
 /**
  * The line an Agree sends: the ask's id as the session's open-asks block lists it, quoted and cut, so
@@ -1389,15 +1368,6 @@ export function dismissBlockedLine(entryId: string, reason: string, at: number):
 }
 
 /**
- * An ask's key in the acted set: its lineage and id with the times it was opened and last raised
- * again, so an ask its session raises again is a new version the operator can act on. The handled
- * mark's own key, `handledKey`, stays the id alone.
- */
-function askActedKey(repo: string, entry: AskEntry): string {
-  return JSON.stringify([repo, entry.id, entry.openedAt, entry.reraisedAt]);
-}
-
-/**
  * A blocked queue entry's key in the acted set: its lineage and id with the reason its item draws and
  * the time the pass first saw this block, null where the pass has not, so a block whose reason changes,
  * or one that clears and recurs, is a new version the operator can dismiss.
@@ -1411,15 +1381,17 @@ export type AgreeHandlerOptions = {
   source: () => Readings;
   /** The inbound router's web seam, the one the say route calls. */
   deliverWeb: SayHandlerOptions["deliverWeb"];
-  /** The store a delivered act's handled mark is written to: the one whose marks the views read. */
+  /**
+   * The broker process's one copy of the ask checks and the acted set, from `createAskActs` over the
+   * same store as `marks`. Every act that sends a line runs through it.
+   */
+  acts: AskActs;
+  /** The store a review's Dismiss writes its handled mark to: the one whose marks the views read. */
   marks: Pick<WatermarkStore, "markHandled">;
-  /** The decision time's clock. Injected so a test fixes it. */
+  /** The clock a review's mark is stamped with. Injected so a test fixes it. */
   now?: () => number;
   log?: Logger;
 };
-
-/** The three fields of an ask as the page drew them, as `drawnAsk` draws them from the entry. */
-type DrawnAsk = ReturnType<typeof drawnAsk>;
 
 type AgreeItem = { askId: string; repo: string; recommend: string | null; drawn: DrawnAsk | null };
 
@@ -1429,54 +1401,6 @@ function askOf(value: Record<string, unknown>): { askId: string; repo: string } 
   if (typeof askId !== "string" || askId === "" || [...askId].length > MAX_ASK_ID_LENGTH) return null;
   if (typeof repo !== "string" || repo === "") return null;
   return { askId, repo };
-}
-
-/** A time as the page sends one: the ISO string the view gave it, or null where the view gave none. */
-const isDrawnTime = (value: unknown): value is string | null => value === null || typeof value === "string";
-
-/**
- * The question and the two times a body says the page drew, or null where the body carries no
- * `question` string, or an `openedAt` or `reraisedAt` that is neither a string nor null. A missing or
- * mistyped field is not a malformed body: it is an act on text the broker cannot match, which every
- * ask act answers as `changed`, as an Agree with no recommendation is.
- */
-function drawnOf(value: Record<string, unknown>): DrawnAsk | null {
-  const { question, openedAt, reraisedAt } = value;
-  if (typeof question !== "string" || !isDrawnTime(openedAt) || !isDrawnTime(reraisedAt)) return null;
-  return { question, openedAt, reraisedAt };
-}
-
-/**
- * Whether the body's three fields are the entry's as the views draw them, byte for byte, a null time
- * equal only to a null; false where the body carries none. The operator's tap is an act on the ask
- * they read, so a question rewritten or an ask raised again since the page drew it is not that ask.
- */
-function drawnMatches(drawn: DrawnAsk | null, entry: AskEntry): boolean {
-  if (drawn === null) return false;
-  const held = drawnAsk(entry);
-  return drawn.question === held.question && drawn.openedAt === held.openedAt && drawn.reraisedAt === held.reraisedAt;
-}
-
-/** The recommendation an Answer or an ask's Dismiss says the page drew, null kept as null. */
-type DrawnRecommend = { recommend: string | null };
-
-/**
- * The recommendation a body says the page drew, or null where the body carries no `recommend` that is
- * a string or null. A missing or mistyped one is not a malformed body: it is an act on text the broker
- * cannot match, which Answer and an ask's Dismiss answer as `changed`.
- */
-function drawnRecommendOf(value: Record<string, unknown>): DrawnRecommend | null {
-  const { recommend } = value;
-  return recommend === null || typeof recommend === "string" ? { recommend } : null;
-}
-
-/**
- * Whether the body's recommendation is the entry's, byte for byte, a null equal only to a null; false
- * where the body carries none. The question the page sends is cut before the recommendation, so this
- * is what holds an Answer or a Dismiss to the recommendation the operator read.
- */
-function recommendMatches(drawn: DrawnRecommend | null, entry: AskEntry): boolean {
-  return drawn !== null && drawn.recommend === entry.recommend;
 }
 
 /**
@@ -1566,9 +1490,12 @@ function dismissItem(body: Record<string, unknown>): DismissItem | null {
  *
  * The answer to each single act is `{status}`: the router's word for the line, or `closed` where the
  * ledger holds no such open ask or the status reading does not read the entry as blocked,
- * `already-acted` where this broker already delivered a line of any act for the item at its current
- * version since it started, `no-recommendation` where an Agree's ask has nothing to agree to, or
- * `changed`; those send nothing. The acted key is one per item version, `askActedKey` or
+ * `already-acted` where this broker process already delivered a line of any act for the item at its
+ * current version or has one out now, and where a handled mark hides an ask's current version by
+ * `handledHides`, which holds across a restart, `no-recommendation` where an Agree's ask has nothing
+ * to agree to, or `changed`; those send nothing. The checks on an ask, the acted set and the delivery
+ * under an acted key are the `acts` option's, from `./ask-act.ts`, which states their order; this
+ * handler finds the item and words the line. The acted key is one per item version, `askActedKey` or
  * `blockedActedKey`, so an ask raised again or a block that clears and recurs is acted on afresh. It is
  * held while a delivery is out and kept only where the delivery answered `delivered` and the handled
  * mark was written. A delivered line writes the item's handled mark with its act, after the delivery
@@ -1589,8 +1516,7 @@ function dismissItem(body: Record<string, unknown>): DismissItem | null {
  */
 export function registerAgreeHandlers(register: WebHandler["register"], options: AgreeHandlerOptions): void {
   const now = options.now ?? Date.now;
-  /** The item versions this broker delivered a line for since it started, by `askActedKey` or `blockedActedKey`. */
-  const acted = new Set<string>();
+  const { acts } = options;
 
   const openAsk = (repo: string, askId: string) =>
     options.source().ledger.value?.find((reading) => reading.name === repo)?.open.find((open) => open.id === askId);
@@ -1601,70 +1527,28 @@ export function registerAgreeHandlers(register: WebHandler["register"], options:
     return status;
   };
 
-  /**
-   * Hands an item's line to its session under the item's acted key. The key is held before the
-   * delivery is awaited, so a second act on the item that arrives while the first is out answers
-   * `already-acted`; any answer but `delivered` gives the key back. A delivered line writes the item's
-   * handled mark, stamped with the line's own decision time, and a mark that cannot be written gives the
-   * key back too, since the page still draws the item.
-   */
-  async function act(
-    login: string,
-    repo: string,
-    key: string,
-    label: string,
-    line: (at: number) => string,
-    mark: (at: number) => HandledMark,
-  ): Promise<ActStatus> {
-    acted.add(key);
-    const at = now();
-    let status: ActStatus = "no-session";
-    try {
-      status = await options.deliverWeb(repo, login, line(at), []);
-    } finally {
-      if (status !== "delivered") acted.delete(key);
-    }
-    if (status === "delivered") {
-      try {
-        options.marks.markHandled(mark(at));
-      } catch {
-        acted.delete(key);
-        options.log?.warn(`${label}: the handled mark was not written`);
-      }
-    }
-    return status;
+  /** The seam a line takes to the lineage's session as the login's word, naming no file. */
+  const deliverTo = (repo: string, login: string) => (line: string) => options.deliverWeb(repo, login, line, []);
+
+  /** What an ask act's log lines open with: the route's act, then the reading's own id and the lineage, each as JSON. */
+  const askLabel = (act: string, repo: string) => (entry: AskEntry) => `web ${act}: ask ${JSON.stringify(entry.id)} for ${JSON.stringify(repo)}`;
+
+  function agree(login: string, { askId, repo, recommend, drawn }: AgreeItem, inBatch: boolean): Promise<ActStatus> {
+    return acts.askAct({
+      act: "agree",
+      repo,
+      entry: openAsk(repo, askId),
+      drawn,
+      recommend,
+      inBatch,
+      deliver: deliverTo(repo, login),
+      line: (entry, recommended, at) => agreeLine(entry.id, recommended, at),
+      how: "agreed",
+      label: askLabel("agree", repo),
+    });
   }
 
-  /** An ask's handled mark from the entry its line was composed from. */
-  const askMark = (repo: string, entry: AskEntry, how: HandledHow) => (at: number): HandledMark => ({
-    kind: "ask",
-    repo,
-    askId: entry.id,
-    openedAt: entry.openedAt,
-    seenRaise: entry.reraisedAt,
-    markedAt: at,
-    how,
-  });
-
-  async function agree(login: string, { askId, repo, recommend, drawn }: AgreeItem, inBatch: boolean): Promise<ActStatus> {
-    const entry = openAsk(repo, askId);
-    if (entry === undefined) return "closed";
-    const label = `web agree: ask ${JSON.stringify(entry.id)} for ${JSON.stringify(repo)}`;
-    const settle = settler(label);
-    if (inBatch && entry.blocking === true) return settle("refused: blocking");
-    const key = askActedKey(repo, entry);
-    if (acted.has(key)) return settle("already-acted");
-    const recommended = entry.recommend;
-    if (recommended === null || recommended.trim() === "") return settle("no-recommendation");
-    // Byte for byte: a recommendation rewritten since the page's last poll is not what the operator
-    // agreed to, and the line it would compose was never on their screen. The question and the
-    // version the page drew are held to the same rule, since a question can change under a
-    // recommendation that does not.
-    if (recommend !== recommended || !drawnMatches(drawn, entry)) return settle("changed");
-    return settle(await act(login, repo, key, label, (at) => agreeLine(entry.id, recommended, at), askMark(repo, entry, "agreed")));
-  }
-
-  async function correct(
+  function correct(
     login: string,
     repo: string,
     askId: string,
@@ -1672,30 +1556,32 @@ export function registerAgreeHandlers(register: WebHandler["register"], options:
     drawn: DrawnAsk | null,
     recommend: DrawnRecommend | null,
   ): Promise<ActStatus> {
-    const entry = openAsk(repo, askId);
-    if (entry === undefined) return "closed";
-    const label = `web correct: ask ${JSON.stringify(entry.id)} for ${JSON.stringify(repo)}`;
-    const settle = settler(label);
-    const key = askActedKey(repo, entry);
-    if (acted.has(key)) return settle("already-acted");
-    // The operator's words answer the ask they read: any other question, version or recommendation delivers nothing.
-    if (!drawnMatches(drawn, entry) || !recommendMatches(recommend, entry)) return settle("changed");
-    return settle(await act(login, repo, key, label, () => correctLine(entry.id, entry.question, words), askMark(repo, entry, "corrected")));
+    return acts.askAct({
+      act: "answer",
+      repo,
+      entry: openAsk(repo, askId),
+      drawn,
+      recommend,
+      deliver: deliverTo(repo, login),
+      line: (entry) => correctLine(entry.id, entry.question, words),
+      how: "corrected",
+      label: askLabel("correct", repo),
+    });
   }
 
   async function dismiss(login: string, item: DismissItem): Promise<ActStatus> {
     if (item.kind === "ask") {
-      const entry = openAsk(item.repo, item.askId);
-      if (entry === undefined) return "closed";
-      const label = `web dismiss: ask ${JSON.stringify(entry.id)} for ${JSON.stringify(item.repo)}`;
-      const settle = settler(label);
-      const key = askActedKey(item.repo, entry);
-      if (acted.has(key)) return settle("already-acted");
-      // The operator dismisses the ask they read: any other question, version or recommendation delivers nothing.
-      if (!drawnMatches(item.drawn, entry) || !recommendMatches(item.recommend, entry)) return settle("changed");
-      return settle(
-        await act(login, item.repo, key, label, (at) => dismissAskLine(entry.id, entry.question, at), askMark(item.repo, entry, "dismissed")),
-      );
+      return acts.askAct({
+        act: "dismiss",
+        repo: item.repo,
+        entry: openAsk(item.repo, item.askId),
+        drawn: item.drawn,
+        recommend: item.recommend,
+        deliver: deliverTo(item.repo, login),
+        line: (entry, at) => dismissAskLine(entry.id, entry.question, at),
+        how: "dismissed",
+        label: askLabel("dismiss", item.repo),
+      });
     }
     if (item.kind === "review") {
       const { repo, pullRequest } = item;
@@ -1728,18 +1614,17 @@ export function registerAgreeHandlers(register: WebHandler["register"], options:
     const label = `web dismiss: queue entry ${JSON.stringify(entryId)} for ${JSON.stringify(repo)}`;
     const settle = settler(label);
     const key = blockedActedKey(repo, entryId, reason, readings.blockedSince.get(blockKey(repo, entryId)) ?? null);
-    if (acted.has(key)) return settle("already-acted");
+    if (acts.holds(key)) return settle("already-acted");
     // Byte for byte, as an Agree's recommendation: the operator dismisses the block they read.
     if (item.reason !== reason) return settle("changed");
     return settle(
-      await act(login, repo, key, label, (at) => dismissBlockedLine(entryId, reason, at), (at) => ({
-        kind: "blocked",
-        repo,
-        entryId,
-        reason,
-        markedAt: at,
-        how: "dismissed",
-      })),
+      await acts.act({
+        key,
+        label,
+        deliver: deliverTo(repo, login),
+        line: (at) => dismissBlockedLine(entryId, reason, at),
+        mark: (at) => ({ kind: "blocked", repo, entryId, reason, markedAt: at, how: "dismissed" }),
+      }),
     );
   }
 

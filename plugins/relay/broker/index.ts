@@ -19,6 +19,7 @@ import {
 import type { BrokerConfig } from "./config.ts";
 import { createAnnounceSpool } from "./announce-spool.ts";
 import { createDoorRoutes } from "./door.ts";
+import { createDoorAsks } from "./door-asks.ts";
 import { announceSession, createHandler, createRefusalLog } from "./intake.ts";
 import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
@@ -110,6 +111,7 @@ import { createTalkRing } from "./web/talk.ts";
 import type { TalkTap } from "./web/talk.ts";
 import { DEFAULT_THRESHOLDS, blockedReasons } from "./web/views.ts";
 import { openWatermarks, watermarksFileFor, withMarks } from "./web/watermarks.ts";
+import { createAskActs } from "./web/ask-act.ts";
 import type {
   QuestionAlert,
   QuestionEntryView,
@@ -1144,8 +1146,9 @@ export async function startBroker(
     /** Ends the process once a restart has stopped the broker. A test passes a recorder. */
     exit?: (code: number) => void;
     /**
-     * The clock the restart cooldown reads, in milliseconds. Monotonic by default, so a wall clock
-     * set back does not lengthen the cooldown.
+     * The clock the restart cooldown reads, in milliseconds, and the one the local door's reading
+     * of asks ages by. Monotonic by default, so a wall clock set back neither lengthens the
+     * cooldown nor keeps the door listing from a reading it should have replaced.
      */
     now?: () => number;
     /**
@@ -1761,6 +1764,34 @@ export async function startBroker(
     replyHeartbeatMs: REPLY_HEARTBEAT_MS,
     log: note,
   });
+  // The store of handled marks, beside the registry snapshot, and over it the one copy of the ask
+  // checks and the one acted set of this process, so a version a handled mark hides takes no
+  // second line. The store reads its file once and holds the marks in memory, so it is opened
+  // once, here, ahead of both surfaces that use it: the web block below, and the local door at
+  // operator standing, whose reading of asks hides by the marks. That reading prunes the marks only
+  // where the web surface is off, since the web pass prunes from the reading the page draws. A
+  // broker with neither opens no store and writes no file.
+  const operatorDoor = doorKey !== null && config.doorStanding === "operator";
+  const marks = web === null && !operatorDoor ? null : openWatermarks(watermarksFileFor(config.stateFile), note);
+  const askActs = marks === null ? null : createAskActs({ marks, log: logger });
+  // The door's own reading of the roster and the ask ledgers, since the door may run on a host with
+  // no web surface and so cannot borrow the web pass's. An unset roster path reads nothing, as the
+  // web pass's does, and the ledger reader's log lines open with the door's name. The store is open
+  // wherever the door runs at operator standing, so the store test only narrows its type.
+  const doorRoster =
+    !operatorDoor || config.boardRosterPath === "" ? null : createRosterReader(config.boardRosterPath, { log: note });
+  const doorLedgers = operatorDoor ? createLedgerReader({ log: note, label: "local door: ask ledger" }) : null;
+  const doorAsks =
+    doorLedgers === null || marks === null
+      ? null
+      : createDoorAsks({
+          roster: () => (doorRoster === null ? [] : doorRoster.read()),
+          ledger: (personas) => doorLedgers.read(personas),
+          marks,
+          prunes: web === null,
+          log: note,
+          now,
+        });
   // The local door's routes, which exist only where the door key was read. Whether these routes
   // exist is the door's one switch: the inbound router below is told the door is on by the same
   // test, so a door line is delivered and a held one restored on exactly the brokers that serve
@@ -1779,12 +1810,16 @@ export async function startBroker(
             inbound === null
               ? Promise.resolve({ status: "no-session", truncated: false })
               : inbound.deliverDoor(lineage, name, text),
-          // The door's three other paths, which read what a session waits on and settle it, are
-          // served only where the host gives the door operator standing: the door serves a path
-          // only where it holds that path's callback, so on any other host a request to one is the
-          // hook intake's to answer. The desks are read through their bindings, since the Discord
-          // block replaces the stand-in permission desk, and with no router there is no session an
-          // answer or a verdict could reach, which `no-session` says.
+          // The door's four other paths, which read what a session waits on and settle it, and
+          // answer a persona's open ask, are served only where the host gives the door operator
+          // standing: the door serves a path only where it holds that path's callback, so on any
+          // other host a request to one is the hook intake's to answer. The desks are read through
+          // their bindings, since the Discord block replaces the stand-in permission desk, and
+          // with no router there is no session an answer or a verdict could reach, which
+          // `no-session` says. The pending read lists the open asks of the lineage's persona from
+          // the door's own reading, and `/door/ask` judges an answer against a new reading of it
+          // and hands it to the one copy of the ask checks. Both are built above at the same
+          // standing, so their tests here only narrow their types.
           ...(config.doorStanding !== "operator"
             ? {}
             : {
@@ -1792,6 +1827,15 @@ export async function startBroker(
                   questions: questionDesk.heldFor(sessionId),
                   permissions: permissions.pendingFor(sessionId),
                 }),
+                ...(doorAsks === null ? {} : { asks: (lineage: string) => doorAsks.list(lineage) }),
+                ...(doorAsks === null || askActs === null
+                  ? {}
+                  : {
+                      askDoor: {
+                        openAsk: (lineage: string, askId: string) => doorAsks.openAsk(lineage, askId),
+                        askAct: askActs.askAct,
+                      },
+                    }),
                 answerDoor: (lineage: string, name: string, text: string, entryId?: string) =>
                   inbound === null
                     ? Promise.resolve("no-session" as const)
@@ -2781,15 +2825,24 @@ export async function startBroker(
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : config.port;
   // Said once, where the listener that serves it is bound. The line names the paths the door
-  // serves, three at participant standing and all six at operator standing, and the standing the
+  // serves, three at participant standing and all seven at operator standing, and the standing the
   // host gives the door, as the token `participant` or `operator`, and neither the key nor the file
   // it was read from. It is where a host's operator reads the standing the door is running at.
   if (doorRoutes !== null) {
     const doorPaths =
       config.doorStanding === "operator"
-        ? "/door/lineages, /door/lines, /door/line, /door/pending, /door/answer and /door/permission"
+        ? "/door/lineages, /door/lines, /door/line, /door/pending, /door/answer, /door/permission and /door/ask"
         : "/door/lineages, /door/lines and /door/line";
     note(`broker: the local door is on, serving ${doorPaths} on the loopback listener, at ${config.doorStanding} standing`);
+    // On an operator host alone, where the pending read lists asks: whether it has a roster to
+    // list them from, and the setting to write where it has none.
+    if (config.doorStanding === "operator") {
+      note(
+        config.boardRosterPath === ""
+          ? "broker: the local door lists no asks: CHANNEL_BOARD_ROSTER is unset"
+          : "broker: the local door lists open asks from the roster",
+      );
+    }
   }
 
   // The web surface is a sibling of the Discord surfaces: with `CHANNEL_WEB_BIND` unset there is
@@ -2800,7 +2853,9 @@ export async function startBroker(
   // at boot before Tailscale is up: the surface retries its bind while the rest of the broker runs.
   // Sections 2, 4 and 5 register their `/web/<name>` handlers on it inside this block.
   let webPort: number | null = null;
-  if (web !== null) {
+  // The store of handled marks is open and the ask acts are built wherever the web surface is on,
+  // so the tests of those two only narrow their types.
+  if (web !== null && marks !== null && askActs !== null) {
     webServer = createWebServer({
       config: web,
       identity: createTailscaleIdentity({ cli: web.tailscale }),
@@ -2825,10 +2880,11 @@ export async function startBroker(
       log: note,
     });
     webPass = pass;
-    // The operator's marks sit beside the registry snapshot, and the views take them with each reading.
-    const marks = openWatermarks(watermarksFileFor(config.stateFile), note);
-    // The merge drops a handled mark whose ask the ledger reading shows closed, or whose blocked entry
-    // the queues reading no longer shows blocked for the same reason, before it hands the marks on.
+    // The views take the operator's marks with each reading, from the store opened ahead of the
+    // door's routes, and the act routes below write through the ask acts built over it there.
+    // The merge drops a handled mark whose ask the ledger reading shows closed, from file content
+    // written after the mark, or whose blocked entry the queues reading no longer shows blocked for
+    // the same reason, before it hands the marks on.
     const readings = () => withMarks(pass.readings(), marks, blockedReasons);
     // The ask page's thread link takes the two lookups the talk view takes, through the same closures.
     // The plan route reads a queued plan from its branch through the pass's own rollout reader, so
@@ -2884,11 +2940,12 @@ export async function startBroker(
       });
       // The pages' Agree, batch Agree, Correct and Dismiss. Each is a line to the item's session through
       // the same seam the composer's line takes, so it reaches a session as the operator's word, and a
-      // delivered one writes its handled mark to the store the views read.
+      // delivered one writes its handled mark to the store the views read, through `askActs`.
       registerAgreeHandlers(webServer.register, {
         source: readings,
         deliverWeb: (lineage, login, text, files) =>
           inbound === null ? Promise.resolve("no-session") : inbound.deliverWeb(lineage, login, text, files),
+        acts: askActs,
         marks,
         log: logger,
       });
