@@ -54,7 +54,7 @@ import { asciiLower, rosterNameTaken, rosterPathWithin, rosterRepoTaken, validat
 import type { addGoalEntry as addGoalEntryFromModule, clearChildBlockedAncestors as clearChildBlockedAncestorsFromModule, promoteOpenRecord as promoteOpenRecordFromModule } from "./records";
 import { skillPickTool } from "./skill-pick";
 import { GOAL_HISTORY_FILENAME, readPersonaStore, stateNotLoadedText } from "./store-files";
-import { TURN_BUDGET_PAUSED_REASON, TURN_BUDGET_REASON, turnBudgetResumeRefusedText } from "./goal-persona";
+import { ROSTER_SOURCE, TURN_BUDGET_PAUSED_REASON, TURN_BUDGET_REASON, turnBudgetResumeRefusedText } from "./goal-persona";
 import { markStretchApplied, noteStretchShown, stretchShownOfGet } from "./stretch-distillation";
 import { FREE_TEXT_MAX, boundedText, safeErrorText, stripBom } from "./text";
 import { isNudgeCountWork, isWorkTool } from "./turn-state-text";
@@ -2421,6 +2421,14 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return `[${n.status}] ${n.id} (${n.kind}) "${n.title}"${foldedText}${stallText}`;
     };
     lines.push(statusOf(root.id));
+    // A root the roster seeded prints its stored objective whole on the next
+    // line, at the entries' indent, since the title is only the objective's
+    // first 80 code points and this is the one print that shows a persona
+    // holding entries what it works toward. The text is read through String
+    // as the long-term lines read theirs, folded to one line and made
+    // bracket-safe here, so a root stored raw prints as a seeded one does. A
+    // root of any other source prints no such line.
+    if (root.source === ROSTER_SOURCE) lines.push(`  Objective: ${bracketSafeText(oneLine(String(root.objective ?? "")))}`);
     const children = (pid: string) =>
       sess.state.goals.filter((g) => g.parentId === pid)
         .sort((a, b) => (a.sortKey ?? a.createdAt) - (b.sortKey ?? b.createdAt));

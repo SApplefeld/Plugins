@@ -100,7 +100,7 @@ import {
 } from "./commons";
 import type { CommonsStore } from "./commons";
 import type { InboxRecord } from "./operator";
-import { DONE_HOLD_REASON, holdsForGoalDone, readGoalFile, retireRecordText, rosterDifference, seedDecision, seedRootFrom } from "./goal-persona";
+import { DONE_HOLD_REASON, holdsForGoalDone, readGoalFile, retireRecordText, rosterDifference, seedDecision, seedRootFrom, storedObjectiveOf } from "./goal-persona";
 import {
   claimReaderRole,
   mayReachPersona,
@@ -3633,19 +3633,27 @@ const noteCompletionShape = (site: string, value: unknown): void => {
 
 // Reads goalFile, the goal.json path the goalFile option names, and seeds
 // the root where seedDecision says so, logging
-// goal_seeded or goal_seed_skipped with the decision's reason. A reseed on
-// a finished tree copies the tree to the history file first, as
+// goal_seeded or goal_seed_skipped with the decision's reason. goalLifetime
+// is whether the persona's lifetime option reads goal, and seedDecision
+// takes it from here. A reseed on a finished tree copies the tree to the
+// history file first, as
 // goal_create does, and a copy that cannot be written refuses the seed
 // and leaves the tree standing; its open asks close as superseded, the
 // way goal_create closes them. An adoption writes the file's done
 // statements and turn budget onto the open root and logs goal_adopted. It
 // keeps the count of a root that already carried a budget, starts the count
 // at zero where the file gives the root its first one, and removes both
-// fields where the file carries none, and stamps the root's updatedAt. It
-// changes nothing else: the root's status and blocked reason, the tree and
-// the asks stand, and no history line is written. Its decision carries
-// counts and budgets alone, so no roster text reaches the log.
-const seedGoalFromFile = async (dp: any, goalFile: string, firstLaunch: boolean): Promise<void> => {
+// fields where the file carries none, and stamps the root's updatedAt.
+// Where the file's objective differs from the root's under the stored
+// fold, which seedDecision admits on a goal-lifetime persona alone, the
+// adoption also writes the objective and the title cut from it, and where
+// it does not differ the root keeps both as stored. It changes nothing
+// else: the root's id, source, status and blocked reason,
+// the tree, the active entry and the asks stand, an ask already open keeps
+// the words it was opened with, and no history line is written. Its
+// decision carries three changed-or-unchanged flags, counts and budgets
+// alone, so no roster text reaches the log.
+const seedGoalFromFile = async (dp: any, goalFile: string, firstLaunch: boolean, goalLifetime: boolean): Promise<void> => {
   const read = await readGoalFile(hostOf(dp), goalFile);
   const now = Date.now();
   if (read.block === null) {
@@ -3657,12 +3665,17 @@ const seedGoalFromFile = async (dp: any, goalFile: string, firstLaunch: boolean)
     });
     return;
   }
-  const decision = seedDecision(sess.state, read.block, firstLaunch);
+  const decision = seedDecision(sess.state, read.block, firstLaunch, goalLifetime);
   const held = sess.state.goals.find((g) => g.parentId === null);
   if (decision === "adopt" && held) {
     const differs = rosterDifference(held, read.block);
     const countBefore = Array.isArray(held.doneWhen) ? held.doneWhen.length : 0;
     const budgetBefore = held.turnBudget;
+    if (differs.objective) {
+      const stored = storedObjectiveOf(read.block);
+      held.objective = stored.objective;
+      held.title = stored.title;
+    }
     held.doneWhen = [...read.block.done];
     if (read.block.turns !== undefined) {
       if (budgetBefore === undefined) held.turnsSpent = 0;
@@ -3681,7 +3694,7 @@ const seedGoalFromFile = async (dp: any, goalFile: string, firstLaunch: boolean)
       timestamp: now,
       loop: "goal",
       action: "goal_adopted",
-      detail: `adopt: root ${held.id} adopted from ${goalFile}: statements ${differs.statements ? "changed" : "unchanged"}, ${countBefore} before and ${held.doneWhen.length} after; budget ${differs.budget ? "changed" : "unchanged"}, ${budgetBefore ?? "none"} before and ${held.turnBudget ?? "none"} after`,
+      detail: `adopt: root ${held.id} adopted from ${goalFile}: objective ${differs.objective ? "changed" : "unchanged"}; statements ${differs.statements ? "changed" : "unchanged"}, ${countBefore} before and ${held.doneWhen.length} after; budget ${differs.budget ? "changed" : "unchanged"}, ${budgetBefore ?? "none"} before and ${held.turnBudget ?? "none"} after`,
     });
     return;
   }
@@ -6518,8 +6531,14 @@ export const register: Register = async (on, options) => {
     // and turn budget where its objective is the file's and either differs,
     // logged as goal_adopted, or nothing, with the reason logged: skip-same,
     // skip-live, or skip-no-root for a later start whose stored state holds
-    // no root. An adoption that gives the root its first budget starts its
-    // turn count at zero, and any other adoption keeps the count.
+    // no root. On a persona whose lifetime option reads goal, an open
+    // roster root whose objective differs from the file's takes the file's
+    // objective too, with the statements and the budget, under the same
+    // goal_adopted line; a standing persona's start reads skip-live there.
+    // The start reads the lifetime as the option stands, and a value that
+    // is neither word reads as standing. An adoption that gives the root
+    // its first budget starts its turn count at zero, and any other
+    // adoption keeps the count.
     // A reader never seeds, a file that cannot be read or that goalProblem
     // refuses seeds nothing, and no throw here reaches the start. The seed
     // opens no turn: a seeded root with no entries is a planner's root,
@@ -6538,7 +6557,7 @@ export const register: Register = async (on, options) => {
       });
     } else if (sess.isOwner && goalFile !== "") {
       try {
-        await seedGoalFromFile($, goalFile, firstLaunch);
+        await seedGoalFromFile($, goalFile, firstLaunch, lifetimeOption === "goal");
       } catch (err) {
         sess.state.decisions.push({
           timestamp: Date.now(),

@@ -97,44 +97,65 @@ function safeText(text: string): string {
 // must not run the same goal twice. The two objectives are compared under
 // the fold seedRootFrom stores, so a root seeded from the file matches the
 // file's raw text, and so does a root stored raw.
-// `adopt`: the root's objective is the file's, the root is open and of
-// source roster, and the file's done statements or turn budget differ from
-// the root's, so the root takes both from the file and keeps its tree, its
-// status and any block it is under. This is how an edit of the roster
-// entry reaches a goal the persona already holds. A complete or abandoned
-// root and a root goal_create made take nothing and read skip-same. An
-// adoption that gives a root its first budget starts turnsSpent at zero,
-// the third start of that count beside the seed and goal_resume.
+// `adopt`: the root is open and of source roster, and the file differs from
+// it in something an adoption writes, so the root takes that from the file
+// and keeps its tree, its status and any block it is under. This is how an
+// edit of the roster entry reaches a goal the persona already holds. On any
+// persona the root takes the file's done statements and turn budget where
+// its objective is the file's and either differs. On a persona whose
+// lifetime is goal the root also takes a changed objective, with the
+// statements and the budget, whether or not those two differ: such a
+// persona holds one goal for its life, so a changed objective in its roster
+// entry is an edit of that goal and never a second goal. A complete or
+// abandoned root and a root goal_create made adopt nothing. An adoption
+// that gives a root its first budget starts turnsSpent at zero, the third
+// start of that count beside the seed and goal_resume.
 // `reseed-complete`: the root is complete or abandoned and the file names
-// another goal, which replaces the finished tree as goal_create does.
-// `skip-live`: the root is open and the objective differs, which the
-// operator replaces with goal_create.
+// another goal, which replaces the finished tree as goal_create does, on
+// every lifetime, since an edit never reopens finished work.
+// `skip-live`: the root is open and the objective differs, on a standing
+// persona or on a root goal_create made. A standing persona takes goals one
+// after another, so a changed objective there can be a new goal, which the
+// operator starts with goal_create.
 export type SeedDecision = "seed" | "reseed-complete" | "skip-live" | "skip-same" | "skip-no-root" | "adopt";
 
-// Which of the two things an adoption writes differ between the root and the
-// file. The statements are compared as stored, element by element and in
-// order, and a root with no doneWhen reads as an empty list. The budget
-// differs where the file's turns is not the root's turnBudget, a value
-// missing on either side included.
-export function rosterDifference(root: GoalNode, block: GoalBlock): { statements: boolean; budget: boolean } {
+// Which of the three things an adoption writes differ between the root and
+// the file. The objectives are compared under the fold a root stores, so a
+// root seeded from the file matches the file's raw text. The statements are
+// compared as stored, element by element and in order, and a root with no
+// doneWhen reads as an empty list. The budget differs where the file's
+// turns is not the root's turnBudget, a value missing on either side
+// included.
+export function rosterDifference(root: GoalNode, block: GoalBlock): { objective: boolean; statements: boolean; budget: boolean } {
   const stored = Array.isArray(root.doneWhen) ? root.doneWhen : [];
   return {
+    objective: safeText(root.objective) !== safeText(block.objective),
     statements: stored.length !== block.done.length || stored.some((statement, i) => statement !== block.done[i]),
     budget: root.turnBudget !== block.turns,
   };
 }
 
-export function seedDecision(state: AgentState, block: GoalBlock, firstLaunch: boolean): SeedDecision {
+// `goalLifetime` is whether the persona's lifetime option reads goal, and
+// false where the caller passes none, so a caller that does not know the
+// lifetime gets a standing persona's reading.
+export function seedDecision(state: AgentState, block: GoalBlock, firstLaunch: boolean, goalLifetime: boolean = false): SeedDecision {
   if (firstLaunch) return "seed";
   const root = state.goals.find((g) => g.parentId === null);
   if (!root) return "skip-no-root";
-  const finished = root.status === "complete" || root.status === "abandoned";
-  if (safeText(root.objective) === safeText(block.objective)) {
-    if (finished || root.source !== ROSTER_SOURCE) return "skip-same";
-    const differs = rosterDifference(root, block);
-    return differs.statements || differs.budget ? "adopt" : "skip-same";
-  }
-  return finished ? "reseed-complete" : "skip-live";
+  const differs = rosterDifference(root, block);
+  if (root.status === "complete" || root.status === "abandoned") return differs.objective ? "reseed-complete" : "skip-same";
+  if (root.source !== ROSTER_SOURCE) return differs.objective ? "skip-live" : "skip-same";
+  if (differs.objective) return goalLifetime === true ? "adopt" : "skip-live";
+  return differs.statements || differs.budget ? "adopt" : "skip-same";
+}
+
+// The objective and the title a block stores on a root: the objective
+// folded to one line and bracket-safe, and the title as that objective's
+// first 80 code points. The seed and the adoption both take the two from
+// here, so a root reads the same whichever wrote it.
+export function storedObjectiveOf(block: GoalBlock): { objective: string; title: string } {
+  const objective = safeText(block.objective);
+  return { objective, title: headPoints(objective, 80) };
 }
 
 // The root a block seeds: the shape goal_create builds, with the statements
@@ -145,12 +166,12 @@ export function seedDecision(state: AgentState, block: GoalBlock, firstLaunch: b
 // folded to one line and bracket-safe, since every goal print, the planner
 // prompt and the tool results splice them as stored.
 export function seedRootFrom(block: GoalBlock, now: number): GoalNode {
-  const objective = safeText(block.objective);
+  const { objective, title } = storedObjectiveOf(block);
   const root: GoalNode = {
     id: `root-${now.toString(36)}`,
     parentId: null,
     kind: "root",
-    title: headPoints(objective, 80),
+    title,
     objective,
     status: "pending",
     source: ROSTER_SOURCE,
