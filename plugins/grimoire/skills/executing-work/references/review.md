@@ -22,7 +22,7 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
 
    **No run of this session's overlaps the round, so any contention is somebody else's.** Where exactly one shared resource in this repo would block a reviewer's build or run, and anything holds it, a sibling session's suite or build included, carry the Dispatch Brief's workspace-constraint line into every reviewer brief.
 
-   **A section's first review round runs every reviewer at opus over an opus writer, one tier up over a lower writer, and at each lens's ceiling over a fable writer.** The ceiling is Opus for the blind, security and performance reviewers, the scope adjudicator and the finding verifier, and Fable for every other lens. Round 1 is the full roster: the code pair, the document pair, or both where the Audience rule above summons both, plus each advisory lens whose trigger holds. Every later round is one dispatch at the writer tier: the prose-reviewer, carrying its round 1 brief, where the fix delta touched only deliverable documents, else the adversarial-reviewer. A later round whose fix delta meets the security lens's trigger above summons that lens at its ceiling beside the one dispatch. The finishing pass is no stand-in, since its all-prose waiver does not share the trigger. The adversarial dispatch's round 1 brief gains `Fix delta:`, the files the fix round changed, from the fix writer's report or the orchestrator's edits. `Adjudicated findings:` lists each Critical and Major this section's earlier rounds returned, as the lens printed it, with its disposition from a closed set: fixed, justified-not-fixed, refused, refuted, declared, Minor-listed, held, deferred, routed-out. `refuted` entries carry the verifier's ground. From the fourth round a `Step back:` line names the rounds run and asks first whether the remaining findings share a cause in the approach, and that round reads the whole changeset.
+   **A section's first review round runs every reviewer at opus over an opus or fable writer, and one tier up over a lower writer.** Every per-section lens's ceiling is Opus, the scope adjudicator's and the finding verifier's included. Round 1 is the full roster: the code pair, the document pair, or both where the Audience rule above summons both, plus each advisory lens whose trigger holds. Every later round is one dispatch at the writer tier, opus the ceiling and sonnet the floor: the prose-reviewer, carrying its round 1 brief, where the fix delta touched only deliverable documents, else the adversarial-reviewer. A later round whose fix delta meets the security lens's trigger above summons that lens at its ceiling beside the one dispatch. The finishing pass is no stand-in, since its all-prose waiver does not share the trigger. The adversarial dispatch's round 1 brief gains `Fix delta:`, the files the fix round changed, from the fix writer's report or the orchestrator's edits. `Adjudicated findings:` lists each Critical and Major this section's earlier rounds returned, as the lens printed it, with its disposition from a closed set: fixed, justified-not-fixed, refused, refuted, declared, Minor-listed, held, deferred, routed-out. `refuted` entries carry the verifier's ground. From the fourth round a `Step back:` line names the rounds run and asks first whether the remaining findings share a cause in the approach, and that round reads the whole changeset.
 
    A correctness lens's Critical that survives adjudication unrefuted, in any round, re-raises the next round to round 1's roster, rows and tier, read against the writer tier in force when it dispatches. A re-raised round returning no such Critical hands the next round back to one lens.
 
@@ -65,9 +65,8 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
 
    | The dispatch | Model | Effort | Route |
    |---|---|---|---|
-   | **Adversarial lens**: round 1 over an opus or fable writer, or a later round over a fable writer, `adversarial-reviewer` | the writer's tier | `medium` (frontmatter default) | Agent tool |
-   | **Round 1 pair** over an opus writer: `blind-reader`, `prose-reviewer` | opus | `low` (frontmatter default) | Agent tool |
-   | **Fable round 1 pair** over a fable writer: `blind-reader`, `prose-reviewer` | fable | `low` (frontmatter default) | Agent tool |
+   | **Adversarial lens**: round 1 over an opus or fable writer, `adversarial-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
+   | **Round 1 pair** over an opus or fable writer: `blind-reader`, `prose-reviewer` | opus | `low` (frontmatter default) | Agent tool |
    | **Round 1 blind** over an opus or fable writer, `blind-reviewer` | opus | `low` (frontmatter default) | Agent tool |
    | **Round 1 security** over an opus or fable writer, `security-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
    | **Later-round security summons** over any writer, `security-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
@@ -75,12 +74,9 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
    | **Scope adjudicator**, in every shape step 4 and finishing-work dispatch it, `scope-adjudicator` | opus | `high` (frontmatter default) | Agent tool |
    | **Finding verifier**, in every shape step 4 and finishing-work dispatch it, `finding-verifier` | opus | `high` (frontmatter default) | Agent tool |
    | **Below-fable round 1**: reviewers one tier above a haiku- or sonnet-tier writer, whichever lens | sonnet or opus | `medium` | Agent tool |
-   | **Fable later round**: the prose lens over a fable writer, `prose-reviewer` | fable | `low` (frontmatter default) | Agent tool |
-   | **Below-fable later round**: one lens over a haiku, sonnet or opus writer | the writer's tier, sonnet the floor | `medium` | Agent tool |
+   | **Below-fable later round**: one lens over any writer | the writer's tier, opus the ceiling and sonnet the floor | `medium` | Agent tool |
    | **Below-fable re-aim**: a per-section reviewer re-aimed after its tier was ruled out, landing below fable | one tier up | `medium` | Agent tool |
-   | **Fable re-aim**: the same, landing on fable | fable | `medium` | Agent tool |
-   | **Finishing reviews**: the document lenses, and the final adversarial review where any section is uncleared | fable | `medium` | Agent tool, per finishing-work |
-   | **Finishing adversarial, cleared**: the final adversarial review where every section is cleared, per finishing-work | opus | `medium` | Agent tool, per finishing-work |
+   | **Finishing reviews**: the document lenses and the final adversarial review, in the finishing pass's first round and in a round a surviving Critical re-raised | fable | `medium` | Agent tool, per finishing-work |
    | **Finishing advisory**: the security and performance lenses over the whole changeset | opus | `medium` | Agent tool, per finishing-work |
    | **Gate compensation** for a Fable gate ruled out | opus | `high` | Agent tool, per finishing-work |
    | **Haiku implementer**, `implementer-haiku` | haiku | `medium` (frontmatter default) | Agent tool |
