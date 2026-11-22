@@ -101,7 +101,7 @@ A coordinator record opening `[FINDING]` or `[PROPOSAL]` is a finding or a propo
 
 ## Waiting and Blocked
 
-A wait longer than an hour is a paused entry, never a `WAITING:` line. The controller's hold on a waiting lead lapses, and the turns it then starts on the entry are spent waiting. The paragraph opening "The two leads" under "Plan entries: judged from the record" in `plugins/personas/README.md` owns what each lead does and how long the hold lasts.
+A wait longer than 50 minutes is a paused entry, never a `WAITING:` line. The controller's hold on a waiting lead lapses, and the turns it then starts on the entry are spent waiting. The paragraph opening "The two leads" under "Plan entries: judged from the record" in `plugins/personas/README.md` owns what each lead does and how long the hold lasts.
 
 ## Kit Memory
 

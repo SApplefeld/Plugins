@@ -5828,16 +5828,17 @@ Extracted at `6bc07fb`: lines 1-96 (`skills.executing-work.c1.md`); lines 97-358
 - passage: 8. Declare the compaction boundary: read [references/closing.md](references/closing.md) before acting.
 
 ### J001
-- key: Know the persona controller as the personas plugin's supervisor, which drives a persona session from its goal tree and stops prompting it while its last turn opens with `BLOCKED:`, or for an hour after one that opens with `WAITING:`.
+- key: Know the persona controller as the personas plugin's supervisor, which drives a persona session from its goal tree and stops prompting it while its last turn opens with `BLOCKED:`, or for 50 minutes after one that opens with `WAITING:`.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/SKILL.md:66
-- provenance: `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4, 2026-10-06, which made the persona controller one of the two holders of a run to completion and the reader of the `BLOCKED:` and `WAITING:` leads. Amended in place by `docs/archive/claude-kit_untrue-passages-corrected_spec_v1.md` section 10, 2026-11-13, which narrowed the hold on a `WAITING:` lead to the hour the plugin keeps it.
+- provenance: `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4, 2026-10-06, which made the persona controller one of the two holders of a run to completion and the reader of the `BLOCKED:` and `WAITING:` leads. Amended in place by `docs/archive/claude-kit_untrue-passages-corrected_spec_v1.md` section 10, 2026-11-13, which narrowed the hold on a `WAITING:` lead to the hour the plugin keeps it. Amended in place by `docs/archive/claude-kit_waiting-wake-reads-cache_spec_v1.md` section 2, 2026-11-22, which set the figure to the 50 minutes the plugin's hold now keeps, so a waiting persona's wake reads the prompt cache.
 - verdict: rewrite
 - landed: 4ae66c4a section 4
 - landed: dd8cf5bb finishing
 - landed: cb3f248c section 10
+- landed: 5a611e73 section 2
 - reason: The completion contract's leads are written for this reader (c1.C129 for `BLOCKED:`, V002 for a park's `WAITING:`), so the skill names what the reader is and what it does with a lead. Without the definition a session cannot tell which holder it runs under or why the lead must open the message.
-- passage: The persona controller is the personas plugin's supervisor, which drives a persona session from its goal tree and stops prompting it while its last turn opens with `BLOCKED:`, or for an hour after one that opens with `WAITING:`.
+- passage: The persona controller is the personas plugin's supervisor, which drives a persona session from its goal tree and stops prompting it while its last turn opens with `BLOCKED:`, or for 50 minutes after one that opens with `WAITING:`.
 
 ### J002
 - key: Hold yourself to the completion contract whether the persona controller, the operator's `/goal` or neither holds the run.

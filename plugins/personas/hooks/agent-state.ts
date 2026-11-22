@@ -1530,8 +1530,11 @@ export function stallPartsText(node: GoalNode, now: number): string {
 
 // How long a waiting lead holds the controller's idle branch, measured from
 // the clock the lead was read at. Past it the branch runs as usual with the
-// lead left on the entry.
-export const LEAD_WAITING_HOLD_MS = 60 * 60_000;
+// lead left on the entry. The hold is shorter than the prompt cache's
+// one-hour life, so that the request the next nudge starts reads the
+// conversation from the cache. The ten minutes between them cover the turn's
+// last request and the time from the hold's end to that request.
+export const LEAD_WAITING_HOLD_MS = 50 * 60_000;
 
 // The one reason the controller's idle branch must not nudge, or null. The
 // set is closed at three, read in this order with the first that holds
