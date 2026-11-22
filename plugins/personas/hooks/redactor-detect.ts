@@ -85,7 +85,10 @@ const TAG_BODY = /(REDACTED-(?:SECRET|EMAIL|LITERAL)-)[0-9a-f]{8}/g
 // undefined until index.ts hands it in at the session-start seed, and where
 // the session has none. The first value refused for being the id leaves one
 // note; this module has no log handle, so index.ts drains the note after a
-// scrub and logs it, and the line appears once per seeded id.
+// scrub and logs it, and the line appears once per seeded id. Where the id is
+// a UUID the vault keeps no part of it of PREFIX characters or more either,
+// as refuseOwnId reads a part, since a kept part is hidden again inside the
+// id. A refused part leaves no note.
 let ownSessionId: string | undefined
 let ownIdNoted = false
 let ownIdNote: string | null = null
@@ -103,8 +106,23 @@ export function setOwnSessionId(id: string | undefined): void {
 // True where `value` is the session's own id, compared trimmed and in any
 // case, as seedVault in redactor.ts compares a seed against the same id, and
 // the caller then refuses it. The first refusal records the note.
+// True also where `value`, trimmed and lowercased the same way, is a part of
+// that id: a run of consecutive characters of it, PREFIX characters or more,
+// that is not the whole id. The id with characters left out, such as its
+// dashes, is not a part, and neither is a value that runs past the id. The
+// floor is PREFIX because no detector finds a value under PREFIX characters
+// again, so a shorter part is kept as any short secret is: only a tool call
+// that was handed it hides it again, in that call's own result, as
+// rehideHanded in redactor.ts does. The part rule holds only where the id is
+// a UUID from its first character to its last, as SESSION_UUID reads one.
+// The harness draws its session id as a random version 4 UUID, so a real
+// secret equals one of its parts only by chance, while an id that is a word
+// has parts that are words, and there only equality refuses. SESSION_UUID
+// reads the shape alone and not the version. A part records no note.
 function refuseOwnId(value: string): boolean {
-  if (ownSessionId === undefined || value.trim().toLowerCase() !== ownSessionId) return false
+  if (ownSessionId === undefined) return false
+  const read = value.trim().toLowerCase()
+  if (read !== ownSessionId) return read.length >= PREFIX && ownSessionId.includes(read) && SESSION_UUID.test(ownSessionId)
   if (!ownIdNoted) {
     ownIdNoted = true
     ownIdNote = OWN_ID_NOTE
@@ -172,7 +190,8 @@ function keyedHash(text: string): string {
 // stored with that placeholder put back, so one restore gives the real text.
 // Two different values never share a placeholder: on a clash the hash is
 // taken again with a counter until the tag is free. A secret equal to the
-// session's own id comes back as it is: no placeholder, no echo, not counted.
+// session's own id, or a part of it as refuseOwnId reads one, comes back as
+// it is: no placeholder, no echo, not counted.
 // `evidence` says what a SECRET hide rests on, and the value is marked with
 // it at a first sight and at every later one. The default is `named`, so a
 // caller that says nothing marks its value as one never spared. The mark
@@ -263,7 +282,8 @@ export function restore(text: string): string {
 // of the session, even one too short or too plain for the echo rule (a word
 // password from .env). Values under PREFIX characters can't be indexed. The
 // value is recorded as seeded, so it stays hidden where it opens a token that
-// is a record id. The session's own id comes back as it is and joins nothing.
+// is a record id. The session's own id, or a part of it as refuseOwnId reads
+// one, comes back as it is and joins nothing.
 export function keepSecret(value: string): string {
   if (refuseOwnId(value)) return value
   seeded.add(value)

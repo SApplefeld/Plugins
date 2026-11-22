@@ -139,7 +139,8 @@
 // names, the three files under the home's .claude directory and each path in
 // the credentialFiles setting, and hands the values and texts to seedVault,
 // which keeps every value it finds but the session's own id through
-// keepSecret: one of eight characters
+// keepSecret. Where that id is a UUID, keepSecret keeps no part of it of
+// eight characters or more either. A kept value of eight characters
 // or more is hidden everywhere for the rest of the session, a shorter one only
 // in the tool call that restored it. A file that is missing or could not be
 // read, a JSON file that does not parse, a home directory that could not be
@@ -1491,7 +1492,10 @@ function envValues(text: string): string[] {
 // ownId, the session's own id at its start, trimmed and in any case, is never
 // kept, since the harness prints that id on every transcript line; each
 // source that carried it, the environment name in envNames at its read's
-// index or the file's path, logs one line, never the value. A value that
+// index or the file's path, logs one line, never the value. Where that id has
+// the UUID shape and setOwnSessionId was handed the same id before this call,
+// as index.ts does at the session-start seed, a value that is a part of it, as
+// keepSecret refuses one, is not kept either and logs no line. A value that
 // only contains the id is kept. Returns those lines for index.ts to log.
 export function seedVault(env: readonly PromiseSettledResult<unknown>[], files: readonly (SeedFile & { text: string | null | undefined })[], ownId?: string, envNames: readonly string[] = []): string[] {
   const values: [string, string][] = [];
