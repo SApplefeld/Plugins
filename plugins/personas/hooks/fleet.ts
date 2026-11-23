@@ -10,7 +10,9 @@
 // hooks/index.ts builds over `$` with hostOf, as the beat and the seam do.
 
 import {
+  askStateOf,
   bracketSafeText,
+  isStoredAskEntry,
   fleetClassValue,
   headPoints,
   oneLine,
@@ -20,6 +22,7 @@ import {
   FLEET_HEALTH,
   FLEET_ROSTER_STATE_KEY,
   LINE_TERMINATOR,
+  type AskState,
   type FleetHealth,
   type FleetHealthMemo,
   type GoalNode,
@@ -766,8 +769,12 @@ const FLEET_STALL_KIND_UNKNOWN = "unknown";
 // blockedReason where it holds one. `releasedBy` rides a paused entry alone,
 // and `ageMs` is read from the stamp the entry's status reads, pausedAt on a
 // paused entry and blockedAt on a blocked one, never from updatedAt, which
-// moves on later writes.
-type FleetStall = { id: string; kind: string; status: "paused" | "blocked"; title: string; reason?: string; releasedBy?: string; ageMs?: number };
+// moves on later writes. `waitsOnAsk` and `askState` ride a paused entry
+// alone, one whose stored node holds waitsOnAsk as non-empty text: the id of
+// the ask it waits on, guarded and cut as an open ask's id is, and where that
+// ask stands on the same store reading's ledger, the state askStateOf names.
+// The id rides whole because the reason's cut can end inside it.
+type FleetStall = { id: string; kind: string; status: "paused" | "blocked"; title: string; reason?: string; releasedBy?: string; ageMs?: number; waitsOnAsk?: string; askState?: AskState };
 
 // Where an open ask's id and node id, and its question, are cut. An ask's id
 // is its node's id between the word "ask" and a millisecond stamp, so the id
@@ -911,6 +918,12 @@ export const readFleetStalls = async (host: FleetStallsHost, workdir: string | n
   const goals = slot !== null && typeof slot === "object" ? (slot as { goals?: unknown }).goals : undefined;
   if (slot === null || typeof slot !== "object" || !Array.isArray(goals)) return { stalls: [], asks: [], stallsNote: "the goal store's entry for this persona does not parse as a goal tree" };
   const stalls: FleetStall[] = [];
+  // The ledger items a stall's askState is read from: the items of the same
+  // entry's `asks` value the owner's load keeps, through isStoredAskEntry,
+  // so a malformed item never reads here as a state the owner does not
+  // hold; none where that value is no list.
+  const storedAsks = (slot as { asks?: unknown }).asks;
+  const ledgerItems = Array.isArray(storedAsks) ? storedAsks.filter(isStoredAskEntry) : [];
   let more = 0;
   for (const candidate of goals) {
     if (candidate === null || typeof candidate !== "object") continue;
@@ -931,6 +944,9 @@ export const readFleetStalls = async (host: FleetStallsHost, workdir: string | n
       ...(typeof node.blockedReason === "string" && node.blockedReason !== "" ? { reason: headPoints(stallText(node.blockedReason), FLEET_STALL_REASON_MAX) } : {}),
       ...(releaser !== null ? { releasedBy: headPoints(stallText(releaser), FLEET_STALL_RELEASER_MAX) } : {}),
       ...(typeof stamp === "number" && Number.isFinite(stamp) ? { ageMs: Math.max(0, now - stamp) } : {}),
+      ...(status === "paused" && typeof node.waitsOnAsk === "string" && node.waitsOnAsk !== ""
+        ? { waitsOnAsk: headPoints(stallText(node.waitsOnAsk), FLEET_ASK_ID_MAX), askState: askStateOf(node.waitsOnAsk, ledgerItems) }
+        : {}),
     });
   }
   return { stalls, ...(more > 0 ? { stallsMore: more } : {}), asks: fleetAsksOf(slot, now) };

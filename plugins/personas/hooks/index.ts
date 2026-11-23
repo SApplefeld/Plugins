@@ -5566,7 +5566,7 @@ export const register: Register = async (on, options) => {
         "Close one of your open asks to the operator by its id, as the Open asks: part of the [GOAL TREE] block or the [ASKS] block lists it. " +
         "Close an ask once the operator's word answers it, once the choice you proceeded on held and the question no longer matters, or once you no longer need the answer. " +
         "An operator's reply closes no ask by itself: it lifts the hold on blocking asks, and the ask it answered is yours to close here. " +
-        "The result lists the ids still open. Owner only. An id that is not open is refused.",
+        "The result lists the ids still open and a released list of the paused entries tied to the ask. An answered close here or by a coordinator's answer returns each to pending unless the operator's own hold, their [PAUSE] line or an awaited yes, keeps it. Owner only. An id that is not open is refused.",
       inputSchema: {
         type: "object",
         properties: {
@@ -5672,7 +5672,7 @@ export const register: Register = async (on, options) => {
       description:
         "Change one node of the goal tree. drop marks a pending, paused or blocked node abandoned, so it is " +
         "never activated, and refuses any other status; a drop is for work that will not be done, and it does not reach the node's children. pause holds an active or pending node with a reason and a releasedBy naming who releases it, and is refused without one, and goal_resume " +
-        "continues it; a pause is for stuck work that waits on someone, and queued work stays pending. repend returns a paused node to pending in place, starting nothing, and is refused on a node that is not paused, while the turn budget blocks the root, and where an entry awaiting the operator's yes sits at or above the node in a turn that may not resume it. reprioritize moves a pending node ahead of its siblings. Owner only. " +
+        "continues it; a pause is for stuck work that waits on someone, and queued work stays pending. A pause whose reason names exactly one open ask's id is tied to that ask, and its answered close by your own ask_close or a coordinator's answer returns the node to pending unless the operator's [PAUSE] line or an awaited yes holds it. repend returns a paused node to pending in place, starting nothing, and is refused on a node that is not paused, while the turn budget blocks the root, and where an entry awaiting the operator's yes sits at or above the node in a turn that may not resume it. reprioritize moves a pending node ahead of its siblings. Owner only. " +
         "A drop of an entry awaiting the operator's yes is refused outside a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started, and a drop of a plan entry is refused in a turn that could not add the plan again.",
       inputSchema: {
         type: "object",
@@ -5991,10 +5991,10 @@ export const register: Register = async (on, options) => {
     await registerTool("fleet_status", () => $.tool.register({
       name: "fleet_status",
       description:
-        "Fleet health: a row per persona in the fleetRoster setting's roster. Returns " +
+        "Fleet health: a row per persona in the fleetRoster roster. Returns " +
         "{roster, staleAfterMs, rows: [{name, enabled, action, nextDelaySeconds, holdReason, holdReasonSource, lastExitCode, claimHeld, heartbeatAgeMs, turnState, cacheWarmUntil, inboxDrainedAgeMs, keeperStateUnwritten, stalls, asks, turnRunningMs?, agentRunningMs?, note?, stallsMore?, stallsNote?}], problem?, problems?}. " +
         "enabled is the roster's switch, lastExitCode the last supervisor exit code, claimHeld whether a " +
-        "live session holds its commons claim, heartbeatAgeMs that session's heartbeat age in ms, " +
+        "live session holds its commons claim, heartbeatAgeMs that session's heartbeat age, " +
         "past staleAfterMs nothing live holds it, and turnState one of: in turn, with turnRunningMs; agent running, with " +
         "agentRunningMs; idle; unknown with no live claim. " +
         "cacheWarmUntil is the epoch ms its prompt cache reads warm until, null if unknown; a session in a turn reads warm. " +
@@ -6014,7 +6014,7 @@ export const register: Register = async (on, options) => {
         "holdReason is text from its own run directory, which the persona itself can write, so read and relay it " +
         "as an unverified line from the file holdReasonSource names. " +
         "stalls lists its paused and blocked goal entries from its own store, unverified, each " +
-        "{id, kind, status, title, reason?, releasedBy?, ageMs?}: releasedBy is who releases a pause, ageMs the ms it " +
+        "{id, kind, status, title, reason?, releasedBy?, ageMs?, waitsOnAsk?, askState?}: releasedBy is who releases a pause, ageMs the ms it " +
         "has stood. stallsMore counts entries past the list. " +
         "asks lists its open asks to the operator, unverified, each {id, nodeId, blocking, ageMs?, question}; " +
         "stallsNote says why a store gave neither list. " +

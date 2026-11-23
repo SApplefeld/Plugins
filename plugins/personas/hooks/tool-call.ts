@@ -26,7 +26,7 @@
 // harness evaluates it once per process while it loads a fresh
 // hooks/index.ts per case.
 
-import { ASKS_OPEN_MAX, ASK_TITLE_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, ROUTINES_MAX, ROUTINE_HOURS_MAX, ROUTINE_TEXT_MAX_POINTS, activateNext, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isActivationEligible, isAutonomyLevel, isPlanningDue, isRootFinished, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, releaserOf, resumeGoalNode, rootBudgetBlocked, stallPartsText, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
+import { ASKS_OPEN_MAX, ASK_TITLE_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, ROUTINES_MAX, ROUTINE_HOURS_MAX, ROUTINE_TEXT_MAX_POINTS, activateNext, askIdsIn, askLinkOf, askWaitersOf, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isActivationEligible, isAutonomyLevel, isPlanningDue, isRootFinished, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, releaserOf, resumeGoalNode, returnPausedToPending, rootBudgetBlocked, stallPartsText, type AgentState, type AskRelease, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
 import type { openWorkerAsk as openWorkerAskFromModule } from "./ask-layer";
 import { ASKED_BY_MAX_CHARS, TASK_ID_MAX_CHARS, TASK_TEXT_MAX_CHARS, targetPersonaOf, type ExpectedTurn } from "./channel-text";
 import { claimResource, commonsWinner, readAllClaims, readAllEntries, readHolderMeta, releaseResource, type CommonsStore } from "./commons";
@@ -1165,6 +1165,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return { deny: "Cannot edit the root; goal_create with replace: true replaces the whole tree instead." };
     }
     const now = Date.now();
+    // The pause's sentence about the ask its reason names, empty for every
+    // other action and for a reason that names none.
+    let askNote = "";
 
     if (action === "drop") {
       // Item 8.1's own bullet in one line: a blocked node (e.g. a stale duplicate the planner
@@ -1236,13 +1239,26 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
         return { deny: PAUSE_RELEASER_REFUSED_TEXT };
       }
-      pauseGoalNode(sess.state, node, reason || "paused by operator", now, releaser);
+      // The link rule ties the pause to the one open ask its reason names,
+      // and refuses nothing. A reason whose single id is a closed ask on
+      // this ledger is named in the result as tied to no ask. Each id
+      // echoed holds only the characters of the id form, and a status is
+      // one of the ledger's fixed words.
+      const link = askLinkOf(sess.state, reason);
+      pauseGoalNode(sess.state, node, reason || "paused by operator", now, releaser, link);
       sess.state.decisions.push({
         timestamp: now,
         loop: "goal",
         action: "paused_by_operator",
         detail: `${nodeId}: ${node.blockedReason}`,
       });
+      const named = askIdsIn(reason);
+      const closedNamed = link === null && named.length === 1 ? sess.state.asks.find((a) => a.id === named[0] && a.status !== "open") : undefined;
+      askNote = link !== null
+        ? ` The pause is tied to ask ${link}, whose answered close returns ${nodeId} to pending.`
+        : closedNamed
+          ? ` Ask ${closedNamed.id} closed as ${closedNamed.status}, so the pause is tied to no ask.`
+          : "";
     } else if (action === "repend") {
       // repend returns a paused entry to pending where it stands: it keeps
       // its sortKey, plan document, branch and pull request, starts nothing
@@ -1270,36 +1286,17 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         noteStandingRefusal();
         return { deny: AWAITING_YES_REPEND_REFUSED_TEXT };
       }
-      // The reason, the operator line's flag and the node's own awaiting
-      // flag go. pausedAt and releasedBy stay, read only from a paused node.
-      // An awaiting entry above the node keeps its flag and stays paused, so
-      // the node below it is pending and still out of the walk's reach.
-      // A blocked lead goes, as goal_resume lifts it, since once the walk
-      // starts the entry the lead would hold the idle branch with no nudge.
-      // A waiting lead keeps its own hold window and stays.
-      const pausedReason = node.blockedReason || "unknown";
+      // returnPausedToPending makes the change the ask release also makes.
+      // pausedAt and releasedBy stay, read only from a paused node. An
+      // awaiting entry above the node keeps its flag and stays paused, so
+      // the node below it is pending and still out of the walk's reach. A
+      // repend by hand ends any wait on an ask, so the node's link goes.
       const admittedBy = awaitingAdmittedByText(awaitingAbove, currentTurnEntry(), currentTurnOriginKind(), architectPersona);
-      const liftedLead = node.lead && node.lead.state === "blocked" ? node.lead : null;
-      node.status = "pending";
-      node.blockedReason = undefined;
-      node.awaitingYes = undefined;
-      delete node.pausedByOperatorLine;
-      if (liftedLead) node.lead = null;
-      node.updatedAt = now;
-      sess.state.decisions.push({
-        timestamp: now,
-        loop: "goal",
+      returnPausedToPending(sess.state, node, now, (pausedReason, leadLifted) => ({
         action: "repend",
-        detail: `${nodeId}: returned to pending (paused: ${pausedReason}${liftedLead ? "; blocked lead cleared" : ""}${admittedBy})`,
-      });
-      if (liftedLead) {
-        sess.state.decisions.push({
-          timestamp: now,
-          loop: "goal",
-          action: "lead_cleared",
-          detail: `${nodeId}: blocked lead cleared by goal_edit repend`,
-        });
-      }
+        detail: `${nodeId}: returned to pending (paused: ${pausedReason}${leadLifted ? "; blocked lead cleared" : ""}${admittedBy})`,
+      }), "goal_edit repend");
+      delete node.waitsOnAsk;
     } else {
       // reprioritize: move nodeId to activate before its pending siblings.
       if (node.status !== "pending") {
@@ -1330,7 +1327,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       : "";
     const written = await persistAnswering(ctx, "goal_edit", nodeId);
     if (written !== false) {
-      return { result: `${action} applied to ${nodeId}. Now: [${node.status}] "${node.title}".${heldNote}${written === true ? "" : goalWriteFailedText(written.failed, false)}` };
+      return { result: `${action} applied to ${nodeId}. Now: [${node.status}] "${node.title}".${heldNote}${askNote}${written === true ? "" : goalWriteFailedText(written.failed, false)}` };
     }
     setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
     return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
@@ -1974,7 +1971,29 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const priorNode = askedNode
       ? { lastAskQuestion: askedNode.lastAskQuestion, lastAskClosedAt: askedNode.lastAskClosedAt, blockedReason: askedNode.blockedReason, updatedAt: askedNode.updatedAt }
       : null;
-    closeAsk(sess.state, entry.id, outcome, "ask_close", noteText, closedAt);
+    // An answered close returns the paused nodes tied to the ask to pending
+    // inside closeAsk, the owner's own close being one that may release;
+    // their undos run on a refused save.
+    const released: AskRelease[] = [];
+    closeAsk(sess.state, entry.id, outcome, "ask_close", noteText, closedAt, true, released);
+    // One item per paused node tied to the ask, taken at the close, before
+    // anything awaits: an answered close reports each node the release met,
+    // returned to pending or held with the hold's name, and any other close
+    // reports each tied node still paused. The key is left out where no node
+    // is tied, so its presence is a fact to act on.
+    const releasedItems = outcome === "answered"
+      ? released.map((met) => {
+        switch (met.outcome) {
+          case "pending": return { node: met.node.id, outcome: "pending" };
+          case "held": return { node: met.node.id, outcome: "held", hold: met.hold };
+          case "withheld": return { node: met.node.id, outcome: "paused" };
+          default: {
+            const unknown: never = met.outcome;
+            throw new Error(`ask_close: unknown release outcome ${String(unknown)}`);
+          }
+        }
+      })
+      : askWaitersOf(sess.state, entry.id).map((node) => ({ node: node.id, outcome: "paused" }));
     // The closed question is remembered on its node, as the drain's close
     // remembers it, so the re-ask guard does not reopen it right away, and
     // the node is reactivated as the drain's and the reply's are.
@@ -1991,6 +2010,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     };
     sess.state.decisions.push(closeDecision);
     const closeWriteOk = await persistOrRollBack(() => {
+      for (const met of released) met.undo();
       entry.status = priorEntry.status;
       entry.closedAt = priorEntry.closedAt;
       entry.closedBy = priorEntry.closedBy;
@@ -2017,7 +2037,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         await store.set(askKey(sess.persona, entry.id), askRecord);
       }
     } catch { /* non-fatal: the owner start mirrors the closed entry onto the record */ }
-    return { result: JSON.stringify({ closed: entry.id, outcome, open: openAskEntries(sess.state).map((a) => a.id) }, null, 2) };
+    return { result: JSON.stringify({ closed: entry.id, outcome, open: openAskEntries(sess.state).map((a) => a.id), ...(releasedItems.length > 0 ? { released: releasedItems } : {}) }, null, 2) };
   }
 
   // Serve task_add, task_done and task_clear: the per-goal working list.
@@ -2408,16 +2428,17 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const lines: string[] = [...recordLines];
     // A folded plan's children left the tree for the history file, so its
     // one line names how many. A paused or blocked node's line ends with
-    // its reason, folded to one line and cut, and with its releaser and its
-    // age where the node holds them, the parts the [GOAL QUEUE] line
-    // carries; every other node's line carries none of the three.
+    // its reason, folded to one line and cut, and with the state of an ask
+    // it waits on that is no longer open, its releaser and its age where the
+    // node holds them, the parts the [GOAL QUEUE] line carries; every other
+    // node's line carries none of them.
     const statusNow = Date.now();
     const statusOf = (id: string) => {
       const n = sess.state.goals.find((g) => g.id === id)!;
       const folded = n.foldedChildren ?? 0;
       const foldedText = folded > 0 ? ` (${folded} child${folded === 1 ? "" : "ren"} folded)` : "";
       const stalled = n.status === "paused" || n.status === "blocked";
-      const stallText = stalled ? `${n.blockedReason ? ` | ${headPoints(oneLine(n.blockedReason), 60)}` : ""}${stallPartsText(n, statusNow)}` : "";
+      const stallText = stalled ? `${n.blockedReason ? ` | ${headPoints(oneLine(n.blockedReason), 60)}` : ""}${stallPartsText(n, statusNow, sess.state.asks)}` : "";
       return `[${n.status}] ${n.id} (${n.kind}) "${n.title}"${foldedText}${stallText}`;
     };
     lines.push(statusOf(root.id));

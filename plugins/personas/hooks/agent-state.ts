@@ -319,6 +319,17 @@ export interface GoalNode {
                       // now names one, and a paused node loaded from a
                       // store an older build wrote may lack it. Load drops
                       // a value releaserOf refuses.
+  waitsOnAsk?: string; // The id of the one ask on this persona's ledger a
+                      // paused node waits on, written by the plugin alone
+                      // from the pause reason by askLinkOf: goal_edit's
+                      // pause sets or deletes it, every other write of
+                      // paused deletes it, and the load sets it on a
+                      // paused node below the root that holds none and
+                      // that the operator's [PAUSE] line did not pause. That
+                      // ask's answered close returns the node to pending
+                      // (releaseAskWaiters) and the node keeps the id.
+                      // goal_resume and goal_edit's repend delete it. Load
+                      // drops a value that is not a non-empty string.
   runLines?: RunLines; // Plan holder only: the run lines of the plan's run,
                       // the messages hooks/run-lines.ts decides and the
                       // turn-end handler sends to the session's own thread.
@@ -1204,18 +1215,69 @@ export function oweAskBrief(state: AgentState, entry: AskEntry, now: number, end
   }
 }
 
+// An ask id inside free text: the form newAskId in hooks/worker-ask.ts
+// writes, ask-<nodeId or persona name>-<13-digit ms>, as one run with no id
+// character directly before or after it.
+const ASK_ID_IN_TEXT = /(?<![A-Za-z0-9_-])ask-[A-Za-z0-9_-]+-[0-9]{13}(?![A-Za-z0-9_-])/g;
+
+// The distinct ask ids `text` holds, in the order first written, so one id
+// written twice is one id.
+export function askIdsIn(text: string): string[] {
+  return [...new Set(text.match(ASK_ID_IN_TEXT) ?? [])];
+}
+
+// The link rule: the id of the ask a pause reason ties its node to, or null.
+// A reason links where it holds exactly one ask id and that id is an open
+// entry on this ledger. No id, two or more, a closed entry's id and an id no
+// entry carries each link nothing. The rule looks ids up and judges no prose,
+// and no caller refuses a pause on its answer.
+export function askLinkOf(state: AgentState, reason: string): string | null {
+  const ids = askIdsIn(reason);
+  return ids.length === 1 && openAskEntry(state, ids[0]) ? ids[0] : null;
+}
+
+// Where the ask a node waits on stands: one of the six ledger statuses, or
+// "absent" where no entry of the ledger carries the id, which is how a closed
+// ask reads once pruneAsks drops it. An open ask whose hold a timeout lifted
+// reads "open", since a lift clears only `blocking`. The state is read from
+// the ledger at each print and stored nowhere, so it cannot go stale.
+export type AskState = AskEntryStatus | "absent";
+
+// The state of the ask `waitsOnAsk` names on `ledger`. The ledger may be a
+// store's `asks` items as the fleet read passes them, the ones the owner's
+// load keeps, so an item whose status is none of ASK_ENTRY_STATUSES counts
+// as no entry, and the first item carrying the id decides.
+export function askStateOf(waitsOnAsk: string, ledger: readonly { id?: unknown; status?: unknown }[]): AskState {
+  const entry = ledger.find((item) => item.id === waitsOnAsk);
+  const status = entry?.status;
+  return ASK_ENTRY_STATUSES.find((known) => known === status) ?? "absent";
+}
+
 // Closes the open entry `id` names with `status`, the route that closed it and
 // a note cut to ASK_ANSWER_MAX, and returns it. Returns null and changes
 // nothing where no open entry carries that id, so a closed or unknown id is
 // never closed twice. The caller writes the same status onto the commons
-// record in the same step.
-export function closeAsk(state: AgentState, id: string, status: AskClosedStatus, closedBy: AskClosedBy, answer: string | null, now: number): AskEntry | null {
+// record in the same step. A close as answered then runs releaseAskWaiters
+// over the paused nodes tied to the ask. It releases them only where the
+// caller passes `release` as true, which the owner's ask_close and an answer
+// record on the coordinator's ground do; a caller passing the ground it
+// withholds the release for, and one passing nothing, release no node, and
+// each tied node logs why. So this is the one place a close releases, and a
+// close route added later releases nothing until it says it may. A caller
+// that rolls back on a refused save passes `released` to receive the nodes
+// it met with their undos. A close with any other status changes no node.
+export function closeAsk(state: AgentState, id: string, status: AskClosedStatus, closedBy: AskClosedBy, answer: string | null, now: number, release?: AskReleaseAuthority, released?: AskRelease[]): AskEntry | null {
   const entry = openAskEntry(state, id);
   if (!entry) return null;
   entry.status = status;
   entry.closedAt = now;
   entry.closedBy = closedBy;
   entry.answer = answer === null ? null : headPoints(answer, ASK_ANSWER_MAX);
+  if (status === "answered") {
+    const withheldGround = release === true ? null : release === undefined ? `none stated (close route ${closedBy})` : release.withheldGround;
+    const met = releaseAskWaiters(state, id, now, withheldGround);
+    released?.push(...met);
+  }
   return entry;
 }
 
@@ -1298,6 +1360,16 @@ function isAskEntry(value: unknown): value is AskEntry {
     && closeFieldsAgree
     && stringOrNull(entry.answer)
     && stringOrNull(entry.brief);
+}
+
+// Whether the load keeps a stored value as a ledger entry: isAskEntry over a
+// copy of the value carrying the two keys the load fills where they are
+// absent, brief as null and title as the empty text. It writes nothing, so
+// the fleet read takes a stall's askState over the entries the owner holds
+// without touching another persona's store.
+export function isStoredAskEntry(value: unknown): value is Partial<Record<keyof AskEntry, unknown>> {
+  if (value === null || typeof value !== "object") return false;
+  return isAskEntry({ brief: null, title: "", ...value });
 }
 
 // The ledger as a load fills it. A stored list keeps every value that is an
@@ -1509,23 +1581,32 @@ export function releaserOf(value: unknown): string | null {
   return PERSONA_NAME_RE.test(value) && /[A-Za-z]/.test(value) ? value : null;
 }
 
-// The two parts a stalled node's line carries after its reason, for the
-// [GOAL QUEUE] block and goal_status alike: " | released by <releasedBy>" on
-// a paused node that holds one, and " | <age>" where the node holds the
-// stamp its status reads, pausedAt on a paused node and blockedAt on a
-// blocked one. The age is one whole number and one unit: minutes under an
-// hour, hours under two days and days after. Any other node, and a stalled
-// one holding neither field, gives the empty text. releasedBy is spliced as
-// stored, since every writer and the load hold it to releaserOf, whose
-// values carry no bracket and no line break.
-export function stallPartsText(node: GoalNode, now: number): string {
+// The parts a stalled node's line carries after its reason, for the
+// [GOAL QUEUE] block and goal_status alike, in this order: the ask part on a
+// paused node holding waitsOnAsk whose ask `asks` no longer holds open,
+// " | ask closed as <status>" for a closed ask and " | ask gone from the
+// ledger" for one no entry carries; " | released by <releasedBy>" on a paused
+// node that holds one; and " | <age>" where the node holds the stamp its
+// status reads, pausedAt on a paused node and blockedAt on a blocked one. A
+// paused node whose ask is open prints no ask part, so the part marks only a
+// wait the ask itself will no longer end: a closed ask releases nothing, and
+// an answered one leaves its entry paused where a hold of the operator's kept
+// it or the answer came on a ground that releases nothing. The age is one
+// whole number and one unit: minutes under an hour, hours under two days and
+// days after. Any other node, and a stalled one holding none of the fields,
+// gives the empty text. releasedBy is spliced as stored, since every writer
+// and the load hold it to releaserOf, whose values carry no bracket and no
+// line break, and the ask part carries only a status word the plugin names.
+export function stallPartsText(node: GoalNode, now: number, asks: readonly AskEntry[]): string {
   if (node.status !== "paused" && node.status !== "blocked") return "";
+  const askState = node.status === "paused" && node.waitsOnAsk !== undefined ? askStateOf(node.waitsOnAsk, asks) : "open";
+  const askPart = askState === "open" ? "" : askState === "absent" ? " | ask gone from the ledger" : ` | ask closed as ${askState}`;
   const releaser = node.status === "paused" && node.releasedBy !== undefined ? ` | released by ${node.releasedBy}` : "";
   const stamp = node.status === "paused" ? node.pausedAt : node.blockedAt;
-  if (stamp === undefined) return releaser;
+  if (stamp === undefined) return `${askPart}${releaser}`;
   const minutes = Math.max(0, Math.floor((now - stamp) / 60_000));
   const age = minutes < 60 ? `${minutes}m` : minutes < 2 * 24 * 60 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / (24 * 60))}d`;
-  return `${releaser} | ${age}`;
+  return `${askPart}${releaser} | ${age}`;
 }
 
 // How long a waiting lead holds the controller's idle branch, measured from
@@ -2540,6 +2621,22 @@ function enforceInvariants(state: AgentState): void {
     }
   }
 
+  // The ask link, kept only where it is a non-empty string. Then each paused
+  // node below the root that holds none takes the link rule's answer on its
+  // reason, so an entry paused before the field existed is tied to its open
+  // ask. A node the operator's [PAUSE] line paused is skipped, since that
+  // pause waits on no ask and his [RESUME] line ends it. Nothing else
+  // changes, and the link reaches the store file at the session's next
+  // store write. Every load path fills the ledger before this pass, so the
+  // rule reads the asks the store holds.
+  for (const g of state.goals) {
+    const raw = g as { waitsOnAsk?: unknown };
+    if (raw.waitsOnAsk !== undefined && !(typeof raw.waitsOnAsk === "string" && raw.waitsOnAsk !== "")) delete g.waitsOnAsk;
+    if (g.parentId === null || g.status !== "paused" || g.pausedByOperatorLine === true || g.waitsOnAsk !== undefined || typeof g.blockedReason !== "string") continue;
+    const link = askLinkOf(state, g.blockedReason);
+    if (link !== null) g.waitsOnAsk = link;
+  }
+
   // The seeded root's four fields, each kept only in the shape the seed
   // writes: doneWhen an array of strings, turnBudget a positive integer,
   // turnsSpent and turnsTotal each a whole number. A value of another shape
@@ -2993,15 +3090,148 @@ export function activateNext(state: AgentState, completedId?: string): string | 
 // operator line's flag, so a node a tool paused is never one a [RESUME]
 // line lifts; the line sets the flag again after its own pause. Every pause
 // stamps pausedAt and records its releaser, the party whose act lets the
-// node move again, so no caller pauses without naming one.
-export function pauseGoalNode(state: AgentState, node: GoalNode, reason: string, now: number, releasedBy: string): void {
+// node move again, so no caller pauses without naming one. Every pause sets
+// waitsOnAsk to the ask id given, or deletes it where none is given, so a
+// node paused again for another reason never carries an old link; the
+// operator's line gives none.
+export function pauseGoalNode(state: AgentState, node: GoalNode, reason: string, now: number, releasedBy: string, waitsOnAsk: string | null): void {
   node.status = "paused";
   node.blockedReason = reason;
   node.pausedAt = now;
   node.releasedBy = releasedBy;
   node.updatedAt = now;
   delete node.pausedByOperatorLine;
+  if (waitsOnAsk === null) delete node.waitsOnAsk;
+  else node.waitsOnAsk = waitsOnAsk;
   if (state.activeGoalId === node.id) state.activeGoalId = null;
+}
+
+// The one return of a paused node to pending where it stands, shared by
+// goal_edit's repend and the ask release so the two cannot drift. The node
+// keeps its sortKey, plan document, branch, pull request, pausedAt,
+// releasedBy and waitsOnAsk, starts nothing, and no other node and no
+// activeGoalId changes, so the controller's walk starts it in queue order.
+// The reason, the operator line's flag and the node's own awaiting flag go.
+// A blocked lead goes too, as goal_resume lifts it, since once the walk
+// starts the entry the lead would hold the idle branch with no nudge; a
+// waiting lead keeps its own hold window and stays. `decide` builds the
+// caller's decision from the paused reason and whether a lead was lifted,
+// and a lifted lead adds one lead_cleared decision after it naming
+// `leadClearedBy`. Returns the decisions pushed, in order.
+export function returnPausedToPending(
+  state: AgentState,
+  node: GoalNode,
+  now: number,
+  decide: (pausedReason: string, leadLifted: boolean) => { action: string; detail: string },
+  leadClearedBy: string,
+): AgentState["decisions"][number][] {
+  const pausedReason = node.blockedReason || "unknown";
+  const liftedLead = node.lead && node.lead.state === "blocked" ? node.lead : null;
+  node.status = "pending";
+  node.blockedReason = undefined;
+  node.awaitingYes = undefined;
+  delete node.pausedByOperatorLine;
+  if (liftedLead) node.lead = null;
+  node.updatedAt = now;
+  const pushed: AgentState["decisions"][number][] = [{ timestamp: now, loop: "goal", ...decide(pausedReason, liftedLead !== null) }];
+  if (liftedLead) {
+    pushed.push({ timestamp: now, loop: "goal", action: "lead_cleared", detail: `${node.id}: blocked lead cleared by ${leadClearedBy}` });
+  }
+  state.decisions.push(...pushed);
+  return pushed;
+}
+
+// The hold that keeps a node tied to an answered ask paused: the operator's
+// [PAUSE] line, or the operator's yes the node itself awaits. Each is his own
+// hold, and his own act ends it.
+export type AskReleaseHold = "pausedByOperatorLine" | "awaitingYes";
+
+// Whether an answered close may release the nodes tied to its ask: true from
+// the owner's ask_close and from an answer record on the coordinator's
+// ground, or the ground the release is withheld for, which the decision each
+// tied node logs names.
+export type AskReleaseAuthority = true | { withheldGround: string };
+
+// One paused node an answered close met: "pending" where it returned to
+// pending, "held" with the hold that kept it paused, and "withheld" where the
+// close came on a ground that releases nothing, which its decision names.
+// `undo` puts the node and the decision log back as they stood before the
+// release, for a caller whose save is refused.
+export interface AskRelease {
+  node: GoalNode;
+  outcome: "pending" | "held" | "withheld";
+  hold: AskReleaseHold | null;
+  undo: () => void;
+}
+
+// The nodes tied to `askId`: each node below the root whose status is paused
+// and whose waitsOnAsk is that id, in the tree's order. The release and
+// ask_close's released list both read this one rule.
+export function askWaitersOf(state: AgentState, askId: string): GoalNode[] {
+  return state.goals.filter((node) => node.parentId !== null && node.status === "paused" && node.waitsOnAsk === askId);
+}
+
+// The release closeAsk runs after it closes `askId` as answered. Each node
+// below the root whose status is paused and whose waitsOnAsk is `askId` is
+// met once. A node under neither hold returns to pending through
+// returnPausedToPending, the same change repend makes, and keeps its link,
+// which the release line reads. A node carrying pausedByOperatorLine, or its
+// own awaitingYes, stays paused with its reason and link. Where
+// `withheldGround` names a ground, the close releases nothing: every tied
+// node stays paused with its reason and link, whatever its holds. Each node
+// met logs one ask_release decision naming the node, the ask and its
+// outcome, the ground where the release was withheld. The
+// release reads no turn's standing, and a pending node under a root the turn
+// budget blocks, or under an ancestor that is not pending, is out of the
+// walk's reach as any pending node is.
+export function releaseAskWaiters(state: AgentState, askId: string, now: number, withheldGround: string | null): AskRelease[] {
+  const met: AskRelease[] = [];
+  const dropAll = (pushed: AgentState["decisions"][number][]): void => {
+    for (const decision of pushed) {
+      const at = state.decisions.indexOf(decision);
+      if (at !== -1) state.decisions.splice(at, 1);
+    }
+  };
+  for (const node of askWaitersOf(state, askId)) {
+    if (withheldGround !== null) {
+      const decision: AgentState["decisions"][number] = {
+        timestamp: now,
+        loop: "goal",
+        action: "ask_release",
+        detail: `${node.id}: kept paused at ask ${askId}'s answered close on ground ${withheldGround}; only the owner's ask_close and an answer on the coordinator's ground release`,
+      };
+      state.decisions.push(decision);
+      met.push({ node, outcome: "withheld", hold: null, undo: () => dropAll([decision]) });
+      continue;
+    }
+    const hold: AskReleaseHold | null = node.pausedByOperatorLine === true ? "pausedByOperatorLine" : node.awaitingYes ? "awaitingYes" : null;
+    if (hold !== null) {
+      const decision: AgentState["decisions"][number] = {
+        timestamp: now,
+        loop: "goal",
+        action: "ask_release",
+        detail: `${node.id}: kept paused at ask ${askId}'s answered close, held by ${hold === "pausedByOperatorLine" ? "the operator's [PAUSE] line" : "the operator's yes it awaits"}`,
+      };
+      state.decisions.push(decision);
+      met.push({ node, outcome: "held", hold, undo: () => dropAll([decision]) });
+      continue;
+    }
+    const prior = { status: node.status, blockedReason: node.blockedReason, awaitingYes: node.awaitingYes, lead: node.lead, updatedAt: node.updatedAt };
+    const pushed = returnPausedToPending(state, node, now, (pausedReason, leadLifted) => ({
+      action: "ask_release",
+      detail: `${node.id}: returned to pending by ask ${askId}'s answered close (paused: ${pausedReason}${leadLifted ? "; blocked lead cleared" : ""})`,
+    }), `ask ${askId}'s answered close`);
+    met.push({
+      node,
+      outcome: "pending",
+      hold: null,
+      undo: () => {
+        Object.assign(node, prior);
+        dropAll(pushed);
+      },
+    });
+  }
+  return met;
 }
 
 export interface ResumeGoalNodeOptions {
@@ -3087,6 +3317,8 @@ export function resumeGoalNode(state: AgentState, target: GoalNode, opts: Resume
   // Any resume lifts the operator line's pause on the node, so a later
   // [RESUME] line finds nothing of this node's left to resume.
   delete target.pausedByOperatorLine;
+  // A resume by hand ends any wait on an ask, so the node's link goes.
+  delete target.waitsOnAsk;
   target.status = holdsActive ? "pending" : "active";
   // A released entry left at its maxRounds would re-block on its next
   // scored round, so its count restarts. Its scores stay.
@@ -3286,7 +3518,7 @@ export function applyOperatorLine(state: AgentState, line: OperatorLine, now: nu
       return null;
     }
     for (const { node } of steps) {
-      pauseGoalNode(state, node, line.reason, now, "operator");
+      pauseGoalNode(state, node, line.reason, now, "operator", null);
       node.pausedByOperatorLine = true;
     }
     state.decisions.push({

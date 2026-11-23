@@ -129,7 +129,9 @@ function driveRooted(path: string): boolean {
 // entry, which only a store written by a controller that paused on an ask
 // carries, since an active entry has no reason to be blocked. A paused
 // entry keeps its reason, which its pause wrote and goal_resume reads
-// back.
+// back. A paused entry tied to the ask by waitsOnAsk is returned to pending
+// on an answered close by releaseAskWaiters in hooks/agent-state.ts, which
+// closeAsk runs, and never here.
 export const reactivateAskedEntry = (askedNode: GoalNode): void => {
   if (askedNode.status === "active" && askedNode.blockedReason !== undefined) {
     askedNode.blockedReason = undefined;

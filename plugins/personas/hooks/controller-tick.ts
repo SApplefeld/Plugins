@@ -41,7 +41,7 @@ import { fleetReadingOf, readFleetRows, type FleetLine, type fleetPromptText } f
 import type { PluginHost } from "./host";
 import { shownDoneStatement } from "./goal-persona";
 import type { HookBudget, LiveAskResult } from "./jev-live";
-import { SweepDeleteError, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundIn, deliveryPrefix, deliveryRecordProblem, enforceChannelWindow, isQuietRecord, listInboxRecords, mayReachPersona, readAskRecord, readInboxRecord, sendPluginRecord, sweepExpiredRecords, type InboxRecord } from "./operator";
+import { COORDINATOR_GROUND, SweepDeleteError, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundIn, deliveryPrefix, deliveryRecordProblem, enforceChannelWindow, isQuietRecord, listInboxRecords, mayReachPersona, readAskRecord, readInboxRecord, sendPluginRecord, sweepExpiredRecords, type InboxRecord } from "./operator";
 import { PLAN_ARCHIVE_DIRS } from "./plan-record";
 import { isPlanEntry, reactivateAskedEntry, roundSummaryText } from "./plan-route";
 import { CONTROLLER_DECISION, PLAN_SWITCH, PLAN_SWITCH_NO_MATCH, controllerLabelsOf, controllerLastAnswerText, controllerStateText, kaizenLine, resolverOf, type ControllerStateFact } from "./question-catalog";
@@ -898,7 +898,10 @@ export async function drainInboxOnce(ctx: TickContext, owns: () => boolean): Pro
             await store.set(askKey(persona, askId), askRecord);
             if (!owns()) return false;
           }
-          closeAsk(sess.state, askId, "answered", `record ${answer.id}`, answer.text, Date.now());
+          // The close releases the paused entries tied to the ask only on the
+          // coordinator's ground; an answer a reader or a worker relayed
+          // closes the ask and releases nothing, each tied entry logging why.
+          closeAsk(sess.state, askId, "answered", `record ${answer.id}`, answer.text, Date.now(), answerLabel === COORDINATOR_GROUND ? true : { withheldGround: answerLabel });
           // D5b: remember the closed question so the classifier does
           // not reopen it on this node right away (bullet 2).
           const askedNodeInbox = sess.state.goals.find((n) => n.id === askEntry.nodeId);
@@ -924,8 +927,10 @@ export async function drainInboxOnce(ctx: TickContext, owns: () => boolean): Pro
           }
           // Deliver the answer as a labelled prompt.
           // The entry is the one the ledger entry names, or the active
-          // entry where it is gone from the tree. The close moves no
-          // status; see reactivateAskedEntry.
+          // entry where it is gone from the tree. This prompt moves no
+          // status; see reactivateAskedEntry. A paused entry tied to the ask
+          // by waitsOnAsk is returned to pending by releaseAskWaiters in
+          // agent-state.ts, which the closeAsk above runs, and never here.
           const targetNode = sess.state.goals.find((g) => g.id === askEntry.nodeId) ?? null;
           const activeNode = targetNode || (sess.state.activeGoalId
             ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)

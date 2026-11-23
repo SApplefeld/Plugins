@@ -1974,6 +1974,8 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
           g.pausedAt = budgetNow;
           g.releasedBy = "operator";
           g.updatedAt = budgetNow;
+          // This pause waits on no ask, so a link an earlier pause left goes.
+          delete g.waitsOnAsk;
         }
         sess.state.activeGoalId = null;
         sess.state.decisions.push({

@@ -227,6 +227,20 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
     // Section 3 (boundary-compaction): the active entry's plan document
     // and section, spliced right after the Path: line.
     const planLine = planDocumentLine(state, activeNode);
+    // The release line, spliced after the plan document line: while the
+    // active entry holds waitsOnAsk and that ask reads answered, the ask's id
+    // and the answer its close recorded, the owner's ask_close note or the
+    // answer record a coordinator relayed, the only closes that release, so
+    // the session that starts an entry an answer released learns why it
+    // moved and what was said. It ends when the ledger's prune drops the ask
+    // or the entry leaves active. The answer takes the fold, the bracket rule
+    // and the cut the Open asks: part gives a question, and the id is printed
+    // as that part prints one.
+    const waitedAsk = activeNode.waitsOnAsk === undefined ? undefined : state.asks.find((entry) => entry.id === activeNode.waitsOnAsk);
+    const releaseAsk = waitedAsk?.status === "answered" ? waitedAsk : undefined;
+    const releaseLine = releaseAsk !== undefined
+      ? `Released by ask ${releaseAsk.id}, answered: ${releaseAsk.answer === null || releaseAsk.answer.trim() === "" ? "no note" : bracketSafeText(headPoints(oneLine(releaseAsk.answer), 120))}\n`
+      : "";
     const openAsksPart = openAsks.length > 0
       ? `Open asks:\n` + openAskLines + openAskCountLine
       : "";
@@ -246,6 +260,7 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
       `Path: ${path}\n` +
       `${goalPart}` +
       planLine +
+      releaseLine +
       siblingLine +
       lastNote +
       openAsksPart +
@@ -271,8 +286,9 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
     // With no active entry, the [GOAL QUEUE] block lists every open entry
     // in openGoals order with its status, so the model reads the whole
     // queue rather than one entry's reason. A paused or blocked entry's
-    // line ends with its releaser and its age, where the node holds them,
-    // as stallPartsText builds them. Its last line says whether the
+    // line ends with the state of an ask it waits on that is no longer
+    // open, its releaser and its age, where the node holds them, as
+    // stallPartsText builds them. Its last line says whether the
     // controller will start anything by itself, which hasStartableWork
     // decides from the controller's own walk.
     const open = openGoals(state);
@@ -280,7 +296,7 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
       const listed = open.slice(0, GOAL_QUEUE_MAX_LINES);
       const queueLines =
         listed
-          .map((g) => `- ${g.status} ${g.kind} ${g.id} | ${headPoints(oneLine(g.title), 40)}${g.blockedReason ? ` | ${headPoints(oneLine(g.blockedReason), 60)}` : ""}${stallPartsText(g, now)}\n`)
+          .map((g) => `- ${g.status} ${g.kind} ${g.id} | ${headPoints(oneLine(g.title), 40)}${g.blockedReason ? ` | ${headPoints(oneLine(g.blockedReason), 60)}` : ""}${stallPartsText(g, now, state.asks)}\n`)
           .join("") +
         (open.length > listed.length ? `...and ${open.length - listed.length} more open ${open.length - listed.length === 1 ? "entry" : "entries"}.\n` : "");
       // A root the turn budget blocks holds every entry, and goal_resume
