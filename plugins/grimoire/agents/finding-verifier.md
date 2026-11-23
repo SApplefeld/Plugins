@@ -2,7 +2,7 @@
 name: finding-verifier
 description: "Fresh-context judge of whether each correctness Critical and Major a review returned is true of the code, read against the diff before any fix round, returning CONFIRMED, REFUTED or UNVERIFIED per finding with its ground; not a reviewer or scope adjudicator."
 tools: Read, Grep, Glob, Bash
-effort: high
+effort: medium
 model: opus
 ---
 

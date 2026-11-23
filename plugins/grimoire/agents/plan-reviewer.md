@@ -26,7 +26,7 @@ Use only read-only commands: never edit files, commit, or run builds, the suite 
 The set is closed. Each finding carries exactly one tag, and a defect fitting none is not yours to raise.
 
 1. `[unwanted-satisfaction]` An acceptance criterion a reading nobody wants would satisfy, or that no run performs.
-2. `[two-way]` A sentence a sonnet-tier implementer holding only the section text could read two ways. State both readings.
+2. `[two-way]` A sentence an implementer holding only the section text could read two ways. State both readings.
 3. `[falsified-surface]` A file, document, test or pinned copy outside every `Files in scope:` list and outside `## Out of Scope` that the change as written would make false.
 4. `[rule-conflict]` An instruction contradicting a doctrine bullet, skill rule or charter line the executor will have loaded, named by its bold lead. Read that skill or charter under your `Kit root:` line, the copy the executor loaded. Without a `Kit root:` line in your start context, read under the `grimoire@*` entry's `installPath` in `~/.claude/plugins/installed_plugins.json`, or say none exists, and name the path you read in your return.
 5. `[unguaranteed-handoff]` Something section N assumes section N-1 produced that N-1's acceptance does not guarantee, or an ordering the sections need that the header does not state.
