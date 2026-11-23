@@ -374,8 +374,19 @@ holder_ask_file_whole() {  # <file> <first line as read>
   # never empty, since it defaults to "default" above. It sits outside the
   # role arms so each arm stays one literal, and it is spliced from PERSONA
   # the way the coordinator and architect sentences below splice their
-  # fleet's names.
+  # fleet's names. On a fleet naming a liaison, the clause after it names the
+  # liaison persona too.
   PERSONA_NAME_INSTRUCTION="Your persona on this fleet is ${PERSONA}: this session starts under it, so you never need to call agentic_identity to learn it. "
+  # The liaison's name, so this seat knows the liaison's worker records by the
+  # label the plugin writes. The brainstorming skill's worth test and the
+  # peer-sessions skill's relay rule read the name from here. Built only where
+  # this launch's settings name a liaison, on every launch but the liaison's
+  # own, which the sentence above names, and the coordinator's, whose own
+  # liaison clause below names it. A launch whose settings name none leaves
+  # the sentence as it reads without the clause.
+  if [ -n "${LIAISON_PERSONA:-}" ] && [ "$PERSONA" != "$LIAISON_PERSONA" ] && [ "$PERSONA" != "$COORDINATOR_PERSONA" ]; then
+    PERSONA_NAME_INSTRUCTION+="The liaison persona's name on this fleet is ${LIAISON_PERSONA}, and a worker record whose label names ${LIAISON_PERSONA} is the liaison's. "
+  fi
   # The coordinator persona's own sentences. They carry what only the plugin
   # and the launch know: that this seat is the kit's Coordinator seat on this
   # machine, how the plugin labels a record the seat sends with agentic_say and
