@@ -7,8 +7,19 @@
 # matches no row once applied, so a second run against an installed host
 # applies no change and says so on its own output.
 #
+# The local mode, -LocalAccount <computer or authority>\<name>, installs a
+# database for one machine and nothing of the fleet's. It applies the same
+# scripts but Security/020-Logins.sql and Security/030-Sandboxes.sql, which it
+# skips, and applies Local/010-LocalSandbox.sql after Security. That script
+# gives the one Windows account a login, the user kit_local in mem_publisher
+# and one mem.Sandbox row named for this computer. The mode creates no SQL
+# login, generates no password and writes no logins file. It is admitted only
+# under Windows authentication, and it refuses an account equal to the one the
+# installer connects as.
+#
 # The script order is the directory order Schema, FullText, Procedures,
-# Security, Version, and inside each directory the ordinal order of the file names,
+# Security, then Local in the local mode, then Version, and inside each
+# directory the ordinal order of the file names,
 # whose numeric prefixes are what fix it. Each script runs through sqlcmd
 # with -b, so the first failing statement stops the whole run with a
 # non-zero exit and the failing file named.
@@ -45,7 +56,9 @@
 # the schema version carried and installed, one Applied line per script
 # reading changed or no change with the logins file line just before the
 # logins script, one Login line per login reading created or present, and a
-# Summary line with the two counts. A refusal is one line starting FAIL:
+# Summary line with the two counts. In the local mode each skipped script
+# prints one Skipped line where it would apply, and the one Login line names
+# the local account. A refusal is one line starting FAIL:
 # naming the reason, then exit 1.
 #
 # The changed / no change reading is a digest of the catalog state this
@@ -55,8 +68,9 @@
 # definition; every index with its key and included columns, ordering and
 # filter; every check, default and foreign key definition; every mem_ and
 # kit_ principal with its SID, default schema, role memberships and
-# permissions; the five server logins with their SIDs, default databases and
-# disabled flags; the full-text catalog and index with its columns; and the
+# permissions; the five server logins, or in the local mode the local
+# account's login, with their SIDs, default databases, disabled flags and
+# server permissions; the full-text catalog and index with its columns; and the
 # rows of mem.Sandbox and mem.SchemaVersion. Outside it: a login's password,
 # which no catalog exposes; the audit timestamps; and the data rows of every
 # table but those two. So a run that touched nothing reads as no change, and
@@ -77,6 +91,11 @@ param(
     # validating it. Needed against a local instance carrying a self-signed
     # certificate; never against the host, whose certificate is trusted.
     [switch]$TrustServerCertificate,
+    # The local mode: the one Windows account, <computer or authority>\<name>,
+    # that publishes to a database serving one machine. It belongs to no
+    # parameter set, so -Login beside it reaches the body and is refused there
+    # with a FAIL line rather than as a binding error.
+    [string]$LocalAccount,
     # Where sqlcmd is. Resolved from the pinned client tools path and then
     # from PATH when absent.
     [string]$SqlcmdPath
@@ -256,11 +275,23 @@ $script:Logins = @(
 # only after every other directory has applied.
 $script:ScriptDirectories = @('Schema', 'FullText', 'Procedures', 'Security', 'Version')
 
+# The local mode's order takes Local after Security, whose roles its script
+# adds a member to, and before Version. The fleet path never reads Local.
+$script:LocalScriptDirectories = @('Schema', 'FullText', 'Procedures', 'Security', 'Local', 'Version')
+
+# The two scripts that create the fleet's logins and seed its sandbox rows.
+# The local mode skips both.
+$script:FleetOnlyScripts = @('Security/020-Logins.sql', 'Security/030-Sandboxes.sql')
+
 $script:Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Which authentication the run uses, read once here because the parameter
 # set name belongs to the script's own scope and not to the functions below.
 $script:SqlAuth = ($PSCmdlet.ParameterSetName -eq 'SqlAuth')
+
+# Whether the run is the local mode. A -LocalAccount given as an empty string
+# is the local mode too, and the screen below refuses it.
+$script:LocalMode = $PSBoundParameters.ContainsKey('LocalAccount')
 
 # Every refusal takes this path: one FAIL: line, exit 1.
 function Stop-Install {
@@ -391,7 +422,9 @@ function Stop-OnBatchFailure {
 # The digest of everything this installer owns on the host. The reads of
 # mem.Sandbox and mem.SchemaVersion go through sp_executesql because a plain
 # batch binds every table name at compile time, and on a first run those two
-# tables do not exist yet.
+# tables do not exist yet. KIT_LOGIN_PREDICATE names the server logins the
+# run owns, and is replaced once the run knows its mode: the five fleet
+# logins, or the local account's login.
 $script:DigestBatch = @'
 ;SET NOCOUNT ON
 ;DECLARE @D TABLE ( [K] NVARCHAR(1000) NOT NULL, [V] NVARCHAR(MAX) NULL )
@@ -467,12 +500,12 @@ WHERE	PR.[name] LIKE 'mem[_]%' OR PR.[name] LIKE 'kit[_]%'
 ;INSERT INTO @D ( [K], [V] )
 SELECT	'login:' + SP.[name], CONCAT(SP.[is_disabled], ':', CONVERT(VARCHAR(128), SP.[sid], 2), ':', SP.[default_database_name])
 FROM	sys.server_principals SP
-WHERE	SP.[name] IN ('kit_scott_claude', 'kit_neo_claude', 'kit_asr_claude', 'kit_curator', 'kit_review')
+WHERE	KIT_LOGIN_PREDICATE
 ;INSERT INTO @D ( [K], [V] )
 SELECT	'sperm:' + SP.[name] + ':' + P.[class_desc] + ':' + P.[permission_name], P.[state]
 FROM	sys.server_permissions P
 		INNER JOIN sys.server_principals SP ON SP.[principal_id] = P.[grantee_principal_id]
-WHERE	SP.[name] IN ('kit_scott_claude', 'kit_neo_claude', 'kit_asr_claude', 'kit_curator', 'kit_review')
+WHERE	KIT_LOGIN_PREDICATE
 ;INSERT INTO @D ( [K], [V] )
 SELECT	'ftc:' + C.[name], CONCAT(C.[is_default], ':', C.[is_accent_sensitivity_on])
 FROM	sys.fulltext_catalogs C
@@ -576,6 +609,56 @@ if ($Database -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
     Stop-Install "the database name must be a plain identifier (letters, digits and underscores, not starting with a digit): $Database"
 }
 
+# The local mode's refusals, each before any connection. The account reaches
+# T-SQL inside a string literal and a bracketed login name, and the sandbox
+# name inside a string literal, so each is screened to characters that can
+# close neither. Each refusal names the rule the value failed. The patterns
+# are case-sensitive and end at \z, so no letter outside ASCII and no
+# trailing newline passes them.
+if ($script:LocalMode) {
+    if ($script:SqlAuth) {
+        Stop-Install "-LocalAccount is admitted only under Windows authentication, and -Login asks for SQL authentication; the local mode connects as the current Windows account."
+    }
+    if ($LocalAccount.Length -gt 128) {
+        Stop-Install ("-LocalAccount must be at most 128 characters, the length of mem.Sandbox.PublisherLogin, and holds " + $LocalAccount.Length + ": " + $LocalAccount)
+    }
+    $accountSides = $LocalAccount.Split('\')
+    if ($accountSides.Count -ne 2) {
+        Stop-Install "-LocalAccount must hold exactly one backslash, between the computer or authority and the account name: $LocalAccount"
+    }
+    if ($accountSides[0].Length -eq 0 -or $accountSides[1].Length -eq 0) {
+        Stop-Install "-LocalAccount must hold at least one character on each side of the backslash: $LocalAccount"
+    }
+    if ($LocalAccount -cnotmatch '\A[A-Za-z0-9 ._$\\-]+\z') {
+        Stop-Install "-LocalAccount may hold only ASCII letters, digits, spaces, dots, hyphens, underscores and dollar signs on each side of the backslash: $LocalAccount"
+    }
+    foreach ($side in $accountSides) {
+        if ($side.StartsWith(' ') -or $side.EndsWith(' ')) {
+            Stop-Install "-LocalAccount must not open or close either side of the backslash with a space: $LocalAccount"
+        }
+    }
+    if ($accountSides[0] -eq '.' -or $accountSides[0] -ieq 'localhost') {
+        Stop-Install "-LocalAccount must name the computer or authority before the backslash, not . or localhost, since the server knows an account by its machine's name: $LocalAccount"
+    }
+    # The sandbox row is named for this computer, the value the doctor picks
+    # a sandbox entry by.
+    $script:LocalSandbox = [string]$env:COMPUTERNAME
+    if ($script:LocalSandbox -cnotmatch '\A[A-Za-z0-9._-]{1,100}\z') {
+        Stop-Install "the computer name in COMPUTERNAME names the sandbox row and must be 1 to 100 ASCII letters, digits, dots, hyphens or underscores: $($script:LocalSandbox)"
+    }
+}
+
+# The digest's server logins, now that the run knows its mode. The fleet's
+# predicate is the five names; the local mode's is the account's SID, which
+# the server resolves for a Windows account whether or not it holds a login.
+$loginPredicate = if ($script:LocalMode) {
+    "SP.[sid] = SUSER_SID(N'" + $LocalAccount + "')"
+}
+else {
+    "SP.[name] IN (" + (($script:Logins | ForEach-Object { "'" + $_.Login + "'" }) -join ', ') + ")"
+}
+$script:DigestBatch = $script:DigestBatch.Replace('KIT_LOGIN_PREDICATE', $loginPredicate)
+
 # SQL authentication with no password source would leave sqlcmd prompting on
 # stdin, which is a hang in any unattended run, so it is refused here.
 if ($script:SqlAuth -and -not [System.Environment]::GetEnvironmentVariable('SQLCMDPASSWORD', 'Process')) {
@@ -602,6 +685,10 @@ $hostBatch = @"
 ;SELECT 'kitmem-caseless=' + CASE WHEN N'abcdefghijklmnopqrstuvwxyz' = N'ABCDEFGHIJKLMNOPQRSTUVWXYZ' THEN '1' ELSE '0' END
 ;SELECT 'kitmem-database=' + CASE WHEN DB_ID(N'$Database') IS NULL THEN 'absent' ELSE 'present' END
 "@
+# The local mode also asks who the installer connects as.
+if ($script:LocalMode) {
+    $hostBatch += "`n;SELECT 'kitmem-caller=' + SUSER_SNAME()`n"
+}
 $hostResult = Invoke-KitSqlText -Text $hostBatch -DatabaseName 'master'
 Stop-OnBatchFailure -Result $hostResult -What "Connecting to $Server"
 $fullText = Get-TaggedValues -Lines $hostResult.Output -Tag 'fulltext'
@@ -610,6 +697,19 @@ $serverCaseless = Get-TaggedValues -Lines $hostResult.Output -Tag 'caseless'
 $databaseState = Get-TaggedValues -Lines $hostResult.Output -Tag 'database'
 if ($fullText.Count -ne 1 -or $major.Count -ne 1 -or $serverCaseless.Count -ne 1 -or $databaseState.Count -ne 1) {
     Stop-Install "the host batch did not answer every question it was asked."
+}
+if ($script:LocalMode) {
+    # The account that creates the database owns it, an owner cannot be given
+    # a second user in it, and an instance administrator is bound by no DENY,
+    # so the installing account can be neither the publisher's user nor held
+    # to the publisher's role.
+    $caller = Get-TaggedValues -Lines $hostResult.Output -Tag 'caller'
+    if ($caller.Count -ne 1) {
+        Stop-Install "the host batch did not say which account the installer connects as."
+    }
+    if ([string]::Equals($caller[0], $LocalAccount, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Stop-Install ("-LocalAccount " + $LocalAccount + " is the account this installer connects as, and the database's creator owns it and cannot be its publisher; run the installer as an administrator account other than the publisher.")
+    }
 }
 if (@('0', '1') -notcontains $serverCaseless[0]) {
     Stop-Install "the host batch answered whether $Server compares text without regard to case with a value this installer cannot read: $($serverCaseless[0])"
@@ -672,54 +772,73 @@ if ($installedText -ne 'none') {
 }
 Write-Output ("Schema version: carried " + $script:SchemaVersion + ", installed " + $installedText)
 
-# Which of the five logins the host already holds. Missing ones get a fresh
-# password each, held in memory until the logins file is written immediately
-# before the logins script runs.
-$loginNames = @($script:Logins | ForEach-Object { $_.Login })
-$loginBatch = ";SET NOCOUNT ON`n;SELECT 'kitmem-login=' + SP.[name] FROM sys.server_principals SP WHERE SP.[name] IN (" +
-    (($loginNames | ForEach-Object { "N'" + $_ + "'" }) -join ', ') + ")"
-$loginResult = Invoke-KitSqlText -Text $loginBatch -DatabaseName 'master'
-Stop-OnBatchFailure -Result $loginResult -What "Reading the server logins"
-$presentLogins = Get-TaggedValues -Lines $loginResult.Output -Tag 'login'
-$missing = @($script:Logins | Where-Object { $presentLogins -notcontains $_.Login })
-
 $variables = @{ KitSchemaVersion = [string]$script:SchemaVersion }
-foreach ($entry in $script:Logins) {
-    # A present login's CREATE branch never runs. Its variable carries this
-    # placeholder, which Security/020-Logins.sql compares against and refuses
-    # to create a login with, so a login dropped between the read above and
-    # that script fails the run rather than being created with a public value.
-    $variables['KitPassword_' + $entry.Login] = 'unused-login-already-present'
-}
 $entries = @()
-if ($missing.Count -gt 0) {
-    if (Test-Path -LiteralPath $LoginsPath) {
-        # The refusal says what the existing file's passwords are worth: a
-        # login it names that is on the server may hold that password, one
-        # that is not never received it.
-        $missingNames = (($missing | ForEach-Object { $_.Login }) -join ', ')
-        $verb = if ($missing.Count -eq 1) { "is" } else { "are" }
-        $fileReport = ''
-        try {
-            $existing = Get-Content -LiteralPath $LoginsPath -Raw | ConvertFrom-Json
-            $named = @($existing.logins | ForEach-Object { [string]$_.login } | Where-Object { $_ })
-            if ($named.Count -eq 0) { throw "it names no logins" }
-            $onServer = @($named | Where-Object { $presentLogins -contains $_ })
-            $offServer = @($named | Where-Object { $presentLogins -notcontains $_ })
-            $fileReport = " Of the logins that file names, " +
-                $(if ($onServer.Count -gt 0) { ($onServer -join ', ') + " are on the server, so their passwords there may be live" } else { "none is on the server" }) +
-                $(if ($offServer.Count -gt 0) { ", and " + ($offServer -join ', ') + " are not, so their passwords there reached no server." } else { "." })
-        }
-        catch {
-            $fileReport = " That file could not be read as a logins file (" + $_.Exception.Message + "), so whether its passwords reached the server is unknown."
-        }
-        Stop-Install ($missingNames + " " + $verb + " absent from " + $Server + " and the logins file " + $LoginsPath +
-            " already exists; this installer never overwrites a logins file." + $fileReport + " Move it aside and run again.")
+if ($script:LocalMode) {
+    # Whether the server holds a login for the account, matched by the
+    # account's SID, so the spelling's letter case does not matter. The local
+    # mode generates no password.
+    $localLoginBatch = ";SET NOCOUNT ON`n;SELECT 'kitmem-locallogin=' + CASE WHEN EXISTS ( SELECT NULL FROM sys.server_principals SP WHERE SP.[sid] = SUSER_SID(N'" +
+        $LocalAccount + "') ) THEN 'present' ELSE 'absent' END"
+    $localLoginResult = Invoke-KitSqlText -Text $localLoginBatch -DatabaseName 'master'
+    Stop-OnBatchFailure -Result $localLoginResult -What "Reading the server login for $LocalAccount"
+    $localLoginBefore = Get-TaggedValues -Lines $localLoginResult.Output -Tag 'locallogin'
+    if ($localLoginBefore.Count -ne 1 -or @('present', 'absent') -notcontains $localLoginBefore[0]) {
+        Stop-Install "the login read did not say whether the server holds a login for $LocalAccount."
     }
-    foreach ($entry in $missing) {
-        $generated = New-KitPassword
-        $variables['KitPassword_' + $entry.Login] = $generated
-        $entries += @{ Login = $entry.Login; Password = $generated; Role = $entry.Role; Sandbox = $entry.Sandbox }
+    # Local/010-LocalSandbox.sql reads both as sqlcmd scripting variables
+    # from its environment, the way every script reads its variables.
+    $variables['KitLocalAccount'] = $LocalAccount
+    $variables['KitLocalSandbox'] = $script:LocalSandbox
+}
+else {
+    # Which of the five logins the host already holds. Missing ones get a
+    # fresh password each, held in memory until the logins file is written
+    # immediately before the logins script runs.
+    $loginNames = @($script:Logins | ForEach-Object { $_.Login })
+    $loginBatch = ";SET NOCOUNT ON`n;SELECT 'kitmem-login=' + SP.[name] FROM sys.server_principals SP WHERE SP.[name] IN (" +
+        (($loginNames | ForEach-Object { "N'" + $_ + "'" }) -join ', ') + ")"
+    $loginResult = Invoke-KitSqlText -Text $loginBatch -DatabaseName 'master'
+    Stop-OnBatchFailure -Result $loginResult -What "Reading the server logins"
+    $presentLogins = Get-TaggedValues -Lines $loginResult.Output -Tag 'login'
+    $missing = @($script:Logins | Where-Object { $presentLogins -notcontains $_.Login })
+
+    foreach ($entry in $script:Logins) {
+        # A present login's CREATE branch never runs. Its variable carries this
+        # placeholder, which Security/020-Logins.sql compares against and refuses
+        # to create a login with, so a login dropped between the read above and
+        # that script fails the run rather than being created with a public value.
+        $variables['KitPassword_' + $entry.Login] = 'unused-login-already-present'
+    }
+    if ($missing.Count -gt 0) {
+        if (Test-Path -LiteralPath $LoginsPath) {
+            # The refusal says what the existing file's passwords are worth: a
+            # login it names that is on the server may hold that password, one
+            # that is not never received it.
+            $missingNames = (($missing | ForEach-Object { $_.Login }) -join ', ')
+            $verb = if ($missing.Count -eq 1) { "is" } else { "are" }
+            $fileReport = ''
+            try {
+                $existing = Get-Content -LiteralPath $LoginsPath -Raw | ConvertFrom-Json
+                $named = @($existing.logins | ForEach-Object { [string]$_.login } | Where-Object { $_ })
+                if ($named.Count -eq 0) { throw "it names no logins" }
+                $onServer = @($named | Where-Object { $presentLogins -contains $_ })
+                $offServer = @($named | Where-Object { $presentLogins -notcontains $_ })
+                $fileReport = " Of the logins that file names, " +
+                    $(if ($onServer.Count -gt 0) { ($onServer -join ', ') + " are on the server, so their passwords there may be live" } else { "none is on the server" }) +
+                    $(if ($offServer.Count -gt 0) { ", and " + ($offServer -join ', ') + " are not, so their passwords there reached no server." } else { "." })
+            }
+            catch {
+                $fileReport = " That file could not be read as a logins file (" + $_.Exception.Message + "), so whether its passwords reached the server is unknown."
+            }
+            Stop-Install ($missingNames + " " + $verb + " absent from " + $Server + " and the logins file " + $LoginsPath +
+                " already exists; this installer never overwrites a logins file." + $fileReport + " Move it aside and run again.")
+        }
+        foreach ($entry in $missing) {
+            $generated = New-KitPassword
+            $variables['KitPassword_' + $entry.Login] = $generated
+            $entries += @{ Login = $entry.Login; Password = $generated; Role = $entry.Role; Sandbox = $entry.Sandbox }
+        }
     }
 }
 
@@ -728,10 +847,13 @@ if ($missing.Count -gt 0) {
 # generated password, so an earlier failure leaves no file behind.
 $loginsScript = 'Security/020-Logins.sql'
 $loginsFileWritten = $false
+$localScript = 'Local/010-LocalSandbox.sql'
+$localScriptApplied = $false
 $applied = 0
 $changed = 0
+$directories = if ($script:LocalMode) { $script:LocalScriptDirectories } else { $script:ScriptDirectories }
 $digest = Get-StateDigest
-foreach ($directoryName in $script:ScriptDirectories) {
+foreach ($directoryName in $directories) {
     $directory = Join-Path $script:Root $directoryName
     if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
         Stop-Install "the script directory $directory is missing."
@@ -741,7 +863,10 @@ foreach ($directoryName in $script:ScriptDirectories) {
     foreach ($fileName in $files) {
         $label = $directoryName + "/" + $fileName
         if ($label -eq $loginsScript) {
-            if ($entries.Count -gt 0) {
+            if ($script:LocalMode) {
+                Write-Output ("Logins file: not written (local mode)")
+            }
+            elseif ($entries.Count -gt 0) {
                 try { Write-LoginsFile -Path $LoginsPath -Entries $entries }
                 catch { Stop-Install ("the logins file could not be written at " + $LoginsPath + ": " + $_.Exception.Message) }
                 Write-Output ("Logins file: written " + $LoginsPath + " (" + $entries.Count + " login(s))")
@@ -751,8 +876,13 @@ foreach ($directoryName in $script:ScriptDirectories) {
             }
             $loginsFileWritten = $true
         }
+        if ($script:LocalMode -and $script:FleetOnlyScripts -ccontains $label) {
+            Write-Output ("Skipped " + $label + ": local mode")
+            continue
+        }
         $result = Invoke-KitSqlcmd -InputFile (Join-Path $directory $fileName) -DatabaseName $Database -Variables $variables
         Stop-OnBatchFailure -Result $result -What ("Applying " + $label)
+        if ($label -eq $localScript) { $localScriptApplied = $true }
         $applied += 1
         $after = Get-StateDigest
         if ($after -ne $digest) {
@@ -765,20 +895,37 @@ foreach ($directoryName in $script:ScriptDirectories) {
         $digest = $after
     }
 }
-if (-not $loginsFileWritten) {
-    Stop-Install ("the scripts hold no " + $loginsScript + ", so the logins were never created; the tree is incomplete.")
-}
-
-# The logins as the host now holds them.
-$verifyResult = Invoke-KitSqlText -Text $loginBatch -DatabaseName 'master'
-Stop-OnBatchFailure -Result $verifyResult -What "Verifying the server logins"
-$nowPresent = Get-TaggedValues -Lines $verifyResult.Output -Tag 'login'
-foreach ($entry in $script:Logins) {
-    if ($nowPresent -notcontains $entry.Login) {
-        Stop-Install ("login " + $entry.Login + " is still absent after Security/020-Logins.sql ran.")
+if ($script:LocalMode) {
+    if (-not $localScriptApplied) {
+        Stop-Install ("the scripts hold no " + $localScript + ", so the sandbox row and the database user were never created; the tree is incomplete.")
     }
-    $state = if ($presentLogins -contains $entry.Login) { "present" } else { "created" }
-    Write-Output ("Login " + $entry.Login + ": " + $state)
+
+    # The local account's login as the host now holds it.
+    $verifyResult = Invoke-KitSqlText -Text $localLoginBatch -DatabaseName 'master'
+    Stop-OnBatchFailure -Result $verifyResult -What "Verifying the server login for $LocalAccount"
+    $localLoginAfter = Get-TaggedValues -Lines $verifyResult.Output -Tag 'locallogin'
+    if ($localLoginAfter.Count -ne 1 -or $localLoginAfter[0] -ne 'present') {
+        Stop-Install ("login " + $LocalAccount + " is still absent after Local/010-LocalSandbox.sql ran.")
+    }
+    $state = if ($localLoginBefore[0] -eq 'present') { "present" } else { "created" }
+    Write-Output ("Login " + $LocalAccount + ": " + $state)
+}
+else {
+    if (-not $loginsFileWritten) {
+        Stop-Install ("the scripts hold no " + $loginsScript + ", so the logins were never created; the tree is incomplete.")
+    }
+
+    # The logins as the host now holds them.
+    $verifyResult = Invoke-KitSqlText -Text $loginBatch -DatabaseName 'master'
+    Stop-OnBatchFailure -Result $verifyResult -What "Verifying the server logins"
+    $nowPresent = Get-TaggedValues -Lines $verifyResult.Output -Tag 'login'
+    foreach ($entry in $script:Logins) {
+        if ($nowPresent -notcontains $entry.Login) {
+            Stop-Install ("login " + $entry.Login + " is still absent after Security/020-Logins.sql ran.")
+        }
+        $state = if ($presentLogins -contains $entry.Login) { "present" } else { "created" }
+        Write-Output ("Login " + $entry.Login + ": " + $state)
+    }
 }
 
 Write-Output ("Summary: " + $applied + " script(s) applied, " + $changed + " changed")

@@ -75,7 +75,10 @@
 # login's password, and it reaches sqlcmd through SQLCMDPASSWORD, which this
 # script sets for the length of one spawn and restores afterwards. It is never
 # a command-line argument (a command line is readable in the process list),
-# never an output line, and never part of an error message.
+# never an output line, and never part of an error message. A config that sets
+# windowsAuth to true connects as the current Windows account instead, carries
+# no login and no password, and spawns its child with SQLCMDPASSWORD removed,
+# restoring the value it found afterwards.
 #
 # The checks connect to `master`, never to the configured database, because at
 # first run that database does not exist yet. Whether it exists is itself
@@ -224,8 +227,17 @@ function Read-ClientConfig {
         return $null
     }
 
+    # windowsAuth and trustServerCertificate count only on an exact JSON true,
+    # as memory-database.js's loadConfig reads them, so a string "true" is
+    # false for both. Under windowsAuth the probe connects as the current
+    # Windows account, and login and password are neither required nor read.
+    $windowsAuth = ($parsed.windowsAuth -is [bool]) -and $parsed.windowsAuth
+    $trustServerCertificate = ($parsed.trustServerCertificate -is [bool]) -and $parsed.trustServerCertificate
+
     $missing = @()
-    foreach ($key in @("server", "database", "login", "password")) {
+    $requiredKeys = @("server", "database")
+    if (-not $windowsAuth) { $requiredKeys += @("login", "password") }
+    foreach ($key in $requiredKeys) {
         $value = $parsed.$key
         if ($null -eq $value -or ([string]$value).Trim() -eq "") { $missing += $key }
     }
@@ -280,16 +292,21 @@ function Read-ClientConfig {
         }
     }
 
-    return @{
-        Server         = ([string]$parsed.server).Trim()
-        Database       = $database
-        DatabaseUsable = $databaseUsable
-        Login          = ([string]$parsed.login).Trim()
-        Password       = [string]$parsed.password
-        EmbeddingUrl   = $embeddingUrl
-        EmbeddingModel = $embeddingModel
-        TimeoutMs      = $timeoutMs
+    $config = @{
+        Server                 = ([string]$parsed.server).Trim()
+        Database               = $database
+        DatabaseUsable         = $databaseUsable
+        WindowsAuth            = $windowsAuth
+        TrustServerCertificate = $trustServerCertificate
+        EmbeddingUrl           = $embeddingUrl
+        EmbeddingModel         = $embeddingModel
+        TimeoutMs              = $timeoutMs
     }
+    if (-not $windowsAuth) {
+        $config.Login = ([string]$parsed.login).Trim()
+        $config.Password = [string]$parsed.password
+    }
+    return $config
 }
 
 # ---------------------------------------------------------------------------
@@ -315,7 +332,8 @@ function Resolve-Sqlcmd {
 #
 # Four things here are load-bearing. The password reaches the child through
 # SQLCMDPASSWORD, saved and restored around the spawn so a value the caller's
-# environment already held survives this script. The batch goes in a temp file
+# environment already held survives this script; under windowsAuth the
+# variable is removed for the spawn and restored the same way. The batch goes in a temp file
 # rather than on the command line, which keeps a quoting bug from becoming a
 # syntax error on the server, written with a byte-order mark so the tool reads
 # it as UTF-8.
@@ -326,14 +344,19 @@ function Resolve-Sqlcmd {
 # names, so a $(VAR) reference in the batch stays literal while the :r and :!!
 # directives, which read a file and run a shell command, are still live. The
 # banner offers -X as "disable commands, startup script, environment variables"
-# without naming which commands it means, and -X is unusable here whichever ones
-# it covers: taking the environment variables away takes SQLCMDPASSWORD with
-# them, which makes the login fail and the tool prompt for a password instead. What keeps a directive out of the batch is therefore the
-# batch's authorship rather than a flag: every line is written by this script,
-# and the one value interpolated into one is the database name, screened
-# against a plain-identifier pattern at the config read. A caller that puts
-# text it did not author into a batch needs its own answer to this and cannot
-# inherit one from here.
+# without naming which commands it means. On the SQL-login branch -X is
+# unusable whichever ones it covers: taking the environment variables away
+# takes SQLCMDPASSWORD with them, which makes the login fail and the tool
+# prompt for a password instead. Neither branch passes -X, the -E branch
+# included. Apart from SQLCMDPASSWORD, the child inherits this process's
+# environment on both branches, so a startup script named by SQLCMDINI is
+# not turned off. What keeps a directive out of the batch is therefore the
+# batch's authorship rather than a flag: every line is written
+# by this script, and the one value interpolated into one is the database
+# name, screened against a plain-identifier pattern at the config read. That
+# authorship guards the batch's own lines only, and nothing here guards a
+# startup script. A caller that puts text it did not author into a batch
+# needs its own answer to this and cannot inherit one from here.
 #
 # And the run is captured whole before anything filters it: piping a native
 # command through a filter that closes the pipeline early makes PowerShell
@@ -360,17 +383,34 @@ function Invoke-SqlBatch {
         }
     }
     $batchFile = Join-Path ([System.IO.Path]::GetTempPath()) ("kit-memory-db-probe-" + [guid]::NewGuid().ToString("n") + ".sql")
+    # SQLCMDPASSWORD holds the config's password for a SQL login's spawn and is
+    # removed for an -E spawn, whose child has no use for a secret. Either way
+    # the value this process held is put back afterwards. No other variable is
+    # touched, so the child inherits the rest of this process's environment,
+    # SQLCMDINI included, and no -X is passed on either branch.
+    $sqlAuth = -not $Config.WindowsAuth
     $savedPassword = [Environment]::GetEnvironmentVariable("SQLCMDPASSWORD", "Process")
     try {
         Set-Content -LiteralPath $batchFile -Value $Batch -Encoding utf8BOM -ErrorAction Stop
-        $env:SQLCMDPASSWORD = $Config.Password
-        # -N encrypts and -C is deliberately absent, so the connection succeeds
-        # only where this machine trusts the host's certificate. -b makes a
-        # SQL error a non-zero exit, -I quotes identifiers, -h -1 and -W strip
-        # the headers and the padding so each answer is one bare line, and -x
-        # leaves a $(VAR) reference in the batch literal.
-        $output = & $SqlcmdPath -S $Config.Server -d master -U $Config.Login -N -b -I -h -1 -W -x `
-            -l $seconds -t $seconds -i $batchFile 2>&1
+        if ($sqlAuth) { $env:SQLCMDPASSWORD = $Config.Password }
+        else { Remove-Item "Env:\SQLCMDPASSWORD" -ErrorAction SilentlyContinue }
+        # The account is -E under windowsAuth and -U <login> otherwise, the
+        # same form the installer's Invoke-KitSqlcmd and the client's spawn
+        # use, though each of the three places it at its own point in the
+        # argument list. -N encrypts. -C is present only where windowsAuth and
+        # trustServerCertificate are both true, which is a machine's own
+        # instance with its self-signed certificate. Everywhere else it is
+        # absent, so the connection succeeds only where this machine trusts the
+        # host's certificate. -b makes a SQL error a non-zero exit, -I quotes
+        # identifiers, -h -1 and -W strip the headers and the padding so each
+        # answer is one bare line, and -x leaves a $(VAR) reference in the
+        # batch literal.
+        $arguments = @('-S', $Config.Server, '-d', 'master')
+        if ($sqlAuth) { $arguments += @('-U', $Config.Login) } else { $arguments += '-E' }
+        $arguments += '-N'
+        if ($Config.WindowsAuth -and $Config.TrustServerCertificate) { $arguments += '-C' }
+        $arguments += @('-b', '-I', '-h', '-1', '-W', '-x', '-l', $seconds, '-t', $seconds, '-i', $batchFile)
+        $output = & $SqlcmdPath @arguments 2>&1
         $code = $LASTEXITCODE
         $lines = @($output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -ne "" })
         return @{ Code = $code; Lines = $lines; Spawned = $true }
@@ -556,16 +596,22 @@ $sqlcmdPath = Resolve-Sqlcmd
 
 # --- 1. The encrypted connection.
 # The proof is the driver's own refusal behaviour under the probe's flags. Every
-# spawn carries -N and never -C, and under those flags the ODBC driver refuses an
-# unencrypted link and an untrusted certificate chain outright rather than
-# downgrading, so a batch that answered at all ran over an encrypted link whose
-# certificate this machine trusts. The batch reads two values any login can
-# read about its own session, so the line carries a measurement rather than a
-# bare "connected". No server-side value would do better: CONNECTIONPROPERTY
+# spawn carries -N, and every spawn but a machine's own instance's carries no
+# -C. Under those flags the ODBC driver refuses an unencrypted link and an
+# untrusted certificate chain outright rather than downgrading, so a batch that
+# answered at all ran over an encrypted link whose certificate this machine
+# trusts. Where windowsAuth and trustServerCertificate are both true the spawn
+# carries -C, the link is still encrypted, the certificate is not validated
+# because the client file asks for that, and the line says so. The batch reads
+# two values any login can read about its own session, so the line carries a
+# measurement rather than a bare "connected". No server-side value would do
+# better: CONNECTIONPROPERTY
 # reports no encrypt_option for any login, sysadmin included, and the
 # sys.dm_exec_connections column is closed to an execute-only login and reads
-# TRUE on an unvalidated link besides, which is the half the client proves.
-# 'ok', 'failed' or 'starved', which the checks below read. Both of the last
+# TRUE on an unvalidated link besides. Certificate validation is proven by the
+# client's refusal on a spawn without -C, and on a spawn with -C nothing proves
+# it.
+# $connectionState is 'ok', 'failed' or 'starved', which the checks below read. Both of the last
 # two are failures and both exit the run non-zero; they differ only in what the
 # line says, since a connection that was attempted and refused and a connection
 # the budget never funded are different things to the operator reading them.
@@ -595,7 +641,12 @@ else {
         $parts = $connected.Split("|", 2)
         $login = Get-SanitizedLine $parts[0] 40
         $transport = if ($parts.Length -gt 1) { Get-SanitizedLine $parts[1] 20 } else { "unknown transport" }
-        Write-Check "PASS" 1 "Connection" ("encrypted and certificate-validated by the client (-N, no -C), as " + $login + " over " + $transport)
+        if ($config.WindowsAuth -and $config.TrustServerCertificate) {
+            Write-Check "PASS" 1 "Connection" ("encrypted, certificate not validated, per client file (-N -C), as " + $login + " over " + $transport)
+        }
+        else {
+            Write-Check "PASS" 1 "Connection" ("encrypted and certificate-validated by the client (-N, no -C), as " + $login + " over " + $transport)
+        }
     }
 }
 
