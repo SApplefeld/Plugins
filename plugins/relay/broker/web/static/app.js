@@ -2290,6 +2290,19 @@
   }
 
   /**
+   * Whether a draft holds no word a person would see, as `isBlankText` in `broker/sanitize.ts` reads
+   * an answer: the three odd line breaks U+0085, U+2028 and U+2029 made newlines, every code point
+   * `invisibleCode` holds dropped, and the rest trimmed to nothing. The breaks go first because
+   * `trim` keeps U+0085 and `invisibleCode` does not hold it, while the broker makes it a newline and
+   * so calls it blank. A test holds this equal to the broker's check.
+   */
+  function blankDraft(text) {
+    return Array.from(text.replace(/[\u0085\u2028\u2029]/g, "\n"))
+      .filter((character) => !invisibleCode(character.codePointAt(0)))
+      .join("").trim() === "";
+  }
+
+  /**
    * Takes the echo a landed line's words pair with off the list and marks it landed, or answers null
    * where none has those words. An echo whose request is out or was delivered is taken before one
    * whose request ended with no readable answer, since a line resent after such an end is the one
@@ -3688,8 +3701,8 @@
   async function sendCorrect(item) {
     const held = needsMe.correct;
     if (held === null || held.key !== itemKey(item)) return;
+    if (blankDraft(held.draft)) return;
     const words = held.draft.trim();
-    if (words === "") return;
     const sent = await sendAct(item, "correct", {
       askId: item.askId,
       repo: item.repo,
@@ -3874,7 +3887,7 @@
     field.disabled = needsMe.acting;
     field.dataset.key = "correct-text|" + key;
     const send = actButton("nm-send", "Send", "correct-send|" + key, () => sendCorrect(item));
-    send.disabled = needsMe.acting || held.draft.trim() === "";
+    send.disabled = needsMe.acting || blankDraft(held.draft);
     // The draft is read from the field the event fired on, and the redraw sets Send's state from it; the
     // patch keeps this field and its caret, since the draft it draws is the field's own value.
     listen(field, "input", (event) => {

@@ -199,6 +199,20 @@ export function withoutInvisible(value: string): string {
 }
 
 /**
+ * Whether a text holds no word a person would see: true where `withoutInvisible(value).trim()` is
+ * the empty string.
+ *
+ * The one test for an empty answer to an ask, on the door's route and the page's alike, so the two
+ * cannot disagree on it. A plain `trim` keeps the zero-width family, the bidi controls and the word
+ * joiner, so words made only of those would pass it and reach a session as an answer with
+ * nothing in it. The page's `blankDraft` in `broker/web/static/app.js` is this test written over the
+ * page's copy of the class, held equal to it by a test.
+ */
+export function isBlankText(value: string): boolean {
+  return withoutInvisible(value).trim() === "";
+}
+
+/**
  * Truncates to a length in code points, never in UTF-16 units. Cutting an astral-plane character in
  * half leaves a lone surrogate, which is not valid UTF-8 for a request body or a JSON-RPC frame.
  *

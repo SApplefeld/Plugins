@@ -47,7 +47,7 @@ import { pipeline } from "node:stream/promises";
 import { MAX_ASKS_PER_LIST, questionOf } from "../decisions/ledger.ts";
 import type { AskEntry } from "../decisions/ledger.ts";
 import type { Logger } from "../log.ts";
-import { oneLine } from "../sanitize.ts";
+import { isBlankText, oneLine } from "../sanitize.ts";
 import { READER_KEY_HEADER, foldRootName } from "./config.ts";
 import type { WebConfig } from "./config.ts";
 import type { TailnetPeer, WebIdentity } from "./identity.ts";
@@ -1673,7 +1673,7 @@ export function registerAgreeHandlers(register: WebHandler["register"], options:
   post("correct", MAX_SAY_BODY_BYTES, async (body, login) => {
     const named = askOf(body);
     const { words } = body;
-    if (named === null || typeof words !== "string" || words.trim() === "" || words.length > MAX_CORRECT_WORDS_LENGTH) return null;
+    if (named === null || typeof words !== "string" || isBlankText(words) || words.length > MAX_CORRECT_WORDS_LENGTH) return null;
     return { status: await correct(login, named.repo, named.askId, words, drawnOf(body), drawnRecommendOf(body)) };
   });
 

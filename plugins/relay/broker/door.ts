@@ -100,7 +100,8 @@
 //     are the ask's fields as GET /door/pending listed them, sent back so the answer is held to
 //     the ask its sender read. `words` is read on an `answer` alone.
 //     -> 200 {"status": "..."}, the first of these that holds:
-//        empty: an answer whose words, trimmed, are empty.
+//        empty: an answer whose words hold nothing but whitespace and invisible characters, as
+//        isBlankText in broker/sanitize.ts reads them.
 //        too-long: an answer whose words pass 3,500 code points. A longer line would be cut, and
 //        a cut one would put unfinished words into a session.
 //        closed: no registry record carries the lineage, or a reading of the ask ledgers taken
@@ -183,6 +184,7 @@ import type { SessionRecord } from "./registry.ts";
 import { createRepeatLog } from "./repeat-log.ts";
 import type { RepeatLogSurface } from "./repeat-log.ts";
 import type { DoorAnswerStatus, DoorDeliveryStatus, DoorVerdictStatus } from "./routing/inbound.ts";
+import { isBlankText } from "./sanitize.ts";
 import type { PendingPermission, Verdict } from "./security/permission.ts";
 import {
   MAX_ASK_ID_LENGTH,
@@ -662,7 +664,7 @@ export function createDoorRoutes(
         refuse(response, "/door/ask", 400, "words is not a string");
         return;
       }
-      if (words.trim() === "") {
+      if (isBlankText(words)) {
         send(response, 200, { status: "empty" });
         return;
       }
