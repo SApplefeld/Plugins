@@ -56,10 +56,11 @@ export const MENTIONS_SHAPE_SENTENCE =
  */
 function noSessionSentence(opening: string): string {
   return (
-    `${opening}: the broker holds no session for this process, so there is no thread. The broker ` +
-    "may register this session from its next hook post, where this host's hooks post to the " +
-    "broker, so this call is worth one more try after the next tool call. If that try gets the " +
-    "same answer, do not keep retrying: the session may stay without a thread until it restarts. " +
+    `${opening}: the broker holds no session for this process, so there is no conversation. The ` +
+    "broker may register this session from its next hook post, where this host's hooks post to " +
+    "the broker, so this call is worth one more try after the next tool call. If that try gets " +
+    "the same answer, do not keep retrying: the session may stay without a conversation until it " +
+    "restarts. " +
     `A broker restart registers no session, so do not call ${RESTART_TOOL_NAME} or ask for a restart.`
   );
 }
@@ -67,7 +68,7 @@ function noSessionSentence(opening: string): string {
 /** What the model is told when a reply had nowhere to land. */
 const REPLY_FAILURES: Record<string, string> = {
   "no-session": noSessionSentence("Not sent"),
-  "no-thread": "Not sent: this session's Discord thread has not been opened yet.",
+  "no-thread": "Not sent: this session's conversation has not been opened yet.",
   failed: "Not sent: the broker could not post the message.",
 };
 
@@ -77,11 +78,11 @@ const REPLY_FAILURES: Record<string, string> = {
  * Held apart from the server wiring so the mapping can be driven on its own: what a status becomes
  * is the whole of this tool's model-facing behavior, and `isError` is the load-bearing half of it.
  * An error is the signal that invites another attempt, so it is set on every outcome that had
- * nowhere to land and withheld from the one that may already be part-way up the thread.
+ * nowhere to land and withheld from the one that may already be part-way into the conversation.
  *
  * `report` is what the broker said about a sent reply's names: the ones that matched no single
- * account on this host's allowlist, and whether the thread's ping window quieted the rest. Each adds one
- * sentence after the sent sentence and never an error, since the message is in the thread and an
+ * account on this host's allowlist, and whether the conversation's ping window quieted the rest. Each adds one
+ * sentence after the sent sentence and never an error, since the message is in the conversation and an
  * error would have the model send it again. An unresolved name is the model's own word handed
  * back, quoted as a JSON string so a name with spaces reads whole and any control character in
  * it is escaped rather than written into the result.
@@ -92,7 +93,7 @@ export function replyToolResult(
   report?: { unresolved?: readonly string[]; quieted?: boolean },
 ): CallToolResult {
   if (status === "sent") {
-    const sentences = ["Sent to this session's thread."];
+    const sentences = ["Sent to this session's conversation."];
     if (report?.unresolved !== undefined && report.unresolved.length > 0) {
       const names = report.unresolved.map((name) => JSON.stringify(name)).join(", ");
       sentences.push(`These names matched no single account on this host's allowlist and pinged nobody: ${names}.`);
@@ -104,7 +105,7 @@ export function replyToolResult(
   }
   if (status === "still-posting") {
     // The broker was answering right up to the moment the wait ran out, so the messages may be
-    // going up in the thread now: sending them again is how the operator reads the whole answer
+    // going up in the conversation now: sending them again is how the operator reads the whole answer
     // twice. The instruction leads, because it is the part that has to survive being skimmed.
     return {
       content: [
@@ -112,7 +113,7 @@ export function replyToolResult(
           type: "text",
           text:
             "Do not send this message again. The broker is still posting it, so it may already " +
-            "be in this session's thread in whole or in part.",
+            "be in this session's conversation in whole or in part.",
         },
       ],
     };
@@ -150,7 +151,7 @@ export const NOTED_WORDS_SENTENCE =
  */
 export const NOTED_FAILURES: Record<string, string> = {
   "no-session": noSessionSentence("Not marked"),
-  "no-thread": "Not marked: this session's Discord thread has not been opened yet.",
+  "no-thread": "Not marked: this session's conversation has not been opened yet.",
   failed: "Not marked: the broker could not mark the messages.",
 };
 
@@ -208,7 +209,7 @@ export async function replyToolCall(
         content: [
           {
             type: "text",
-            text: "Not marked: this session was not started through the launch wrapper, so it has no Discord thread.",
+            text: "Not marked: this session was not started through the launch wrapper, so it has no conversation.",
           },
         ],
         isError: true,
@@ -240,19 +241,19 @@ export async function replyToolCall(
   }
   if (!watched) {
     // Answered here rather than by opening a socket the broker would have nothing to match: this
-    // session was started without the launch wrapper, so no thread exists anywhere for it.
+    // session was started without the launch wrapper, so no conversation exists anywhere for it.
     return {
       content: [
         {
           type: "text",
-          text: "Not sent: this session was not started through the launch wrapper, so it has no Discord thread.",
+          text: "Not sent: this session was not started through the launch wrapper, so it has no conversation.",
         },
       ],
       isError: true,
     };
   }
   // Whatever chat_id was passed is left where it is. The broker routes by session, which is what
-  // lets an unprompted reply, sent with no chat_id at all, still reach the right thread.
+  // lets an unprompted reply, sent with no chat_id at all, still reach the right conversation.
   const result: ReplyOutcome = await reply(message, file, mentions);
   return replyToolResult(result.status, result.reason, { unresolved: result.unresolved, quieted: result.quieted });
 }
@@ -286,7 +287,8 @@ export function restartToolResult(outcome: RestartOutcome): CallToolResult {
           type: "text",
           text:
             "The broker is restarting onto the code and configuration on disk. This session's " +
-            "relay and thread reconnect on their own; wait before sending anything to the thread.",
+            "relay and conversation reconnect on their own; wait before sending anything to the " +
+            "conversation.",
         },
       ],
     };

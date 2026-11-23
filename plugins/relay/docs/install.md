@@ -1,6 +1,6 @@
 # Installing a host
 
-One broker per host, one Discord bot identity per host, one channel per host. A broker reaches its
+One broker per host, and on a host with Discord one bot identity and one channel. A broker reaches its
 sessions over localhost. Its one optional second listener, the web surface, binds a Tailscale
 address and serves the operator's own pages to the tailnet devices the keys under "The web surface
 (optional)" name. Nothing else is reachable from another machine, save one. Where
@@ -13,13 +13,15 @@ do not ship in the public folder.
 
 The operator's own fleet runs on three hosts, called HOST-A, HOST-B and HOST-C here, and a client host is one more ("A
 client host is its own server, bot and broker" below). HOST-A and HOST-B are organization-owned; HOST-C is
-a personal Max account with no organization. Steps 1 through 4 are identical on every host. The only
-thing that differs is the channel flag the launch wrapper passes, which is decided by whether that
-host's managed settings allowlist the relay, not by which kind of account pays for the session.
+a personal Max account with no organization. Steps 1 through 4 are identical on every host with
+Discord. The only
+thing that differs between them is the channel flag the launch wrapper passes, which is decided by whether that
+host's managed settings allowlist the relay, not by which kind of account pays for the session. A host with no Discord skips step 1 and passes
+`-NoDiscord` in step 2.
 
 ## 1. Create the Discord application
 
-Once per host. Each host gets its own bot so no two fleets share an identity, and so a revoked token
+Once per host with Discord. A host with no Discord skips this step. Each host gets its own bot so no two fleets share an identity, and so a revoked token
 takes down one machine rather than all of them.
 
 1. At <https://discord.com/developers/applications>, create an application and name it for the host.
@@ -202,13 +204,49 @@ moving the checkout or rotating a token. The identity arguments are needed on th
 only: a re-run reads `-HostName`, `-ChannelId`, `-AllowedUserId`, `-Senders`, and `-Port`
 back from the `broker.env` the last install wrote, announces each reused value as it picks it up, and refuses a
 malformed ID or port on disk naming the key. An argument you supply always wins, which is how a host is
-rebound to a different channel.
+rebound to a different channel. The three Discord values, `-ChannelId`, `-AllowedUserId` (or a
+`-Senders` list naming an operator) and the bot token, are required unless `-NoDiscord` is passed.
+`Install-Host.ps1` run by hand without `-ChannelId` or `-NoDiscord` is refused, naming both.
+
+### A host with no Discord
+
+`-NoDiscord` installs a host that has no Discord bot, channel or operator account:
+
+```powershell
+install\Install-All.ps1 -HostName <host> -NoDiscord
+```
+
+The host name is then the only required identity value. Pass `-NoDiscord` on every later run too:
+nothing in `broker.env` records it, so a re-run without it is refused for the missing `-ChannelId` and operator.
+The run writes no Discord setting into `broker.env` and makes no bot token file. It hardens the
+state root as on any host, hardens the `announce` folder in the token file's place, and checks the
+root's access list through that folder. It refuses three mixes, each before anything is written:
+
+- a Discord parameter beside the switch: `-ChannelId`, `-AllowedUserId`, `-Senders`, `-BotToken` or
+  `-BotTokenFile`;
+- a host whose `broker.env` already names `CHANNEL_DISCORD_CHANNEL`, `CHANNEL_DISCORD_TOKEN_FILE`,
+  `CHANNEL_ALLOWED_USER_ID` or `CHANNEL_SENDERS`, or whose state root already holds
+  `discord-token.txt`. The installer moves no host off Discord; removing those settings is a step a
+  person takes by hand, after which `-NoDiscord` can run again;
+- where `Install-Host.ps1` runs alone, `-SkipAcl`, which would leave the root that holds the door's
+  key neither hardened nor verified.
+
+A host installed this way carries nothing until `broker.env` names a surface a person reads from.
+It carries a conversation only where that file names `CHANNEL_DOOR_KEY_FILE`, the local door under
+"The local door (optional)" below, or `CHANNEL_WEB_BIND`, the web surface under "The web surface
+(optional)". It holds a tool approval or a question for a person to settle only where
+`CHANNEL_DOOR_STANDING` is `operator`, through the door, or where `CHANNEL_WEB_BIND` is set, through
+an operator the web page admits. A question is held only while `CHANNEL_MIRROR` and
+`CHANNEL_INTERIM_MIRROR` are on, as they are by default. Otherwise each approval goes to the console's own dialog and each
+question to the console's picker. Set those values by hand in `broker.env`, then restart the broker.
+The section "A host with no Discord" in `operations.md` says what such a host has and does not
+have.
 
 A host installing from the public marketplace runs the copy of this script in the folder Claude
 Code cloned the public marketplace into, under `plugins/relay/install/`, with `-Marketplace
 applefeld`, as "The relay as a plugin" below describes.
 
-Step 1 stays manual either way (it is Discord's web console), and a host still runs the per-host
+On a host with Discord, step 1 stays manual (it is Discord's web console). Every host still runs the per-host
 verification checklist under "The relay as a plugin" on its first wrapped launch. The sections
 below describe what the one command does, and remain the way to run any piece alone.
 
@@ -219,6 +257,10 @@ From the repository root, in a plain non-elevated session:
 ```powershell
 install\Install-Host.ps1 -HostName <host> -ChannelId <channel id> -AllowedUserId <your user id>
 ```
+
+On a host with no Discord, run `install\Install-Host.ps1 -HostName <host> -NoDiscord` instead. It
+prompts for no token and writes no token file, so the token paragraphs below apply only to a host
+with Discord.
 
 It prompts for the bot token and reads it without echoing. **Do not pass the token as plain text on
 the command line**: PowerShell's history file keeps it in the clear indefinitely, and it also lands
@@ -248,7 +290,7 @@ refuses a port that disagrees rather than moving one copy and silently disconnec
 
 The installer:
 
-- writes `broker.env` and the token file under `%LOCALAPPDATA%\sapplefeld-channels\`, outside the
+- writes `broker.env`, and on a host with Discord the token file, under `%LOCALAPPDATA%\sapplefeld-channels\`, outside the
   repository, keeping any allowlisted key already in `broker.env` that this run does not itself set,
   so a knob tuned by hand survives a re-install,
 - edits your user-level `~/.claude/settings.json` by the host's hook owner, described under "Hook
@@ -258,7 +300,8 @@ The installer:
   hook entry of this project's from that file and merges the permission rules alone. Either way it backs the file up
   first and preserves every hook, rule, and setting that is not this project's,
 - hardens the access control lists on the whole execution surface: `hooks/`, `relay/`, `wrapper/`,
-  `install/`, and `broker/` as directories, the bot token file, and the state root,
+  `install/`, and `broker/` as directories, the bot token file (on a host with no Discord, the `announce`
+  folder in its place), and the state root,
 - installs the dependencies through `install/ensure-dependencies.mjs`, which runs `npm ci` with
   install scripts off. That installs the reviewed lockfile rather than resolving newer dependencies,
   and fails the run on any download whose checksum differs from the lockfile's `integrity` hash. It

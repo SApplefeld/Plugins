@@ -24,9 +24,9 @@
 // judged rows a session read and found nothing to answer in.
 //
 // The delivered event's class is the lowest class present, `operator` only when every buffered
-// message was written from an operator account. A line's prefix is text: a message's own text can
-// span lines, so a participant can type a line that reads as an operator's, and the line's class is
-// data for following the conversation rather than evidence of standing. The class the persona
+// message is of operator class. A line's prefix is text: a message's own text can span lines, so a
+// participant can type a line that reads as an operator's, and the line's class is never evidence
+// of standing. The class the persona
 // plugin acts on is the event's alone, and this is where it is computed from the accounts that
 // wrote the event, never from what any line says.
 //

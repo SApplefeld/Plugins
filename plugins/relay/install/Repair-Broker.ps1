@@ -435,8 +435,15 @@ function Get-ChannelHostHealth {
         if ($values.Contains('CHANNEL_DISCORD_TOKEN_FILE')) {
             $tokenFile = ([string]$values['CHANNEL_DISCORD_TOKEN_FILE']).Trim()
         }
+        # A host installed with -NoDiscord names none of the four Discord keys Install-Host.ps1's
+        # -NoDiscord refusal reads, and needs no token file. A host naming any of them is set up for
+        # Discord, and a missing token file there is a failure.
+        $discordKeys = @('CHANNEL_DISCORD_CHANNEL', 'CHANNEL_DISCORD_TOKEN_FILE', 'CHANNEL_ALLOWED_USER_ID', 'CHANNEL_SENDERS')
+        $namesDiscord = @($discordKeys | Where-Object { $values.Contains($_) }).Count -gt 0
         if ($tokenFile) {
             Write-ChannelCheck -Name 'bot token file' -Ok (Test-Path -LiteralPath $tokenFile) -Detail $tokenFile
+        } elseif (-not $namesDiscord) {
+            Write-ChannelCheck -Name 'bot token file' -Ok $true -Detail 'broker.env names no Discord setting (channel, token file, operator id, sender list)'
         } else {
             Write-ChannelCheck -Name 'bot token file' -Ok $false -Detail 'broker.env names none'
         }

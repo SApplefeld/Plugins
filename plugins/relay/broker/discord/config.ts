@@ -80,11 +80,24 @@ export type DiscordConfigContext = {
   warn?: (message: string) => void;
 };
 
-/** Returns null when no token or no channel is configured, which turns the surfaces off. */
+/**
+ * What the environment says about Discord, as three states the broker builds differently from.
+ * `whole` is a channel and a token, and the surfaces run. `none` is no Discord setting at all: no
+ * `CHANNEL_DISCORD_CHANNEL`, no `CHANNEL_DISCORD_TOKEN_FILE` and no `CHANNEL_DISCORD_TOKEN`, which is
+ * a host meant to run with no Discord. `half` is a channel with no token or a token with no channel,
+ * a mistake the loader warns about, and such a host is given neither the surfaces nor the local
+ * conversation a host with no Discord gets.
+ */
+export type DiscordSetup =
+  | { state: "whole"; config: DiscordConfig }
+  | { state: "none" }
+  | { state: "half" };
+
+/** Reads the Discord settings into one of the three states `DiscordSetup` names. */
 export function loadDiscordConfig(
   env: NodeJS.ProcessEnv,
   context: DiscordConfigContext,
-): DiscordConfig | null {
+): DiscordSetup {
   // Taken and dropped from the environment before anything can return early, whatever else is or
   // is not configured. Every subprocess inherits this environment, and a bearer credential sitting
   // in it is one child process away from being read.
@@ -99,13 +112,12 @@ export function loadDiscordConfig(
   const wanted = Boolean(direct) || Boolean(tokenFile) || Boolean(channelId);
 
   if (!channelId) {
-    if (wanted) {
-      context.warn?.(
-        "discord: a token is configured but CHANNEL_DISCORD_CHANNEL is not, so the surfaces are " +
-          "off. Sessions will be tracked and reachable by nothing.",
-      );
-    }
-    return null;
+    if (!wanted) return { state: "none" };
+    context.warn?.(
+      "discord: a token is configured but CHANNEL_DISCORD_CHANNEL is not, so the surfaces are " +
+        "off. Sessions will be tracked and reachable by nothing.",
+    );
+    return { state: "half" };
   }
   // The channel ID is interpolated into a token-bearing request path, so its shape is checked
   // rather than trusted.
@@ -121,7 +133,7 @@ export function loadDiscordConfig(
       "discord: CHANNEL_DISCORD_CHANNEL names a channel but no bot token is configured, so the " +
         "surfaces are off. Sessions will be tracked and reachable by nothing.",
     );
-    return null;
+    return { state: "half" };
   }
 
   const idleAfterMs = integerAtLeast(
@@ -152,7 +164,7 @@ export function loadDiscordConfig(
     );
   }
 
-  return {
+  const config: DiscordConfig = {
     token,
     channelId,
     refreshIntervalMs: integerAtLeast(
@@ -168,4 +180,5 @@ export function loadDiscordConfig(
     // list says so once. The mirror switch's idiom, read through the mirror switch's own parser.
     archiveOnEnd: strictFlag(env.CHANNEL_DISCORD_ARCHIVE_ON_END, true),
   };
+  return { state: "whole", config };
 }

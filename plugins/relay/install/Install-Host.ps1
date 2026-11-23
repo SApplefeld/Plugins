@@ -13,9 +13,15 @@ project's is removed from it and none is merged. The relay's reply permission ru
 both. Hardens the ACL on the whole execution
 surface a scheduled task and a Bypass-executed hook depend on: hooks/, relay/, wrapper/, install/,
 broker/, the bot token file, and the state root that holds it, so only this process's own account,
-Administrators, and SYSTEM can read or write any of them. Every file and subdirectory under those
-trees is then read back through the broker's own protection check, and one still open to another
-account fails the install rather than being reported as provisioned.
+Administrators, and SYSTEM can read or write any of them. On a -NoDiscord host, which has no token
+file, the state root's announce folder is hardened in its place. Every file and subdirectory under
+the code trees, hooks/, relay/, wrapper/, install/ and broker/, plus duet/ with -Duet, is then read
+back through the broker's own protection check, as are, with -Duet, the web reader key file and the
+Duet state file where it exists. The state root is not walked: it is verified through the token
+file, or on a -NoDiscord host the announce folder, whose check also reads its parent's access list.
+That parent is the state root for the announce folder and for a token file directly in the root,
+as the default is; for a token file in a subfolder of the root, it is that subfolder. A path still
+open to another account fails the install rather than being reported as provisioned.
 
 Does not register the scheduled task; run Register-BrokerTask.ps1 separately, from an elevated
 session, once this has completed.
@@ -33,7 +39,8 @@ The label this host's sessions carry on every surface. Any name is valid: the la
 not read it, and picks its channel flag from the machine's CHANNEL_LAUNCH_FLAG variable instead.
 
 .PARAMETER ChannelId
-The Discord channel this host's threads are opened in. A snowflake (17-20 digits).
+The Discord channel this host's threads are opened in. A snowflake (17-20 digits). Required unless
+-NoDiscord is given, and refused beside it.
 
 .PARAMETER AllowedUserId
 A Discord user ID allowed to send this host's sessions messages and approve their permission
@@ -62,6 +69,23 @@ Path to an existing file already holding the bot token. Must resolve inside the 
 an operator-chosen directory outside the root this installer owns is how a `-BotTokenFile D:\token.txt`
 strips a whole drive's ACL down to three entries. Mutually exclusive with -BotToken.
 
+.PARAMETER NoDiscord
+Installs a host with no Discord: no channel, no operator Discord ID, no roster and no bot token.
+-ChannelId, -AllowedUserId, -Senders, -BotToken and -BotTokenFile are each refused beside it, since a
+host with half a Discord configuration starts a broker with neither surface whole. No token prompt
+runs, no token file is written, read or hardened, and broker.env receives no CHANNEL_DISCORD_CHANNEL,
+CHANNEL_DISCORD_TOKEN_FILE, CHANNEL_ALLOWED_USER_ID or CHANNEL_SENDERS. A host whose broker.env already
+holds any of those four keys, or whose state root holds discord-token.txt, is refused before anything
+is written: this script moves no host off Discord, and removing those settings is a step a person
+takes by hand. The state root is still hardened, and its announce folder takes the token file's place:
+it is hardened as the token file is, and the state root's access list is verified through it.
+-SkipAcl is refused beside the switch, since it would leave that state root neither hardened nor
+verified. Such a host carries a conversation only where broker.env names CHANNEL_DOOR_KEY_FILE or
+CHANNEL_WEB_BIND. It holds a tool approval for a person to settle only where CHANNEL_DOOR_STANDING is
+operator, through the door, or where CHANNEL_WEB_BIND is set, through an operator the web page
+admits; otherwise each approval goes to the console's own dialog. This script writes no door
+setting.
+
 .PARAMETER Port
 The broker's listening port. Must equal the port already baked into every http hook URL in
 hooks/settings-fragment.json, because nothing here rewrites hooks/session-start.ps1's own copy of
@@ -86,8 +110,9 @@ root -BotTokenFile must resolve inside. Defaults to Get-ChannelStateRoot
 Skips every ACL hardening step, and the verification that reads those paths back. Refuses to run at
 all when a token is being provisioned (from either
 -BotToken or -BotTokenFile), because a credential file this installer chose not to protect is worse
-than one it never touched. For a test run against a fixture tree with no token involved, where
-hardening the fixture's own ACL is not the thing under test.
+than one it never touched. Refused beside -NoDiscord too, whose state root is verified only by the
+step this skips. For a test run against a fixture tree with no token involved, where hardening the
+fixture's own ACL is not the thing under test.
 
 .PARAMETER SkipNpmCi
 Skips installing the dependencies, which install/ensure-dependencies.mjs does with `npm ci`. For a
@@ -168,7 +193,8 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$HostName,
 
-    [Parameter(Mandatory)]
+    # Not Mandatory: -NoDiscord installs a host with none, which the check below the parameters
+    # enforces.
     [ValidatePattern('^\d{17,20}$')]
     [string]$ChannelId,
 
@@ -185,6 +211,8 @@ param(
     [System.Security.SecureString]$BotToken,
 
     [string]$BotTokenFile,
+
+    [switch]$NoDiscord,
 
     [Nullable[int]]$Port,
 
@@ -242,11 +270,32 @@ param(
 # port, so the value the server will run on is resolved here when none is given.
 $DefaultDuetPort = 8790
 
+# Before anything is written or prompted for: a -NoDiscord host holds no Discord value, so each
+# parameter that would give it one is refused beside the switch rather than ignored, and a Discord
+# host is refused without its channel.
+if ($NoDiscord) {
+    $discordParameters = @()
+    if ($ChannelId) { $discordParameters += '-ChannelId' }
+    if ($AllowedUserId) { $discordParameters += '-AllowedUserId' }
+    if ($Senders) { $discordParameters += '-Senders' }
+    if ($BotToken) { $discordParameters += '-BotToken' }
+    if ($BotTokenFile) { $discordParameters += '-BotTokenFile' }
+    if ($discordParameters.Count -gt 0) {
+        throw "Install-Host: -NoDiscord installs a host with no Discord, and cannot be combined with " +
+            "$($discordParameters -join ', '). Drop -NoDiscord to install a Discord host, or drop " +
+            "$($discordParameters -join ', ') to install one with none."
+    }
+} elseif (-not $ChannelId) {
+    throw "Install-Host: -ChannelId is required. The ID comes from Discord with Developer Mode on; " +
+        "docs/install.md step 1 walks through it. Pass -NoDiscord for a host that is to run with none."
+}
+
 # Before anything is written or prompted for: a config with no operator is one the broker refuses
 # to start on. This checks only that an operator is named; an ID given two classes across the two
-# keys is caught by Install-All.ps1's resolver and by the broker's own startup check.
+# keys is caught by Install-All.ps1's resolver and by the broker's own startup check. A -NoDiscord
+# host names no Discord account, so it has no operator here to check.
 $senderEntries = if ($Senders) { @($Senders -split ',') } else { @() }
-if (-not $AllowedUserId -and -not ($senderEntries -clike '*:operator')) {
+if (-not $NoDiscord -and -not $AllowedUserId -and -not ($senderEntries -clike '*:operator')) {
     throw "Install-Host: pass -AllowedUserId, or a -Senders list naming at least one " +
         "<snowflake>:operator entry. A broker with a Discord connection and no operator refuses " +
         "to start."
@@ -260,19 +309,47 @@ if ($SkipAcl -and ($BotToken -or $BotTokenFile)) {
         "installer left unprotected is worse than one it never wrote; run without -SkipAcl, or " +
         "without a token for a dry run against a fixture tree."
 }
+if ($SkipAcl -and $NoDiscord) {
+    throw "Install-Host: -SkipAcl cannot be combined with -NoDiscord. A -NoDiscord host's state root " +
+        "is verified through its announce folder, and -SkipAcl would leave that root neither hardened " +
+        "nor verified. Run without -SkipAcl."
+}
 if ($SkipAcl -and $Duet) {
     throw "Install-Host: -SkipAcl cannot be combined with -Duet, which writes the web reader key file, " +
         "a credential this installer protects as it protects the token file."
 }
 
 if (-not $StateRoot) { $StateRoot = Get-ChannelStateRoot }
+# A -NoDiscord run on a host that already has Discord settings is refused before anything is written,
+# the state root's own folders included. The broker.env writer keeps every key it finds, a blank one
+# too, so a run past them would leave a host still naming Discord, and stripping them would cut a live
+# host's threads. Moving a host off Discord is a step a person takes by hand.
+if ($NoDiscord) {
+    $discordFound = @()
+    $existingEnvFile = Join-Path $StateRoot 'broker.env'
+    if (Test-Path -LiteralPath $existingEnvFile) {
+        $existingEnv = Get-ChannelEnvFile -Path $existingEnvFile
+        foreach ($key in @('CHANNEL_DISCORD_CHANNEL', 'CHANNEL_DISCORD_TOKEN_FILE', 'CHANNEL_ALLOWED_USER_ID',
+                'CHANNEL_SENDERS')) {
+            if ($existingEnv.ContainsKey($key)) { $discordFound += "$key in '$existingEnvFile'" }
+        }
+    }
+    $existingTokenFile = Join-Path $StateRoot 'discord-token.txt'
+    if (Test-Path -LiteralPath $existingTokenFile) { $discordFound += "the token file '$existingTokenFile'" }
+    if ($discordFound.Count -gt 0) {
+        throw "Install-Host: -NoDiscord was given, but this host has Discord settings: " +
+            "$($discordFound -join ', '). This installer moves no host off Discord. Removing those " +
+            "settings is a step a person takes by hand, after which -NoDiscord can be run again."
+    }
+}
 if (-not (Test-Path -LiteralPath $StateRoot)) {
     New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
 }
 # The announce folder, where hooks/session-start.ps1 spools an announcement no broker was listening
 # for and broker/announce-spool.ts reads it back at the session's relay attach. Created here, under
 # the root Protect-ChannelPath hardens below, so it inherits the root's grant from the first install
-# on; the hook creates it too where a root installed earlier lacks it, inheriting the same grant.
+# on; the hook creates it too where a root installed earlier lacks it, inheriting the same grant. On a
+# -NoDiscord host it is also hardened in its own right below, since it stands in for the token file.
 $announceDir = Join-Path $StateRoot 'announce'
 if (-not (Test-Path -LiteralPath $announceDir)) {
     New-Item -ItemType Directory -Path $announceDir -Force | Out-Null
@@ -385,15 +462,19 @@ if ($Duet) {
     }
 }
 
-if (-not $BotToken -and -not $BotTokenFile) {
+if (-not $NoDiscord -and -not $BotToken -and -not $BotTokenFile) {
     $BotToken = Read-Host -AsSecureString -Prompt 'Discord bot token'
 }
 
 # The token file. Written and hardened back to back, with nothing else run in between: a comment
 # claiming there is no window between the write and the guard is only true if nothing actually runs
 # there, so nothing does. A pre-existing file named by -BotTokenFile is hardened where it is, once
-# that location is confirmed to be inside the root this installer owns.
-$tokenFile = if ($BotTokenFile) { $BotTokenFile } else { Join-Path $StateRoot 'discord-token.txt' }
+# that location is confirmed to be inside the root this installer owns. A -NoDiscord host has none,
+# and every step below that reads it is skipped.
+$tokenFile = $null
+if (-not $NoDiscord) {
+    $tokenFile = if ($BotTokenFile) { $BotTokenFile } else { Join-Path $StateRoot 'discord-token.txt' }
+}
 if ($BotToken) {
     # Converted to plain text only for the instant it takes to write the file. SecureString does not
     # make the token unrecoverable in memory, but it does keep it off the command line, out of
@@ -405,20 +486,22 @@ if ($BotToken) {
         $plainToken = $null
     }
 }
-if (-not (Test-Path -LiteralPath $tokenFile)) {
+if ($tokenFile -and -not (Test-Path -LiteralPath $tokenFile)) {
     throw "Install-Host: token file '$tokenFile' does not exist."
 }
 
 $resolvedStateRoot = (Resolve-Path -LiteralPath $StateRoot).ProviderPath
-$tokenDirectory = Split-Path -Parent (Resolve-Path -LiteralPath $tokenFile).ProviderPath
-$insideStateRoot = $tokenDirectory -eq $resolvedStateRoot -or
-    $tokenDirectory.StartsWith("$resolvedStateRoot\", [StringComparison]::OrdinalIgnoreCase)
-if (-not $SkipAcl -and -not $insideStateRoot) {
-    throw "Install-Host: the token file '$tokenFile' is outside the state root " +
-        "'$resolvedStateRoot'. Hardening an operator-chosen directory outside the root this " +
-        "installer owns is how a token file at a drive root strips the whole drive's ACL down to " +
-        "three entries. Move the token file into the state root (or pass -StateRoot to match " +
-        "wherever it already lives) and re-run."
+if ($tokenFile) {
+    $tokenDirectory = Split-Path -Parent (Resolve-Path -LiteralPath $tokenFile).ProviderPath
+    $insideStateRoot = $tokenDirectory -eq $resolvedStateRoot -or
+        $tokenDirectory.StartsWith("$resolvedStateRoot\", [StringComparison]::OrdinalIgnoreCase)
+    if (-not $SkipAcl -and -not $insideStateRoot) {
+        throw "Install-Host: the token file '$tokenFile' is outside the state root " +
+            "'$resolvedStateRoot'. Hardening an operator-chosen directory outside the root this " +
+            "installer owns is how a token file at a drive root strips the whole drive's ACL down to " +
+            "three entries. Move the token file into the state root (or pass -StateRoot to match " +
+            "wherever it already lives) and re-run."
+    }
 }
 
 $sessionStartScript = Join-Path $RepoRoot 'hooks\session-start.ps1'
@@ -563,7 +646,14 @@ if (-not $SkipAcl) {
         if (Test-Path -LiteralPath $duetStateFile) { Protect-ChannelPath -Path $duetStateFile }
         Protect-ChannelPath -Path $readerKeyFile
     }
-    Protect-ChannelPath -Path $tokenFile
+    # The path the verification below reads for the state root: the token file, or on a -NoDiscord
+    # host, which has none, the announce folder. Hardened here with the token file's own call, so the
+    # installer owns what it verifies. Protect-ChannelPath takes ownership as this account, and a
+    # folder an elevated process created is owned by Administrators, whose inherited grant to this
+    # account the check reads as foreign. The folder keeps the three-trustee grant every hardened
+    # path carries, which reaches what the session hooks and the broker write under it.
+    $stateRootTarget = if ($tokenFile) { $tokenFile } else { $announceDir }
+    Protect-ChannelPath -Path $stateRootTarget
     # The state root unconditionally, not only "the token's parent directory": with -BotTokenFile
     # pointed elsewhere inside the root, or with no token at all, broker.env, the broker's state
     # file, and its log file still live here and are still worth the same three-trustee grant.
@@ -594,9 +684,16 @@ if (-not $SkipAcl) {
     # whichever process created it. A state file owned by Administrators that correctly inherits the
     # three-trustee list therefore reads as granting a foreign account, and refusing the install over
     # it would be refusing a path that is exactly as protected as it should be. What the state root
-    # needs proven is its own list, and the token file's check covers that as its parent, which is
-    # also precisely the check the broker itself runs at every start.
-    $verifyTargets = @($tokenFile)
+    # needs proven is its own list, and the token file's check covers that as its parent where the
+    # token file sits directly in the root, as the default does, which is also precisely the check
+    # the broker itself runs at every start. A token file in a subfolder of the root has that
+    # subfolder as its parent, so the root's own list is hardened above and not read back.
+    #
+    # A -NoDiscord host has no token file, and its state root is where the door's key is kept, so the
+    # announce folder stands in for the token file: it exists under the root from the step above that
+    # creates it where missing, it was hardened above as the token file is, and it is read with the
+    # root as its parent, the same pair the token file gives.
+    $verifyTargets = @($stateRootTarget)
     # The reader key file, and the Duet state file holding hashed client tokens where one exists,
     # are read back as the token file is. The check reads each file's access list, never its
     # contents, and a refusal names the path alone.
@@ -623,10 +720,13 @@ if (-not $SkipAcl) {
             Remove-Item -LiteralPath $tokenFile -Force -ErrorAction SilentlyContinue
             $residue = " The token file this run wrote at '$tokenFile' has been deleted rather than " +
                 "left in plain text under a path this check just refused."
-        } else {
+        } elseif ($tokenFile) {
             $residue = " The token file at '$tokenFile' holds the bot token in plain text and is " +
                 "still there; move or revoke it if the path it sits under is reachable by other " +
                 "accounts."
+        } else {
+            $residue = " With -NoDiscord there is no token file, so the state root " +
+                "'$resolvedStateRoot' is verified through '$stateRootTarget' in its place."
         }
         # The remedy names both shapes, because the likelier one is not the ownership case. Hardening
         # applies to each tree's root and is inherited by what sits under it, so a child whose
@@ -674,6 +774,12 @@ $envValues = [ordered]@{
 # install wrote survives the merge instead of being blanked by a run that only passed the other one.
 foreach ($key in @('CHANNEL_ALLOWED_USER_ID', 'CHANNEL_SENDERS')) {
     if (-not $envValues[$key]) { $envValues.Remove($key) }
+}
+# A -NoDiscord host's file names no channel and no token file. The refusal above made sure the file
+# holds neither already, so the writer carries none forward either.
+if ($NoDiscord) {
+    $envValues.Remove('CHANNEL_DISCORD_CHANNEL')
+    $envValues.Remove('CHANNEL_DISCORD_TOKEN_FILE')
 }
 # The web keys follow the same rule from the other side: a parameter that was not given adds no key,
 # so the value already in the file survives the merge.
@@ -760,6 +866,14 @@ Write-Host "Provisioned '$HostName': config at '$envFile', $hooksApplied."
 # the task's broker has no user profile of its own to fall back on.
 Write-Host ("Run install\Register-BrokerTask.ps1 -User '$([Security.Principal.WindowsIdentity]::GetCurrent().Name)' " +
     "-EnvFile '$envFile' from an elevated session to install the scheduled task.")
+if ($NoDiscord) {
+    Write-Host ("'$envFile' names no Discord channel, token file, operator or sender list. " +
+        "This host carries a conversation only where that " +
+        "file names CHANNEL_DOOR_KEY_FILE or CHANNEL_WEB_BIND. It holds a tool approval for a person to " +
+        "settle only where CHANNEL_DOOR_STANDING is operator, through the door, or where CHANNEL_WEB_BIND " +
+        "is set, through an operator the web page admits; otherwise each approval goes to the console's " +
+        "own dialog. This installer writes no door setting.")
+}
 
 if ($Duet) {
     # The Funnel route: the node's HTTPS name on 443 forwarded to the Duet public listener on

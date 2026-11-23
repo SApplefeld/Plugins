@@ -27,6 +27,7 @@ import { createRegistry, liveByLineage } from "./registry.ts";
 import type { ModelChange, Registry, SessionRecord } from "./registry.ts";
 import { loadSessions, saveSessions } from "./persistence.ts";
 import { loadDiscordConfig } from "./discord/config.ts";
+import { createLocalSurface } from "./local-surface.ts";
 import { createDiscordTransport, createInteractionResponder } from "./discord/adapter.ts";
 import { createSurface } from "./discord/surface.ts";
 import { createPinKeeper } from "./discord/pins.ts";
@@ -82,7 +83,7 @@ import {
   createPermissionDesk,
 } from "./security/permission.ts";
 import type { PermissionDesk, Verdict } from "./security/permission.ts";
-import { loadSenderGate } from "./security/senders.ts";
+import { createSenderGate, loadSenderGate } from "./security/senders.ts";
 import type { SenderGate } from "./security/senders.ts";
 import { createQuestionDesk, recommendedAnswer } from "./question-desk.ts";
 import { RESOLVE_LITERAL, loadWebConfig, resolveWebBind, webBindLabel } from "./web/config.ts";
@@ -133,6 +134,7 @@ import { createInboundRouter, voiceWhenReady } from "./routing/inbound.ts";
 import type { InboundRouter } from "./routing/inbound.ts";
 import { createResponseGateJournal } from "./routing/response-gate.ts";
 import { createInteractionRouter } from "./routing/interactions.ts";
+import type { InteractionRouter } from "./routing/interactions.ts";
 import { createOutboundRouter } from "./routing/outbound.ts";
 import type { ReplyResult } from "./routing/outbound.ts";
 import type { ReplyFileSystem } from "./routing/reply-file.ts";
@@ -1258,9 +1260,10 @@ export async function startBroker(
   // mutate seam reaches them through this closure so a pruned session's sightings leave with it.
   // Null while the card is off or no roster is configured, which leaves that seam a no-op.
   let sightings: Sightings | null = null;
-  // The inbound router, mutable on the same terms: it exists only once Discord is configured below,
-  // and the registry's mutate seam reaches it through this closure so a session's end drops the
-  // buffer its thread was holding. Null on a host with no Discord, which leaves that seam a no-op.
+  // The inbound router, mutable on the same terms: it is built below, after the Discord block, on a
+  // host with Discord and on one with no Discord setting at all whose door or web surface is on, and
+  // the registry's mutate seam reaches it through this closure so a session's end drops the buffer
+  // its thread was holding. Null on any other host, which leaves that seam a no-op.
   let inbound: InboundRouter | null = null;
   const registry = createRegistry({
     host: config.host,
@@ -1347,8 +1350,8 @@ export async function startBroker(
     // the take-in of an announcement the hook spooled while the broker was down at each attach,
     // and again on each heartbeat while the token has no session and no warning. The attach then
     // delivers a buffer the response gate restored across a restart. The router is reached through
-    // the closure for the reason the mutate seam is: it is built inside the Discord block below,
-    // and a host with no Discord has no router and no buffer to deliver.
+    // the closure for the reason the mutate seam is: it is built below, after the Discord block,
+    // and a host with no router, or with no response gate, has no buffer to deliver.
     takeIn: announceSpool.takeIn,
     onAttach: (processToken) => {
       inbound?.relayAttached(processToken);
@@ -1537,7 +1540,7 @@ export async function startBroker(
     ...(webFiles === null ? {} : { talkFiles: { reserve: (sessionId, file) => webFiles.reserveReply(sessionId, file) } }),
     voice: { reply: (sessionId, text) => voiceBridge?.reply(sessionId, text) },
     // Read through the closure for the reason the registry's seam reads it: the inbound router,
-    // which builds the response gate, exists only once Discord is configured below.
+    // which builds the response gate, is built below, after the Discord block.
     gate: { reply: (sessionId, text) => inbound?.noteReply(sessionId, text) },
     // Both read through closures for the same reason: the sender gate loads and the gateway
     // connects inside the Discord block below, after this router exists, and a broker without
@@ -1580,9 +1583,11 @@ export async function startBroker(
   };
   // The question alert's doorway, mutable for the same reason `threadFor` is: the tailer is
   // constructed here, before the Discord block below decides whether a channel exists, and the
-  // alert needs the sender gate's operator ID, which loads only inside that block. Until then the
-  // alert has no thread to land in and no one to mention, so it drops as the routing layer drops:
-  // a report of no thread, nothing queued, nothing retried.
+  // alert needs the sender gate's operator ID, which loads only inside that block. The Discord
+  // block replaces it, and so does the local mode where a path exists that can answer a question:
+  // the door at operator standing or the web page. Everywhere else it stays, so a question is held
+  // only where something can answer it: the alert drops as the routing layer drops, a report of no
+  // thread, nothing queued, nothing retried, and the question goes to the console's picker.
   let deliverQuestion: (
     sessionId: string,
     questions: readonly AskedQuestion[],
@@ -1604,9 +1609,10 @@ export async function startBroker(
   let tailInFlight: Promise<void> = Promise.resolve();
   // The question desk holds a credited question post's hook response open so the answer can ride
   // back from the thread; every trigger but an answer releases with `{}` to today's behavior, the
-  // console picker. Constructed unconditionally, like the relay hub: without Discord the hold is
-  // created and released within the alert's own failure path, which is today's behavior reached by
-  // a longer road.
+  // console picker. Constructed unconditionally, like the relay hub: on a host with no path that
+  // can answer a question, neither Discord nor the local mode's door at operator standing or web
+  // page, the hold is created and released within the alert's own failure path, which is today's
+  // behavior reached by a longer road.
   //
   // The terminal-state notifier is the message-edit seam. Every trigger rewrites the ask's own
   // thread message and strips its components, because a message whose buttons answer a hold that
@@ -1647,8 +1653,8 @@ export async function startBroker(
       // session-keyed pickup entry point the intake handler's own credit also calls.
       notePickup: (sessionId, at) => pickupFor(sessionId, at),
       // The release wrapper above. The delivery is read through a closure rather than passed
-      // directly, because `deliverQuestion` is replaced further down once Discord's surfaces
-      // exist, and the tailer is constructed before that.
+      // directly, because `deliverQuestion` is replaced further down once Discord's surfaces or
+      // the local mode's exist, and the tailer is constructed before that.
       deliverQuestion: questionDelivery({
         deliver: (sessionId, questions) => deliverQuestion(sessionId, questions),
         desk: questionDesk,
@@ -1716,12 +1722,17 @@ export async function startBroker(
         "CHANNEL_INTERIM_MIRROR both on",
     );
   }
-  // Replaced below when Discord is configured. Without a channel there is no thread to ask in and
-  // no operator to ask, so a prompt is reported and dropped rather than held: the session is at a
-  // terminal, which is where its permission dialog already is.
+  // Replaced below when Discord is configured, and in the local mode where a path exists that can
+  // answer a prompt: the door at operator standing or the web page. Everywhere else there is
+  // nobody to ask, so a prompt is reported and dropped rather than held, since a prompt is held
+  // only where something can answer it: the session is at a terminal, which is where its
+  // permission dialog already is.
   let permissions: PermissionDesk = {
     request: async () => {
-      note("broker: a permission prompt arrived but discord is not configured");
+      note(
+        "broker: a permission prompt arrived but nothing on this host can answer it: Discord is not " +
+          "wholly configured, and the local mode's door at operator standing or web page is not on",
+      );
       return false;
     },
     resolve: () => false,
@@ -1804,8 +1815,9 @@ export async function startBroker(
           key: doorKey,
           records: () => registry.list(),
           ring: talkRing,
-          // The inbound router exists only once Discord is configured, and with no router there is
-          // no session a line could reach, which `no-session` says.
+          // The inbound router is built below, on a host with Discord and on one with no Discord
+          // setting at all, so on a host whose Discord is half configured there is no router and no
+          // session a line could reach, which `no-session` says.
           deliverDoor: (lineage, name, text) =>
             inbound === null
               ? Promise.resolve({ status: "no-session", truncated: false })
@@ -1814,12 +1826,12 @@ export async function startBroker(
           // answer a persona's open ask, are served only where the host gives the door operator
           // standing: the door serves a path only where it holds that path's callback, so on any
           // other host a request to one is the hook intake's to answer. The desks are read through
-          // their bindings, since the Discord block replaces the stand-in permission desk, and
-          // with no router there is no session an answer or a verdict could reach, which
-          // `no-session` says. The pending read lists the open asks of the lineage's persona from
-          // the door's own reading, and `/door/ask` judges an answer against a new reading of it
-          // and hands it to the one copy of the ask checks. Both are built above at the same
-          // standing, so their tests here only narrow their types.
+          // their bindings, since the Discord block and the local mode replace the stand-in
+          // permission desk, and with no router there is no session an answer or a verdict
+          // could reach, which `no-session` says. The pending read lists the open asks of the
+          // lineage's persona from the door's own reading, and `/door/ask` judges an answer
+          // against a new reading of it and hands it to the one copy of the ask checks. Both are
+          // built above at the same standing, so their tests here only narrow their types.
           ...(config.doorStanding !== "operator"
             ? {}
             : {
@@ -1853,7 +1865,7 @@ export async function startBroker(
   // whether the receipts seam is worth wiring at all: a broker this reads as unconfigured for
   // never builds a tracker, and every pickup credit through it would otherwise read and parse a
   // mirror-off prompt body for a seam that can never do anything with what it finds.
-  const discord = loadDiscordConfig(process.env, {
+  const discordSetup = loadDiscordConfig(process.env, {
     staleAfterMs: config.staleAfterMs,
     // A half-configured Discord is the one shape that looks identical to a working one from every
     // other signal: the broker starts, the registry fills, the status cards would tick. Saying so
@@ -1863,6 +1875,13 @@ export async function startBroker(
       logger.warn(message);
     },
   });
+  const discord = discordSetup.state === "whole" ? discordSetup.config : null;
+  // The local mode: no Discord setting at all, and a door or a web page a person can read a
+  // conversation through. Such a host carries its conversations on the local surface, built below
+  // in the place the Discord block builds the thread surface. A half-configured Discord is a
+  // mistake and never this mode, and a host with neither a door nor a web page has no reader, so
+  // each keeps the stand-ins and no line is held for it.
+  const localMode = discordSetup.state === "none" && (doorKey !== null || web !== null);
 
   // The status reader, built wherever Discord is configured and independent of the tailer: it reads
   // every learned transcript, mirror-off included, for harness error lines and channel pickups,
@@ -2109,6 +2128,91 @@ export async function startBroker(
   // What the board card needs from Discord, on the same terms: it draws no session state, so the
   // transport is the whole of it.
   let cardTransport: DiscordTransport | null = null;
+  // What the Discord block's second half, the gateway and the voice, takes from its first half:
+  // the sender gate, the transport and the interaction router. The halves sit either side of the
+  // inbound router, which both modes build once from one set of options. Null with no Discord.
+  let discordLink: {
+    gate: SenderGate;
+    transport: ReturnType<typeof createDiscordTransport>;
+    interactions: InteractionRouter;
+  } | null = null;
+  // The local mode's sender gate, built from an empty list so no Discord account holds a class.
+  // Null on any other host.
+  let localGate: SenderGate | null = null;
+  // The approval desk that holds a prompt, built by the Discord block over its sender gate and by
+  // the local mode over its empty one, each after it has set `threadFor`.
+  const approvalDesk = (operatorIds: readonly string[]): PermissionDesk =>
+    createPermissionDesk({
+      registry,
+      relays,
+      threadFor: (sessionId) => threadFor(sessionId),
+      writer: steeringWriter,
+      operatorIds,
+      now: Date.now,
+      log: note,
+    });
+  // The question alert, built by the Discord block and by the local mode, each after it has set
+  // `threadFor`. It posts through the steering writer's alert tier, the unfloored, phone-reaching
+  // write permission prompts ride, rather than the mirror writer that paces conversation volume:
+  // the notice floor could swallow a question, the mirror writer's pacing could hold one behind a
+  // long narration run, and a question is exactly the parked-session class the alert tier exists
+  // for. `steeringWriter.alert` already ends the thread's narration block on a successful write.
+  //
+  // Its volume rides its own window instance, never the permission desk's: shared stamps would
+  // let a run of question alerts spend the prompt window's slots and push real permission
+  // prompts into drop, the starvation the damping exists to prevent. Past the ping ceiling the
+  // alert lands without a mention, composed and posted without one alike; past the post ceiling
+  // nothing is written, and the refusal is not logged here, because the tailer logs it once,
+  // rate-limited, off the result this closure reports.
+  //
+  // What follows a landed alert is each mode's own, handed in as `afterAlert`: the Discord block
+  // turns the notice into the thread's interactive prompt, and the local mode notes the alert on
+  // the desk.
+  const questionAlert = (
+    operatorIds: readonly string[],
+    afterAlert: (input: {
+      sessionId: string;
+      threadId: string;
+      messageId: string | null;
+      questions: readonly AskedQuestion[];
+    }) => Promise<void>,
+  ): ((sessionId: string, questions: readonly AskedQuestion[]) => Promise<ReplyResult>) => {
+    const questionVolume = createAlertVolume({
+      now: Date.now,
+      pingCeiling: MAX_QUESTION_PINGS_PER_WINDOW,
+      postCeiling: MAX_QUESTION_ALERTS_PER_WINDOW,
+      windowMs: ALERT_WINDOW_MS,
+    });
+    return async (sessionId, questions) => {
+      const threadId = threadFor(sessionId);
+      if (threadId === null) return { status: "no-thread" };
+      const volume = questionVolume(threadId);
+      if (volume === "drop") {
+        return { status: "failed", error: "question alerts are over their window" };
+      }
+      const mention = volume === "ping" ? operatorIds : [];
+      const posted = await steeringWriter.alert(
+        threadId,
+        renderQuestionNotice({ operatorIds: mention, questions }),
+        mention,
+      );
+      if (posted.status !== "ok") return { status: "failed", error: "the alert was not written" };
+      // The ring takes the question as the alert landed it, once the whole alert has posted. A throw
+      // behind it must not turn a landed alert into a failure, and the log line names the session
+      // and never the question.
+      tapQuestion(
+        {
+          talkTap: talkRing,
+          lineageOf: (id) => registry.list().find((record) => record.sessionId === id)?.lineage ?? null,
+          log: note,
+        },
+        sessionId,
+        questions,
+      );
+      await afterAlert({ sessionId, threadId, messageId: posted.value.messageId, questions });
+      return { status: "sent" };
+    };
+  };
   if (discord !== null) {
     // Imported here rather than at the top so that discord.js, the one dependency with a network
     // client in it, is loaded only by a broker that is actually configured to reach Discord.
@@ -2283,15 +2387,7 @@ export async function startBroker(
       throw error;
     }
     senderGate = gate;
-    permissions = createPermissionDesk({
-      registry,
-      relays,
-      threadFor: (sessionId) => surface.threadFor(sessionId),
-      writer: steeringWriter,
-      operatorIds: gate.operatorIds,
-      now: Date.now,
-      log: note,
-    });
+    permissions = approvalDesk(gate.operatorIds);
     // The blocked-state desk runs whenever Discord does, independent of whether the board card is
     // on: the session fold holds its own offset into the same configured stream, so an operator who
     // redirects `CHANNEL_BOARD_EVENTS_PATH` redirects both folds together. Its alerts ride the
@@ -2317,25 +2413,6 @@ export async function startBroker(
     });
     blockedDesk = desk;
     standingBlocked = desk.standing;
-    // The question alert posts through the steering writer's alert tier, the unfloored,
-    // phone-reaching write permission prompts ride, rather than the mirror writer that paces
-    // conversation volume: the notice floor could swallow a question, the mirror writer's pacing
-    // could hold one behind a long narration run, and a question is exactly the parked-session
-    // class the alert tier exists for. `steeringWriter.alert` already ends the thread's narration
-    // block on a successful write.
-    //
-    // Its volume rides its own window instance, never the permission desk's: shared stamps would
-    // let a run of question alerts spend the prompt window's slots and push real permission
-    // prompts into drop, the starvation the damping exists to prevent. Past the ping ceiling the
-    // alert lands without a mention, composed and posted without one alike; past the post ceiling
-    // nothing is written, and the refusal is not logged here, because the tailer logs it once,
-    // rate-limited, off the result this closure reports.
-    const questionVolume = createAlertVolume({
-      now: Date.now,
-      pingCeiling: MAX_QUESTION_PINGS_PER_WINDOW,
-      postCeiling: MAX_QUESTION_ALERTS_PER_WINDOW,
-      windowMs: ALERT_WINDOW_MS,
-    });
     const upgrade = questionUpgrade({
       desk: questionDesk,
       closeOut: closeOutQuestion,
@@ -2358,35 +2435,7 @@ export async function startBroker(
       operatorIds: gate.operatorIds,
       log: note,
     });
-    deliverQuestion = async (sessionId, questions) => {
-      const threadId = surface.threadFor(sessionId);
-      if (threadId === null) return { status: "no-thread" };
-      const volume = questionVolume(threadId);
-      if (volume === "drop") {
-        return { status: "failed", error: "question alerts are over their window" };
-      }
-      const mention = volume === "ping" ? gate.operatorIds : [];
-      const posted = await steeringWriter.alert(
-        threadId,
-        renderQuestionNotice({ operatorIds: mention, questions }),
-        mention,
-      );
-      if (posted.status !== "ok") return { status: "failed", error: "the alert was not written" };
-      // The ring takes the question as the alert landed it, once the whole alert has posted. A throw
-      // behind it must not turn a landed alert into a failure, and the log line names the session
-      // and never the question.
-      tapQuestion(
-        {
-          talkTap: talkRing,
-          lineageOf: (id) => registry.list().find((record) => record.sessionId === id)?.lineage ?? null,
-          log: note,
-        },
-        sessionId,
-        questions,
-      );
-      await upgrade({ sessionId, threadId, messageId: posted.value.messageId, questions });
-      return { status: "sent" };
-    };
+    deliverQuestion = questionAlert(gate.operatorIds, upgrade);
     announceModelChange = modelChangeNotice({
       threadFor: (sessionId) => surface.threadFor(sessionId),
       writer: steeringWriter,
@@ -2428,111 +2477,159 @@ export async function startBroker(
       now: Date.now,
       log: note,
     });
-    // Beside the registry snapshot and the card bindings: one row per
-    // gate decision, written only where the mode is `shadow` or `live`.
-    const responseGateJournalFile = path.join(path.dirname(config.stateFile), "response-gate.jsonl");
-    // Beside the journal: the buffers the gate holds, written on every change in `live` alone and
-    // read once here, when the router is built, so a stop, restart or crash loses no held line.
-    // The registry, the thread bindings and the relay hub are all up by this line. No relay has
-    // attached, since the listener binds below, so a relay attaching is what delivers a restored
-    // buffer here; the router's already-attached branch serves a second router over one state
-    // directory, which its tests drive.
-    const responseGateBuffersFile = path.join(
-      path.dirname(config.stateFile),
-      "response-gate-buffers.json",
-    );
-    const router = createInboundRouter({
-      registry,
-      relays,
-      gate,
-      permissions,
-      // The typed-answer seam. A message posted while this session's question is held answers that
-      // question whole, in the operator's own words, instead of reaching the model as steering it
-      // could only queue against a session parked inside the tool call.
-      // The held alert's recommended choice is what an operator's thumbs-up on that alert submits
-      // through the same seam, read by the message the reaction sat on.
-      questions: {
-        answerTyped: questionDesk.answerTyped,
-        heldEntry: (sessionId) => questionDesk.heldFor(sessionId)[0]?.id ?? null,
-        recommendedAt: (sessionId, messageId) => recommendedAnswer(questionDesk.heldFor(sessionId), messageId),
-      },
-      // The ask a reaction sat on, read off the decisions card's own records: its card message or a
-      // part of its brief, in the card's thread. Null with no card, which is a broker that posts no ask.
-      asks: {
-        forMessage: (threadId, messageId) => {
-          const found = decisionsCard?.askAt(threadId, messageId) ?? null;
-          return found === null
-            ? null
-            : { id: found.id, question: found.question, recommend: found.recommend, lineage: found.persona };
-        },
-      },
-      threadFor: (sessionId) => surface.threadFor(sessionId),
-      writer: steeringWriter,
-      // The mode, caps, judge and journal. The router builds the gate, whose timers deliver into
-      // the router's own pipe; the real clock and the real fetch are the defaults it takes. The
-      // journal sits beside the state file and rotates as the broker log does.
-      responseGate: {
-        mode: config.responseGate,
-        maxMessages: config.responseGateMaxMessages,
-        maxWaitMs: config.responseGateMaxWaitMs,
-        ...(judgeKey === null || config.responseGate === "off"
-          ? {}
-          : {
-              judge: {
-                quietMs: config.responseGateQuietMs,
-                threshold: config.responseGateThreshold,
-                apiKey: judgeKey,
-              },
-            }),
-        journal: createResponseGateJournal({
-          file: responseGateJournalFile,
-          maxBytes: config.logMaxBytes,
-          maxFiles: config.logMaxFiles,
-        }),
-        // A restored buffer's age cap is floored at the restart window, the time a session that
-        // held a relay before the restart is given to reconnect, so a cap that passed during the
-        // outage still waits for the relay's return.
-        buffers: { file: responseGateBuffersFile, graceMs: RELAY_RESTART_GRACE_MS },
-      },
-      now: Date.now,
-      log: note,
-      // The web listener's login list, so a page line held across the restart is the operator's
-      // again only where its login is still admitted. With no web surface, none is.
-      ...(web === null ? {} : { webOperators: web.operators }),
-      receipts: { delivered: (threadId, messageId, at) => receipts?.delivered(threadId, messageId, at) },
-      ...(talkRing === null ? {} : { talkTap: talkRing }),
-      // On exactly where the door's routes exist, so a door line held across the restart is
-      // delivered again only on a broker that would take that line today. The standing rides with
-      // the switch: it is the host's `CHANNEL_DOOR_STANDING` setting, the one thing that decides a
-      // door line's class, and a broker with no door is passed none.
-      ...(doorRoutes === null ? {} : { door: true, doorStanding: config.doorStanding }),
-      // A web page's line and a local door's line each go into the thread as the bot through the
-      // conversation writer's reply, the budget-paced post the mirrored replies take, so a burst of
-      // them is metered with the rest of the conversation volume and a block it earns never refuses
-      // a permission prompt or a question alert, which spend the other writer's bucket. Wired with
-      // the web surface on or off, since a door line is copied into its thread either way.
-      page: { post: (input) => mirrorWriter.reply(input.threadId, input.text, input.file) },
-      ...(webFiles === null ? {} : { webFiles }),
-      // Who may attach a file and how large one may be, as configured. Saved files sit under the
-      // folder holding the state file, beside the buffers file and the journal, wherever
-      // CHANNEL_BROKER_STATE put it, and never in a session's project directory.
-      attachments: createAttachmentIntake({
-        mode: config.attachments,
-        maxBytes: config.attachmentMaxBytes,
-        stateDir: path.dirname(config.stateFile),
-      }),
-      // The voice commands, only where the voice is on: off, `voice on` is text for the session.
-      // Before the module starts and once the broker is stopping, a command is told the voice is
-      // not ready yet.
-      ...(config.voice
-        ? { voice: voiceWhenReady(() => voice) }
-        : {}),
-      // An operator's typed `broker restart`. The reason names the operator's account by its
-      // Discord id, so the restart's log line says who asked; the message text never reaches it.
-      restart: ({ threadId, senderId }) =>
-        restart(`operator account ${senderId} typed broker restart in thread ${threadId}`),
-    });
-    inbound = router;
+    discordLink = { gate, transport, interactions };
+  } else if (localMode) {
+    // The local surface, set where the Discord block sets the thread surface and the transport: a
+    // conversation id of the broker's own for each session, and a sender whose every post lands and
+    // keeps nothing. With those two, the routers, the writers and the talk ring run unchanged.
+    const local = createLocalSurface({ now: Date.now });
+    messenger = local;
+    threadFor = (sessionId) => local.threadFor(sessionId);
+    const gate = createSenderGate([]);
+    localGate = gate;
+    // A prompt and a question are held only where a path exists that can answer them: the door at
+    // operator standing, which serves the pending read, the answer and the verdict, or the web
+    // page, which serves its own. A page whose tailnet bind is still pending counts, since it
+    // serves once it binds and a question waits out its hold. Elsewhere the stand-ins above stay.
+    if (operatorDoor || web !== null) {
+      permissions = approvalDesk(gate.operatorIds);
+      // The alert is noted on the desk, so the desk takes a typed answer once it has landed. No
+      // Discord widget step runs: the answer is typed text with no limit on what it can answer, so
+      // no hold is released for a question the thread's picker could not draw, no components are
+      // drawn and no continuation is posted. A post with no message id releases the hold, as the
+      // Discord mode's does.
+      deliverQuestion = questionAlert(gate.operatorIds, async ({ sessionId, threadId, messageId, questions }) => {
+        const digest = questionDigest(questions);
+        if (messageId === null) {
+          questionDesk.alertLost(sessionId, digest);
+          return;
+        }
+        questionDesk.noteAlert(sessionId, digest, { threadId, messageId });
+      });
+    }
+  }
+
+  // The sender gate the inbound router classes an author by: the Discord block's allowlist, or the
+  // local mode's empty one. Null on any other host, which builds no router.
+  const inboundGate = discordLink?.gate ?? localGate;
+  // Beside the registry snapshot and the card bindings: one row per
+  // gate decision, written only where the mode is `shadow` or `live`.
+  const responseGateJournalFile = path.join(path.dirname(config.stateFile), "response-gate.jsonl");
+  // Beside the journal: the buffers the gate holds, written on every change in `live` alone and
+  // read once here, when the router is built, so a stop, restart or crash loses no held line.
+  // The registry, the thread bindings and the relay hub are all up by this line. No relay has
+  // attached, since the listener binds below, so a relay attaching is what delivers a restored
+  // buffer here; the router's already-attached branch serves a second router over one state
+  // directory, which its tests drive.
+  const responseGateBuffersFile = path.join(
+    path.dirname(config.stateFile),
+    "response-gate-buffers.json",
+  );
+  // The inbound router, built once here for a host with Discord and for one in the local mode.
+  const router =
+    inboundGate === null
+      ? null
+      : createInboundRouter({
+          registry,
+          relays,
+          gate: inboundGate,
+          permissions,
+          // The typed-answer seam. A message posted while this session's question is held answers that
+          // question whole, in the operator's own words, instead of reaching the model as steering it
+          // could only queue against a session parked inside the tool call.
+          // The held alert's recommended choice is what an operator's thumbs-up on that alert submits
+          // through the same seam, read by the message the reaction sat on.
+          questions: {
+            answerTyped: questionDesk.answerTyped,
+            heldEntry: (sessionId) => questionDesk.heldFor(sessionId)[0]?.id ?? null,
+            recommendedAt: (sessionId, messageId) => recommendedAnswer(questionDesk.heldFor(sessionId), messageId),
+          },
+          // The ask a reaction sat on, read off the decisions card's own records: its card message or a
+          // part of its brief, in the card's thread. Null with no card, which is a broker that posts no ask.
+          asks: {
+            forMessage: (threadId, messageId) => {
+              const found = decisionsCard?.askAt(threadId, messageId) ?? null;
+              return found === null
+                ? null
+                : { id: found.id, question: found.question, recommend: found.recommend, lineage: found.persona };
+            },
+          },
+          threadFor: (sessionId) => threadFor(sessionId),
+          writer: steeringWriter,
+          // The mode, caps, judge and journal, on a host with Discord alone. The router builds the
+          // gate, whose timers deliver into the router's own pipe; the real clock and the real fetch
+          // are the defaults it takes. The journal sits beside the state file and rotates as the
+          // broker log does. The local mode passes none, whatever CHANNEL_RESPONSE_GATE says, so its
+          // journal and buffers files are neither read nor written: the gate restores a held buffer
+          // only for a Discord thread id and learns of the bot's own posts only from the gateway.
+          ...(discord === null
+            ? {}
+            : {
+                responseGate: {
+                  mode: config.responseGate,
+                  maxMessages: config.responseGateMaxMessages,
+                  maxWaitMs: config.responseGateMaxWaitMs,
+                  ...(judgeKey === null || config.responseGate === "off"
+                    ? {}
+                    : {
+                        judge: {
+                          quietMs: config.responseGateQuietMs,
+                          threshold: config.responseGateThreshold,
+                          apiKey: judgeKey,
+                        },
+                      }),
+                  journal: createResponseGateJournal({
+                    file: responseGateJournalFile,
+                    maxBytes: config.logMaxBytes,
+                    maxFiles: config.logMaxFiles,
+                  }),
+                  // A restored buffer's age cap is floored at the restart window, the time a session that
+                  // held a relay before the restart is given to reconnect, so a cap that passed during the
+                  // outage still waits for the relay's return.
+                  buffers: { file: responseGateBuffersFile, graceMs: RELAY_RESTART_GRACE_MS },
+                },
+              }),
+          now: Date.now,
+          log: note,
+          // The web listener's login list, so a page line held across the restart is the operator's
+          // again only where its login is still admitted. With no web surface, none is.
+          ...(web === null ? {} : { webOperators: web.operators }),
+          receipts: { delivered: (threadId, messageId, at) => receipts?.delivered(threadId, messageId, at) },
+          ...(talkRing === null ? {} : { talkTap: talkRing }),
+          // On exactly where the door's routes exist, so a door line held across the restart is
+          // delivered again only on a broker that would take that line today. The standing rides with
+          // the switch: it is the host's `CHANNEL_DOOR_STANDING` setting, the one thing that decides a
+          // door line's class, and a broker with no door is passed none.
+          ...(doorRoutes === null ? {} : { door: true, doorStanding: config.doorStanding }),
+          // A web page's line and a local door's line each go into the thread as the bot through the
+          // conversation writer's reply, the budget-paced post the mirrored replies take, so a burst of
+          // them is metered with the rest of the conversation volume and a block it earns never refuses
+          // a permission prompt or a question alert, which spend the other writer's bucket. Wired with
+          // the web surface on or off, since a door line is copied into its thread either way. In the
+          // local mode the post lands on the local surface, which keeps nothing.
+          page: { post: (input) => mirrorWriter.reply(input.threadId, input.text, input.file) },
+          ...(webFiles === null ? {} : { webFiles }),
+          // Who may attach a file and how large one may be, as configured. Saved files sit under the
+          // folder holding the state file, beside the buffers file and the journal, wherever
+          // CHANNEL_BROKER_STATE put it, and never in a session's project directory.
+          attachments: createAttachmentIntake({
+            mode: config.attachments,
+            maxBytes: config.attachmentMaxBytes,
+            stateDir: path.dirname(config.stateFile),
+          }),
+          // The voice commands, only where the voice is on: off, `voice on` is text for the session.
+          // Before the module starts and once the broker is stopping, a command is told the voice is
+          // not ready yet.
+          ...(config.voice
+            ? { voice: voiceWhenReady(() => voice) }
+            : {}),
+          // An operator's typed `broker restart`. The reason names the operator's account by its
+          // Discord id, so the restart's log line says who asked; the message text never reaches it.
+          restart: ({ threadId, senderId }) =>
+            restart(`operator account ${senderId} typed broker restart in thread ${threadId}`),
+        });
+  inbound = router;
+  if (discord !== null) {
     if (config.responseGate === "live") {
       note(
         `broker: the response gate is live, a thread's buffer holds at most ` +
@@ -2548,6 +2645,15 @@ export async function startBroker(
           `decision it would have made is journaled to ${responseGateJournalFile}`,
       );
     }
+  } else if (localMode && config.responseGate !== "off") {
+    note(
+      `broker: CHANNEL_RESPONSE_GATE is ${config.responseGate}, but the response gate needs Discord ` +
+        "and is off on this host, so every line is delivered at once",
+    );
+  }
+
+  if (discord !== null && discordLink !== null && router !== null) {
+    const { gate, transport, interactions } = discordLink;
     // Same reason the REST client is imported here: this module is the only one in the routing
     // layer that loads discord.js, and a broker with no Discord configured never touches it.
     const { createGatewayMessageSource } = await import("./routing/gateway.ts");
@@ -2929,8 +3035,9 @@ export async function startBroker(
         // Through the binding, since the Discord block replaces the stand-in desk.
         permissionsFor: (sessionId) => permissions.pendingFor(sessionId),
       });
-      // The composer's seam. The inbound router exists only once Discord is configured, and with
-      // no router there is no session a line could reach, which `no-session` says.
+      // The composer's seam. The inbound router exists on a host with Discord and on one with no
+      // Discord setting at all, and on a host whose Discord is half configured there is no router
+      // and no session a line could reach, which `no-session` says.
       registerSayHandler(webServer.register, {
         deliverWeb: (lineage, login, text, files) =>
           inbound === null ? Promise.resolve("no-session") : inbound.deliverWeb(lineage, login, text, files),

@@ -18,9 +18,24 @@
 # turns the voice on also invites the bot with the Connect and Speak permissions; the broker requests
 # the GuildVoiceStates intent itself, which is not privileged and has no switch to enable. Step 1 of
 # docs/install.md covers those, and this script's parameters are their outputs.
+#
+# A host that is to run with no Discord takes -NoDiscord in place of the Discord values:
+#
+#   install\Install-All.ps1 -HostName HOST-A -NoDiscord
+#
+# It asks for no channel, operator ID, roster or bot token, and refuses -ChannelId, -AllowedUserId,
+# -Senders, -BotToken and -BotTokenFile beside it. Install-Host.ps1 refuses it on a host that already
+# has Discord settings, which a person removes by hand. Such a host carries a conversation only where
+# broker.env names CHANNEL_DOOR_KEY_FILE or CHANNEL_WEB_BIND. It holds a tool approval for a person to
+# settle only where CHANNEL_DOOR_STANDING is operator, through the door, or where CHANNEL_WEB_BIND is
+# set, through an operator the web page admits; otherwise each approval goes to the console's own
+# dialog. No installer script writes a door setting.
+#
 # Not marked Mandatory, because a test dot-sources this file to reach the functions and a Mandatory
-# script parameter would hang the probe on a prompt; the runner below validates them instead, and
-# Install-Host.ps1's own Mandatory parameters re-validate the values that reach it.
+# script parameter would hang the probe on a prompt; the runner below validates them instead.
+# Install-Host.ps1 re-validates the values that reach it: -HostName as a Mandatory parameter, each
+# Discord ID by its parameter's pattern, and the channel and the operator by the checks below its
+# parameters, which require them unless -NoDiscord is given.
 param(
     [string]$HostName,
 
@@ -36,6 +51,9 @@ param(
     [System.Security.SecureString]$BotToken,
 
     [string]$BotTokenFile,
+
+    # A host with no Discord, forwarded to Install-Host.ps1, which documents it.
+    [switch]$NoDiscord,
 
     [Nullable[int]]$Port,
 
@@ -304,6 +322,11 @@ install refuses only when the two together name no operator, since that is a bro
 start. -Senders is validated whether it came from the argument or the file, entry by entry, with the
 same rules the broker applies, and is returned with the spacing around each entry trimmed.
 
+With -NoDiscord the host name and the port are resolved as above, and the three Discord values are
+neither read from the file nor required. Install-Host.ps1 refuses the switch on a host whose file
+holds any of four Discord keys, CHANNEL_DISCORD_CHANNEL, CHANNEL_DISCORD_TOKEN_FILE,
+CHANNEL_ALLOWED_USER_ID or CHANNEL_SENDERS, or whose state root holds discord-token.txt.
+
 -EnvFile exists so a test can drive a real env file without a state root.
 #>
 function Resolve-ChannelInstallIdentity {
@@ -313,6 +336,7 @@ function Resolve-ChannelInstallIdentity {
         [string]$AllowedUserId,
         [string]$Senders,
         [Nullable[int]]$Port,
+        [switch]$NoDiscord,
         [string]$EnvFile = (Join-Path (Get-ChannelStateRoot) 'broker.env')
     )
 
@@ -334,7 +358,7 @@ function Resolve-ChannelInstallIdentity {
     # The same pattern the ChannelId and AllowedUserId parameters declare, less its optional empty
     # alternative, which an empty value has already been read as absent for.
     $idPattern = '^\d{17,20}$'
-    if (-not $ChannelId) {
+    if (-not $NoDiscord -and -not $ChannelId) {
         $ChannelId = & $read 'CHANNEL_DISCORD_CHANNEL'
         if ($ChannelId) {
             if ($ChannelId -notmatch $idPattern) {
@@ -345,7 +369,7 @@ function Resolve-ChannelInstallIdentity {
             Write-Host "Reusing -ChannelId $ChannelId from $EnvFile."
         }
     }
-    if (-not $AllowedUserId) {
+    if (-not $NoDiscord -and -not $AllowedUserId) {
         $AllowedUserId = & $read 'CHANNEL_ALLOWED_USER_ID'
         if ($AllowedUserId) {
             if ($AllowedUserId -notmatch $idPattern) {
@@ -358,7 +382,7 @@ function Resolve-ChannelInstallIdentity {
     }
     $sendersFrom = '-Senders'
     $sendersRemedy = ''
-    if (-not $Senders) {
+    if (-not $NoDiscord -and -not $Senders) {
         # Trimmed, so a whitespace-only line reads as unset, as the broker's own loader reads it.
         $Senders = "$(& $read 'CHANNEL_SENDERS')".Trim()
         $sendersFrom = "CHANNEL_SENDERS in $($EnvFile)"
@@ -406,17 +430,24 @@ function Resolve-ChannelInstallIdentity {
         }
     }
 
-    $missing = @()
-    if (-not $HostName) { $missing += '-HostName' }
-    if (-not $ChannelId) { $missing += '-ChannelId' }
-    if ($classes.Values -notcontains 'operator') {
-        $missing += '-AllowedUserId or an operator in -Senders'
-    }
-    if ($missing.Count -gt 0) {
-        throw "Install-All: -HostName, -ChannelId, and an operator in -AllowedUserId or -Senders " +
-            "are all required. The IDs come from Discord with Developer Mode on; docs/install.md " +
-            "step 1 walks through it. Not supplied and not found in $($EnvFile): " +
-            "$($missing -join ', ')."
+    if ($NoDiscord) {
+        if (-not $HostName) {
+            throw "Install-All: -HostName is required, and with -NoDiscord it is the only one. Not " +
+                "supplied and not found in $($EnvFile): -HostName."
+        }
+    } else {
+        $missing = @()
+        if (-not $HostName) { $missing += '-HostName' }
+        if (-not $ChannelId) { $missing += '-ChannelId' }
+        if ($classes.Values -notcontains 'operator') {
+            $missing += '-AllowedUserId or an operator in -Senders'
+        }
+        if ($missing.Count -gt 0) {
+            throw "Install-All: -HostName, -ChannelId, and an operator in -AllowedUserId or -Senders " +
+                "are all required. The IDs come from Discord with Developer Mode on; docs/install.md " +
+                "step 1 walks through it. Pass -NoDiscord for a host that is to run with none. Not " +
+                "supplied and not found in $($EnvFile): $($missing -join ', ')."
+        }
     }
 
     return @{
@@ -484,6 +515,10 @@ unbound one arrives as the empty string, which a set would refuse.
 
 The six web keys are passed on the same rule, each only when it is non-empty.
 
+With -NoDiscord the switch is passed in place of the channel, and no roster key, token or token file
+is passed, the existing token file included: Install-Host.ps1 refuses the switch on a host that has
+one, so it is not quietly left out here.
+
 -ExistingTokenFile exists so a test can point the token reuse at a temp path rather than this
 host's state root.
 #>
@@ -505,26 +540,31 @@ function Get-ChannelHostArguments {
         [ValidatePattern('^[^\r\n\x00]*\z')][string]$DuetPublicUrl,
         [Nullable[int]]$DuetPort,
         [Nullable[int]]$DuetApprovePort,
+        [switch]$NoDiscord,
         [string]$ExistingTokenFile = (Join-Path (Get-ChannelStateRoot) 'discord-token.txt')
     )
 
     $hostArgs = @{
         HostName  = $Identity.HostName
-        ChannelId = $Identity.ChannelId
         RepoRoot  = $RepoRoot
     }
-    # Passed only when set: either may be absent, and Install-Host.ps1 validates each by pattern,
-    # which an empty value fails.
-    if ($Identity.AllowedUserId) { $hostArgs.AllowedUserId = $Identity.AllowedUserId }
-    if ($Identity.Senders) { $hostArgs.Senders = $Identity.Senders }
-    if ($BotToken) { $hostArgs.BotToken = $BotToken }
-    if ($BotTokenFile) { $hostArgs.BotTokenFile = $BotTokenFile }
-    # A verify-run on an already-installed host reuses the hardened token from the last install
-    # rather than re-prompting: Install-Host.ps1's prompt is unconditional, and an operator pressing
-    # Enter through it would overwrite a working token with an empty one. Rotating the token is
-    # still just passing -BotToken or -BotTokenFile explicitly.
-    if (-not $BotToken -and -not $BotTokenFile) {
-        if (Test-Path -LiteralPath $ExistingTokenFile) { $hostArgs.BotTokenFile = $ExistingTokenFile }
+    if ($NoDiscord) {
+        $hostArgs.NoDiscord = $true
+    } else {
+        $hostArgs.ChannelId = $Identity.ChannelId
+        # Passed only when set: either may be absent, and Install-Host.ps1 validates each by pattern,
+        # which an empty value fails.
+        if ($Identity.AllowedUserId) { $hostArgs.AllowedUserId = $Identity.AllowedUserId }
+        if ($Identity.Senders) { $hostArgs.Senders = $Identity.Senders }
+        if ($BotToken) { $hostArgs.BotToken = $BotToken }
+        if ($BotTokenFile) { $hostArgs.BotTokenFile = $BotTokenFile }
+        # A verify-run on an already-installed host reuses the hardened token from the last install
+        # rather than re-prompting: Install-Host.ps1 prompts on every Discord install given no token,
+        # and an operator pressing Enter through it would overwrite a working token with an empty one.
+        # Rotating the token is still just passing -BotToken or -BotTokenFile explicitly.
+        if (-not $BotToken -and -not $BotTokenFile) {
+            if (Test-Path -LiteralPath $ExistingTokenFile) { $hostArgs.BotTokenFile = $ExistingTokenFile }
+        }
     }
     if ($null -ne $Identity.Port) { $hostArgs.Port = $Identity.Port }
     if ($HookOwner) { $hostArgs.HookOwner = $HookOwner }
@@ -551,8 +591,24 @@ if ($MyInvocation.InvocationName -ne '.') {
     # over a half-provisioned host.
     $ErrorActionPreference = 'Stop'
 
+    # Before anything is read or run: a -NoDiscord host holds no Discord value, so each parameter that
+    # would give it one is refused beside the switch, as Install-Host.ps1 refuses it.
+    if ($NoDiscord) {
+        $discordParameters = @()
+        if ($ChannelId) { $discordParameters += '-ChannelId' }
+        if ($AllowedUserId) { $discordParameters += '-AllowedUserId' }
+        if ($Senders) { $discordParameters += '-Senders' }
+        if ($BotToken) { $discordParameters += '-BotToken' }
+        if ($BotTokenFile) { $discordParameters += '-BotTokenFile' }
+        if ($discordParameters.Count -gt 0) {
+            throw "Install-All: -NoDiscord installs a host with no Discord, and cannot be combined " +
+                "with $($discordParameters -join ', '). Drop -NoDiscord to install a Discord host, or " +
+                "drop $($discordParameters -join ', ') to install one with none."
+        }
+    }
+
     $identity = Resolve-ChannelInstallIdentity -HostName $HostName -ChannelId $ChannelId `
-        -AllowedUserId $AllowedUserId -Senders $Senders -Port $Port
+        -AllowedUserId $AllowedUserId -Senders $Senders -Port $Port -NoDiscord:$NoDiscord
     Assert-ChannelInstallUnelevated
     $effectiveMarketplace = Resolve-ChannelMarketplace -Marketplace $Marketplace
 
@@ -560,7 +616,8 @@ if ($MyInvocation.InvocationName -ne '.') {
         -BotToken $BotToken -BotTokenFile $BotTokenFile -HookOwner $HookOwner -Marketplace $Marketplace `
         -WebBind $WebBind -WebPort $WebPort -WebOperators $WebOperators -WebDevices $WebDevices `
         -WebSummaryPeers $WebSummaryPeers -WebSiblings $WebSiblings `
-        -Duet:$Duet -DuetPublicUrl $DuetPublicUrl -DuetPort $DuetPort -DuetApprovePort $DuetApprovePort
+        -Duet:$Duet -DuetPublicUrl $DuetPublicUrl -DuetPort $DuetPort -DuetApprovePort $DuetApprovePort `
+        -NoDiscord:$NoDiscord
     & (Join-Path $PSScriptRoot 'Install-Host.ps1') @hostArgs
 
     Install-ChannelPlugin -RepoRoot $RepoRoot -Marketplace $effectiveMarketplace
@@ -589,6 +646,17 @@ if ($MyInvocation.InvocationName -ne '.') {
     Write-Host ""
     Write-Host "    cchat <session-name>"
     Write-Host ""
+    if ($NoDiscord) {
+        Write-Host "broker.env, at '$envFile', names no Discord channel, token file, operator or sender list."
+        Write-Host "This host carries a conversation only where that file names CHANNEL_DOOR_KEY_FILE"
+        Write-Host "or CHANNEL_WEB_BIND. It holds a tool approval for a person to settle only where"
+        Write-Host "CHANNEL_DOOR_STANDING is operator, through the door, or where CHANNEL_WEB_BIND is"
+        Write-Host "set, through an operator the web page admits; otherwise each approval goes to the"
+        Write-Host "console's own dialog. No installer script writes a door setting."
+        Write-Host ""
+        Write-Host "Then check that curl.exe -s http://127.0.0.1:$brokerPort/sessions shows the session."
+        return
+    }
     Write-Host "Then verify the channel end to end:"
     Write-Host "  1. No full-screen channel warning at launch."
     Write-Host "  2. A message typed in the session's Discord thread reaches the session, and a"
