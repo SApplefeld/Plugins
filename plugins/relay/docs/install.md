@@ -97,6 +97,9 @@ people have said enough to be worth answering. At `shadow` it holds nothing: eac
 delivered at once, and the broker journals what `live` would have done. While it is at `shadow` or
 `live`, a gated thread's buffered lines, with the end of the session's last reply there, are sent
 to TypeSafe once the thread goes quiet, and it needs the key file under "The Jev key file" below.
+On a host with no Discord, each session's conversation through the local door or the web page is
+gated the same way: its typed lines are held and sent to TypeSafe, and a typed line that names the
+persona delivers them, as a mention of the bot does in a thread.
 Its default threshold is a measured one, and `operations.md` describes running it in `shadow` for a
 week to measure a host's own.
 
@@ -239,6 +242,8 @@ It carries a conversation only where that file names `CHANNEL_DOOR_KEY_FILE`, th
 an operator the web page admits. A question is held only while `CHANNEL_MIRROR` and
 `CHANNEL_INTERIM_MIRROR` are on, as they are by default. Otherwise each approval goes to the console's own dialog and each
 question to the console's picker. Set those values by hand in `broker.env`, then restart the broker.
+Such a host may also set `CHANNEL_RESPONSE_GATE`, under "The response gate is off until you turn it
+on" above, and at `shadow` or `live` it needs the key file as any host does.
 The section "A host with no Discord" in `operations.md` says what such a host has and does not
 have.
 
@@ -518,7 +523,8 @@ definition. This step is optional while the gate is `off` and the voice is off, 
 file nothing leaves the machine on this path.
 
 Create the file inside the state root, `%LOCALAPPDATA%\sapplefeld-channels\`, beside
-`discord-token.txt`, from the same plain non-elevated session step 2 requires. It holds one line,
+`discord-token.txt` where the host has one, from the same plain non-elevated session step 2
+requires. It holds one line,
 the key alone. Step 2 hardens the state root with the access control list the token file carries,
 granting only the owner, Administrators and SYSTEM, and a file created under that directory inherits
 the list, so a file placed there needs no hardening of its own. This command asks for the key at the

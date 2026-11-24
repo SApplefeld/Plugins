@@ -38,6 +38,9 @@ import type { PermissionDesk, Verdict } from "../security/permission.ts";
 import { SNOWFLAKE } from "../security/senders.ts";
 import type { SenderClass, SenderGate } from "../security/senders.ts";
 import type { RestartAnswer } from "../index.ts";
+// A runtime import of a module that takes only types from the Discord code, so a host with no
+// Discord still loads none of it through this line.
+import { isLocalConversationId } from "../local-surface.ts";
 import { liveByLineage } from "../registry.ts";
 import type { Registry, SessionRecord } from "../registry.ts";
 import { reducedName } from "./attachments.ts";
@@ -361,6 +364,44 @@ function isBoardAct(words: string, fileIds: readonly string[]): boolean {
 function opensAsBoardAct(words: string): boolean {
   const opening = words.trim();
   return BOARD_ACT_PREFIXES.some((prefix) => opening.startsWith(prefix));
+}
+
+/** One code point that is a letter or a digit, by the Unicode classes L and N. */
+const WORD_POINT = /^[\p{L}\p{N}]$/u;
+
+/** Whether the code point is a letter or a digit; an absent one is neither. */
+function isWordPoint(point: number | undefined): boolean {
+  return point !== undefined && WORD_POINT.test(String.fromCodePoint(point));
+}
+
+/** The code point that ends just before `at`, read whole where it is a surrogate pair, or undefined at the start. */
+function codePointBefore(text: string, at: number): number | undefined {
+  if (at === 0) return undefined;
+  const low = text.charCodeAt(at - 1);
+  if (at >= 2 && low >= 0xdc00 && low <= 0xdfff) {
+    const high = text.charCodeAt(at - 2);
+    if (high >= 0xd800 && high <= 0xdbff) return text.codePointAt(at - 2);
+  }
+  return low;
+}
+
+/**
+ * Whether a typed line's bounded words name the persona whose lineage is given, which admits the
+ * line to the response gate as a mention on a local conversation, the one way a person typing there
+ * has to say "answer now". Both are lowered, and the lineage names the session where it stands in the
+ * words with no letter or digit on either side, so `@steward`, `Steward,` and `steward's` name
+ * `STEWARD` and `stewardship` does not. Every occurrence is tried, so a failing one never hides a
+ * passing one after it. The search is plain, never a pattern built from the lineage, so a lineage
+ * such as `C++` matches as written. A null lineage, or one under two code points, names nothing.
+ */
+export function namesLineage(words: string, lineage: string | null): boolean {
+  if (lineage === null || [...lineage].length < 2) return false;
+  const name = lineage.toLowerCase();
+  const text = words.toLowerCase();
+  for (let at = text.indexOf(name); at !== -1; at = text.indexOf(name, at + 1)) {
+    if (!isWordPoint(codePointBefore(text, at)) && !isWordPoint(text.codePointAt(at + name.length))) return true;
+  }
+  return false;
 }
 
 /** The name a web line is attributed to: the login's part before `@`, bounded as the gateway bounds a name. */
@@ -815,8 +856,8 @@ export type InboundRouter = {
   armRestored: () => void;
   /**
    * The session's reply reached its thread. Hands the reply to the gate, which sends the judge
-   * its end beside the held lines. A no-op with the gate off or the session holding no thread.
-   * Never throws.
+   * its end beside the held lines, and on a local conversation also stamps the last-post clock.
+   * A no-op with the gate off or the session holding no thread. Never throws.
    */
   noteReply: (sessionId: string, text: string) => void;
   /**
@@ -889,8 +930,10 @@ function heldBufferOf(
   if (typeof value.threadId !== "string" || typeof value.sessionId !== "string") return null;
   const threadId = clean(value.threadId);
   const sessionId = clean(value.sessionId);
-  // The thread is the channel a dropped buffer's notice is posted to, so it must be a Discord id.
-  if (!SNOWFLAKE.test(threadId) || sessionId === "") return null;
+  // The thread must be a Discord id, whose thread a dropped buffer's notice is posted to, or a
+  // local conversation's id, kept so that conversation's buffer survives a restart. The restore
+  // posts no drop notice for a local id: its log line is the record.
+  if (!(SNOWFLAKE.test(threadId) || isLocalConversationId(threadId)) || sessionId === "") return null;
   // Finite, not merely a number: JSON.parse turns 1e999 into Infinity.
   const oldestAt = value.oldestAt;
   if (typeof oldestAt !== "number" || !Number.isFinite(oldestAt) || oldestAt < 0) return null;
@@ -1628,7 +1671,8 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
   // and the thread is that session's bound thread, with each line classed again through the
   // roster and a line from an account no longer admitted dropped. An entry whose session did not
   // restore is dropped with the counted notice the same drop posts mid-run, its cause read off the
-  // records; one whose thread is not its session's is dropped with a log line alone, since the
+  // records, save one under a local conversation id, whose log line is its only record; one whose
+  // thread is not its session's is dropped with a log line alone, since the
   // thread's readers are not that session's. The restore runs before the first message; the age
   // caps are armed later, by `armRestored`, at the bind. In production the listener binds after
   // this router is built, so a session's relay attaching is what delivers a restored buffer; the
@@ -1652,6 +1696,9 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
           `routing: dropped ${count} buffered messages held for session ${entry.sessionId}, ` +
             "which did not survive the broker restart",
         );
+        // A local conversation's notice would land nowhere, since the local surface keeps no post,
+        // so the log line above is its record and nothing is posted under its id.
+        if (isLocalConversationId(entry.threadId)) continue;
         // Fire and forget, as on every other drop: the announcement never rejects by construction.
         const cause = dropCause(records, entry.sessionId);
         void announceDrop(entry.threadId, entry.messages.length, cause).catch((error: unknown) => {
@@ -2223,7 +2270,11 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         uploads.map((upload) => upload.path),
       );
       // The gateway's own shape with the flags a plain Discord line carries, so the response gate
-      // and the relay see this line as they see a Discord line of its class.
+      // and the relay see this line as they see a Discord line of its class. On a local
+      // conversation, where no line carries a mention, a line whose words name the persona is one;
+      // on a Discord thread a typed line is never a mention, whatever its words. No typed line is a
+      // reply.
+      const mentionsBot = isLocalConversationId(threadId) && namesLineage(words, record.lineage);
       const message: InboundMessage = {
         threadId,
         messageId: id,
@@ -2231,7 +2282,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         author,
         fromBot: false,
         fromSelf: false,
-        mentionsBot: false,
+        mentionsBot,
         repliesToBot: false,
         text: words,
         attachments: [],
@@ -2242,7 +2293,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         record,
         message,
         buffered,
-        { mentionsBot: false, repliesToBot: false },
+        { mentionsBot, repliesToBot: false },
         [],
         line.boardActs && isBoardAct(words, fileIds),
       );
@@ -2757,7 +2808,11 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     noteReply(sessionId, text) {
       if (gate === null) return;
       const threadId = options.threadFor(sessionId);
-      if (threadId !== null) gate.noteReply(threadId, sessionId, text);
+      if (threadId === null) return;
+      gate.noteReply(threadId, sessionId, text);
+      // A local conversation has no gateway to echo the reply, so the reply stamps the last-post
+      // clock itself. A Discord thread's clock is stamped by the gateway's echo alone.
+      if (isLocalConversationId(threadId)) gate.notePost(threadId);
     },
 
     noteNoted(threadId, messageId) {

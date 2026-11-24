@@ -2986,39 +2986,36 @@ export async function startBroker(
           },
           threadFor: (sessionId) => threadFor(sessionId),
           writer: steeringWriter,
-          // The mode, caps, judge and journal, on a host with Discord alone. The router builds the
-          // gate, whose timers deliver into the router's own pipe; the real clock and the real fetch
-          // are the defaults it takes. The journal sits beside the state file and rotates as the
-          // broker log does. The local mode passes none, whatever CHANNEL_RESPONSE_GATE says, so its
-          // journal and buffers files are neither read nor written: the gate restores a held buffer
-          // only for a Discord thread id and learns of the bot's own posts only from the gateway.
-          ...(discord === null
-            ? {}
-            : {
-                responseGate: {
-                  mode: config.responseGate,
-                  maxMessages: config.responseGateMaxMessages,
-                  maxWaitMs: config.responseGateMaxWaitMs,
-                  ...(judgeKey === null || config.responseGate === "off"
-                    ? {}
-                    : {
-                        judge: {
-                          quietMs: config.responseGateQuietMs,
-                          threshold: config.responseGateThreshold,
-                          apiKey: judgeKey,
-                        },
-                      }),
-                  journal: createResponseGateJournal({
-                    file: responseGateJournalFile,
-                    maxBytes: config.logMaxBytes,
-                    maxFiles: config.logMaxFiles,
-                  }),
-                  // A restored buffer's age cap is floored at the restart window, the time a session that
-                  // held a relay before the restart is given to reconnect, so a cap that passed during the
-                  // outage still waits for the relay's return.
-                  buffers: { file: responseGateBuffersFile, graceMs: RELAY_RESTART_GRACE_MS },
-                },
-              }),
+          // The mode, caps, judge and journal, the same on a host with Discord and in the local mode.
+          // The router builds the gate, whose timers deliver into the router's own pipe; the real
+          // clock and the real fetch are the defaults it takes. The journal sits beside the state
+          // file and rotates as the broker log does. In the local mode the gate keys a buffer on the
+          // local conversation id, which is the same after a restart, so the buffers file restores
+          // it. Since no gateway echoes a post there, a reply and a mirrored reply on a local
+          // conversation stamp the last-post clock, and nothing else does.
+          responseGate: {
+            mode: config.responseGate,
+            maxMessages: config.responseGateMaxMessages,
+            maxWaitMs: config.responseGateMaxWaitMs,
+            ...(judgeKey === null || config.responseGate === "off"
+              ? {}
+              : {
+                  judge: {
+                    quietMs: config.responseGateQuietMs,
+                    threshold: config.responseGateThreshold,
+                    apiKey: judgeKey,
+                  },
+                }),
+            journal: createResponseGateJournal({
+              file: responseGateJournalFile,
+              maxBytes: config.logMaxBytes,
+              maxFiles: config.logMaxFiles,
+            }),
+            // A restored buffer's age cap is floored at the restart window, the time a session that
+            // held a relay before the restart is given to reconnect, so a cap that passed during the
+            // outage still waits for the relay's return.
+            buffers: { file: responseGateBuffersFile, graceMs: RELAY_RESTART_GRACE_MS },
+          },
           now: Date.now,
           log: note,
           // The web listener's login list, so a page line held across the restart is the operator's
@@ -3059,7 +3056,7 @@ export async function startBroker(
             restart(`operator account ${senderId} typed broker restart in thread ${threadId}`),
         });
   inbound = router;
-  if (discord !== null) {
+  if (router !== null) {
     if (config.responseGate === "live") {
       note(
         `broker: the response gate is live, a thread's buffer holds at most ` +
@@ -3075,11 +3072,6 @@ export async function startBroker(
           `decision it would have made is journaled to ${responseGateJournalFile}`,
       );
     }
-  } else if (localMode && config.responseGate !== "off") {
-    note(
-      `broker: CHANNEL_RESPONSE_GATE is ${config.responseGate}, but the response gate needs Discord ` +
-        "and is off on this host, so every line is delivered at once",
-    );
   }
 
   if (discord !== null && discordLink !== null && router !== null) {
