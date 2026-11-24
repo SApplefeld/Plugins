@@ -23,7 +23,8 @@ Returns the file name of every whitespace- or quote-delimited token of a command
 .DESCRIPTION
 A token's file name is the text after its last forward or back slash. A null or empty command
 line has no tokens. The allowlist matches on these names and never on a substring of the line,
-so a shell whose arguments merely mention an allowlisted script is not spared.
+so a process is spared where an allowlisted name is the file name of one of its tokens, a path
+to that script among them, and a name that appears only inside a longer token spares nothing.
 #>
 function Get-OrphanTokenNames {
     param([AllowNull()][string]$CommandLine)
