@@ -5235,8 +5235,8 @@ export const register: Register = async (on, options) => {
         $.ui.log(`redactor: restore entry '${entry}' dropped: ${reason}`);
       }
       try {
-        const envNames = ["TYPESAFE_API_KEY", "ANTHROPIC_API_KEY", "GH_TOKEN", "GITHUB_TOKEN", "DEEPGRAM_API_KEY"];
-        const env = await Promise.allSettled([$.env.get("TYPESAFE_API_KEY"), $.env.get("ANTHROPIC_API_KEY"), $.env.get("GH_TOKEN"), $.env.get("GITHUB_TOKEN"), $.env.get("DEEPGRAM_API_KEY")]);
+        const envNames = ["TYPESAFE_API_KEY", "ANTHROPIC_API_KEY", "GH_TOKEN", "GITHUB_TOKEN", "DEEPGRAM_API_KEY", "TMW_REPORTING_TOKEN"];
+        const env = await Promise.allSettled([$.env.get("TYPESAFE_API_KEY"), $.env.get("ANTHROPIC_API_KEY"), $.env.get("GH_TOKEN"), $.env.get("GITHUB_TOKEN"), $.env.get("DEEPGRAM_API_KEY"), $.env.get("TMW_REPORTING_TOKEN")]);
         // The session's own id, which the vault never keeps: $.session.id(),
         // else the environment's CLAUDE_CODE_SESSION_ID, else none. A blank
         // answer counts as none.

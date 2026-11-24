@@ -135,7 +135,7 @@
 // supersedes it, since each restores every line the store rule does not
 // catch, and so does an MCP tool the redactorRestoreTools setting names.
 //
-// The vault is seeded at session start. index.ts reads the five environment
+// The vault is seeded at session start. index.ts reads the six environment
 // names, the three files under the home's .claude directory and each path in
 // the credentialFiles setting, and hands the values and texts to seedVault,
 // which keeps every value it finds but the session's own id through
