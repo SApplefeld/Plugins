@@ -134,7 +134,7 @@ How the script reaches a row:
 
 ## What to tell the operator
 
-The operator reads your reply on Discord and cannot open files. Send the verdict line with its `(run <id>)` part removed, then one plain sentence on what it means:
+The operator reads your reply on the thread and cannot open files. Send the verdict line with its `(run <id>)` part removed, then one plain sentence on what it means:
 
 - `pre` clear: the build passed the checks a session can run before restarting, and you are restarting onto it now.
 - `pre` triage: the build failed the named steps, and you have not restarted. Add each failing step's name, what it checks from the list above, and its evidence line. Say they can reply "restart anyway" to go on, or leave the fleet where it is while the plugin's owner looks.

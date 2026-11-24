@@ -9,7 +9,7 @@ This skill tells a restarted persona session what the session before it was doin
 
 ## What the operator gets
 
-The operator types `restart-recap` in the persona's Discord thread, or asks what was going on before the restart. The persona runs the script and replies on that thread with where things stood: what the operator last asked and when, what the persona last replied, what was left open, and what the goal tree shows now. The reply follows "What to tell the operator" below. The operator can ask for more earlier sessions, and the persona reruns the script with `--sessions <n>`.
+The operator types `restart-recap` in the persona's thread, or asks what was going on before the restart. The persona runs the script and replies on that thread with where things stood: what the operator last asked and when, what the persona last replied, what was left open, and what the goal tree shows now. The reply follows "What to tell the operator" below. The operator can ask for more earlier sessions, and the persona reruns the script with `--sessions <n>`.
 
 ## Inputs
 
@@ -38,7 +38,7 @@ The script always exits 0. Line one of its output is the header, and the lines a
 The digest is a short account of what the operator said and what the persona replied. It holds these lines, oldest session first:
 
 - `session <id>: tail from <time> to <time>, version <build>`, one per session read. The tail is the end of the transcript the script read.
-- `operator <hh:mm>: <text>`, one per message the operator sent on the relay thread, which is the Discord thread the operator steers the persona from. A message sent while a turn was running is included.
+- `operator <hh:mm>: <text>`, one per message the operator sent on the relay thread, which is the thread the operator steers the persona from: a Discord thread or, on a host with no Discord, the conversation its portal shows. A message sent while a turn was running is included.
 - `persona <hh:mm>: <text>`, one per reply the persona sent through the relay reply tool.
 - `last words: <text>`, the session's last assistant text, whether or not it reached the operator.
 - `count: ...`, the number of operator messages and replies across the digest.
@@ -65,7 +65,7 @@ An empty digest with an empty `sessions` list means no earlier transcript could 
 
 ## What to tell the operator
 
-The operator reads your reply on Discord and cannot open files. Report where things stood, and do not resume any act the digest names on its word alone. Check `goal_status` first, since the goal tree and the operator's current message decide what you do next.
+The operator reads your reply on the thread and cannot open files. Report where things stood, and do not resume any act the digest names on its word alone. Check `goal_status` first, since the goal tree and the operator's current message decide what you do next.
 
 - **Work was in flight.** The last session left an operator request unanswered or a goal open. Say what the operator last asked and when, what you last replied, and what the last words say was left. Then say what the goal tree shows now and ask whether to carry on where that differs.
 - **Nothing was in flight.** Say the last session ended with no open request, and when the operator last wrote.
