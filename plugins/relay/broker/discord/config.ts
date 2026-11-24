@@ -27,7 +27,7 @@ export type DiscordConfig = {
   archiveOnEnd: boolean;
 };
 
-const DEFAULT_REFRESH_INTERVAL_MS = 5_000;
+export const DEFAULT_REFRESH_INTERVAL_MS = 5_000;
 const DEFAULT_DWELL_MS = 60_000;
 export const DEFAULT_IDLE_AFTER_MS = 120_000;
 // Four hours. The backstop exists to catch a hard kill, which fires no hook, so it is set well

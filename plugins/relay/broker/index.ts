@@ -26,7 +26,7 @@ import type { Logger } from "./log.ts";
 import { createRegistry, liveByLineage } from "./registry.ts";
 import type { ModelChange, Registry, SessionRecord } from "./registry.ts";
 import { loadSessions, saveSessions } from "./persistence.ts";
-import { loadDiscordConfig } from "./discord/config.ts";
+import { DEFAULT_REFRESH_INTERVAL_MS, loadDiscordConfig } from "./discord/config.ts";
 import { createLocalSurface } from "./local-surface.ts";
 import { createDiscordTransport, createInteractionResponder } from "./discord/adapter.ts";
 import { createSurface } from "./discord/surface.ts";
@@ -35,7 +35,10 @@ import { createTypingKeeper } from "./discord/typing.ts";
 import type { TypingKeeper } from "./discord/typing.ts";
 import {
   displayName,
+  plainLineField,
   renderModelChange,
+  renderPlainBlockedAlert,
+  renderPlainModelChange,
   renderQuestionNotice,
   renderRestartNotice,
 } from "./discord/render.ts";
@@ -146,7 +149,7 @@ import { createRelayRoutes } from "./routing/http.ts";
 import { createThreadWriter } from "./routing/writer.ts";
 import type { ThreadWriter } from "./routing/writer.ts";
 import type { MessageSource } from "./routing/gateway.ts";
-import { fit, withoutInvisible } from "./sanitize.ts";
+import { fit } from "./sanitize.ts";
 import type { VoiceBridge } from "./voice/bridge.ts";
 import type { Voice } from "./voice/connection.ts";
 
@@ -362,17 +365,6 @@ export const QUESTION_LINE_MULTI_SELECT = "(You may pick more than one.)";
 export const QUESTION_LINE_LEFT_OUT = "This line leaves out ";
 
 /**
- * One field of a question as a question line writes it: the invisible class stripped as the reader's
- * own test strips it, and each line break made one space, so no field breaks a line. The vertical tab
- * and the form feed become a space before the strip, which would otherwise drop them and join the
- * words on either side. Nothing is escaped: the line carries text as a reply line does, and the
- * broker's own web page draws it as plain text.
- */
-function questionLineField(value: string): string {
-  return withoutInvisible(value.replace(/[\v\f]/g, " ")).replace(/\n/g, " ");
-}
-
-/**
  * The text of the line a held question writes to the talk ring, which the portal's conversation and
  * the web page show. Each question is its header and its text on one line, with a
  * fixed phrase where it takes several picks, then one line per option: its label, and its
@@ -384,13 +376,13 @@ function questionLineField(value: string): string {
 function questionLineText(questions: readonly AskedQuestion[]): string {
   const body = questions
     .map((asked) => {
-      const question = questionLineField(asked.question);
-      const asks = asked.header === null ? question : `${questionLineField(asked.header)}: ${question}`;
+      const question = plainLineField(asked.question);
+      const asks = asked.header === null ? question : `${plainLineField(asked.header)}: ${question}`;
       const lines = [asked.multiSelect ? `${asks} ${QUESTION_LINE_MULTI_SELECT}` : asks];
       for (const option of asked.options) {
-        const label = questionLineField(option.label);
+        const label = plainLineField(option.label);
         lines.push(
-          option.description === null ? `- ${label}` : `- ${label}: ${questionLineField(option.description)}`,
+          option.description === null ? `- ${label}` : `- ${label}: ${plainLineField(option.description)}`,
         );
       }
       return lines.join("\n");
@@ -477,7 +469,7 @@ const MAX_HOLD_ENDED_QUESTION = 300;
 
 /**
  * The text of the line saying a question waits at the machine's console: `QUESTION_LINE_AT_CONSOLE`,
- * then the text of the first question, with no header, screened as `questionLineField` screens a
+ * then the text of the first question, with no header, screened as `plainLineField` screens a
  * field and cut to `MAX_HOLD_ENDED_QUESTION` through `fit`. Where there is no question, the sentence
  * stands alone. A hold that ended and an ask the desk would not hold both write this one text.
  */
@@ -485,14 +477,14 @@ function consoleLineText(questions: readonly AskedQuestion[]): string {
   const first = questions[0];
   return first === undefined
     ? QUESTION_LINE_AT_CONSOLE
-    : `${QUESTION_LINE_AT_CONSOLE}\n${fit(questionLineField(first.question), MAX_HOLD_ENDED_QUESTION)}`;
+    : `${QUESTION_LINE_AT_CONSOLE}\n${fit(plainLineField(first.question), MAX_HOLD_ENDED_QUESTION)}`;
 }
 
 /**
  * Hands the talk ring, on a host with no Discord, the line saying a held question went to the
  * machine's console: where an entry ends `expired` or `released`, one `question` line under the
  * session's lineage, holding `QUESTION_LINE_AT_CONSOLE` and then the text of the bounded reading's
- * first question, with no header, screened as `questionLineField` screens a field and cut to
+ * first question, with no header, screened as `plainLineField` screens a field and cut to
  * `MAX_HOLD_ENDED_QUESTION` through `fit`. Where the reading holds no question, the sentence stands
  * alone. The line is written whether or not a question line went before it, since a hold released
  * because its alert was dropped wrote none.
@@ -693,6 +685,47 @@ export function modelChangeNotice(options: {
         );
       }
     })();
+  };
+}
+
+/**
+ * Writes the one talk ring line a session's model change earns on a host with no Discord, under the
+ * session's lineage, and nothing for a session with none. The line is `renderPlainModelChange`'s, so
+ * a forced downgrade carries the cause the thread's message would carry.
+ *
+ * The change is read from a transcript another program writes, so a model string alternating there
+ * can report one change per poll. The window bounds the lines per lineage at the model-change
+ * ceilings; past its post ceiling the line is dropped and the log says so with the session id, and
+ * never a model name, since the names are transcript-sourced.
+ */
+function modelChangeLine(options: {
+  talkTap: TalkTap;
+  lineageOf: (sessionId: string) => string | null;
+  volume: (lineage: string) => "ping" | "quiet" | "drop";
+  log: (message: string) => void;
+}): (change: ModelChange) => void {
+  return (change) => {
+    const lineage = options.lineageOf(change.sessionId);
+    if (lineage === null) return;
+    if (options.volume(lineage) === "drop") {
+      options.log(
+        `broker: session ${change.sessionId}'s model-change line is over its window; the line is dropped`,
+      );
+      return;
+    }
+    try {
+      options.talkTap.push(lineage, {
+        kind: "model-change",
+        author: null,
+        senderClass: null,
+        text: renderPlainModelChange({ from: change.from, to: change.to, downgrade: change.downgrade }),
+      });
+    } catch {
+      options.log(
+        `broker: session ${change.sessionId}'s model-change line could not be written; ` +
+          "the error detail is withheld, it can carry content",
+      );
+    }
   };
 }
 
@@ -1417,6 +1450,12 @@ export async function startBroker(
      * test ends a hold without waiting it out. The real `setTimeout` when not given.
      */
     questionDeskTimer?: (callback: () => void, ms: number) => NodeJS.Timeout;
+    /**
+     * The local mode's blocked desk timer, which arms the repeating tick, so a test runs a tick
+     * without waiting the interval and awaits the pass the callback returns. The real `setInterval`
+     * when not given.
+     */
+    blockedDeskTimer?: (callback: () => Promise<void>, ms: number) => NodeJS.Timeout;
   } = {},
 ): Promise<Broker> {
   const exit = options.exit ?? ((code: number): void => process.exit(code));
@@ -1633,8 +1672,9 @@ export async function startBroker(
   let decisionsCardMessage: () => string | null = () => null;
   // The blocked-state desk, mutable for the reason `threadFor` is: it is built inside the Discord
   // block below, because its alerts need the sender gate's operator ID and the surface's threads,
-  // and the refresh timer that ticks it starts before that block finishes. Without Discord it is
-  // never built, and no session stands blocked anywhere, because no surface exists to render one.
+  // and the refresh timer that ticks it starts before that block finishes. The local mode builds a
+  // desk of its own, ticked by its own timer, which writes its alerts to the talk ring and sets
+  // `standingBlocked` below. A host with neither builds no desk, and no session stands blocked there.
   let blockedDesk: BlockedDesk | null = null;
   // The standing computation both `toView` call sites read, so the fleet card and the session
   // thread cannot disagree about who is blocked. Mutable because the usage card's wiring is built
@@ -1796,11 +1836,15 @@ export async function startBroker(
     gate: { reply: (sessionId, text) => inbound?.noteReply(sessionId, text) },
     // Both read through closures for the same reason: the sender gate loads and the gateway
     // connects inside the Discord block below, after this router exists, and a broker without
-    // Discord has neither, so every name a reply asks to ping is reported unresolved there.
+    // Discord has neither.
     roster: {
       gate: () => senderGate,
       memberName: (userId) => (gateway === null ? Promise.resolve(null) : gateway.memberName(userId)),
     },
+    // Read through the closure for the same reason: the mode is decided below, after this router
+    // exists, and copied into the question desk's flag. In the local mode a reply's names ride its
+    // ring line, matched against nobody, and none is reported unresolved.
+    localMode: () => questionDeskLocalMode,
     // Read through the closure for the reason `threadFor` is: the tracker is built inside the
     // Discord block below, once the transport it paints reactions through exists.
     receipts: {
@@ -1850,8 +1894,8 @@ export async function startBroker(
   // poll timer starts before that block finishes, so a change read in the gap would otherwise be
   // lost outright: the registry's transition is already consumed and reports no second change. One
   // held slot, latest change wins, because the gap is one startup's width; the Discord block
-  // installs the real doorway and flushes the held change through it. A broker without Discord
-  // never flushes it, which is that broker's steady state for every message.
+  // installs the real doorway and flushes the held change through it, and the local mode installs
+  // the talk ring's line and flushes it there. A host with neither keeps the change held unread.
   let heldModelChange: ModelChange | null = null;
   let announceModelChange: (change: ModelChange) => void = (change) => {
     heldModelChange = change;
@@ -1965,7 +2009,7 @@ export async function startBroker(
         if (change !== null) announceModelChange(change);
       },
       // What the session is trying to finish, for its own card. Nothing is posted and nothing is
-      // logged: the goal is operator prose, and the card is the one surface that reads it.
+      // logged: the goal is operator prose, read only by the card and the local door's status read.
       noteGoal: (sessionId, goal) => {
         registry.noteGoal(sessionId, goal);
       },
@@ -2111,16 +2155,19 @@ export async function startBroker(
             inbound === null
               ? Promise.resolve({ status: "no-session", truncated: false })
               : inbound.deliverDoor(lineage, name, text),
-          // The door's four other paths, which read what a session waits on and settle it, and
-          // answer a persona's open ask, are served only where the host gives the door operator
-          // standing: the door serves a path only where it holds that path's callback, so on any
-          // other host a request to one is the hook intake's to answer. The desks are read through
-          // their bindings, since the Discord block and the local mode replace the stand-in
-          // permission desk, and with no router there is no session an answer or a verdict
-          // could reach, which `no-session` says. The pending read lists the open asks of the
-          // lineage's persona from the door's own reading, and `/door/ask` judges an answer
-          // against a new reading of it and hands it to the one copy of the ask checks. Both are
-          // built above at the same standing, so their tests here only narrow their types.
+          // The door's five other paths, which read what a session waits on and settle it, answer a
+          // persona's open ask and read a session's status, are served only where the host gives
+          // the door operator standing: the door serves a path only where it holds that path's
+          // callback, so on any other host a request to one is the hook intake's to answer. The
+          // desks are read through their bindings, since the Discord block and the local mode
+          // replace the stand-in permission desk, and with no router there is no session an answer
+          // or a verdict could reach, which `no-session` says. The status read derives a state by
+          // the signals and thresholds the web pass derives by, read through the same closures at
+          // each request, since the blocked desk's binding is set below. The pending read lists
+          // the open asks of the lineage's persona from the door's own reading, and `/door/ask`
+          // judges an answer against a new reading of it and hands it to the one copy of the ask
+          // checks. Both are built above at the same standing, so their tests here only narrow
+          // their types.
           ...(config.doorStanding !== "operator"
             ? {}
             : {
@@ -2128,6 +2175,7 @@ export async function startBroker(
                   questions: questionDesk.heldFor(sessionId),
                   permissions: permissions.pendingFor(sessionId),
                 }),
+                status: (record: SessionRecord) => ({ signals: surfaceSignals(record), thresholds: surfaceThresholds }),
                 ...(doorAsks === null ? {} : { asks: (lineage: string) => doorAsks.list(lineage) }),
                 ...(doorAsks === null || askActs === null
                   ? {}
@@ -2165,6 +2213,16 @@ export async function startBroker(
     },
   });
   const discord = discordSetup.state === "whole" ? discordSetup.config : null;
+  // What the web pass and the door's status read derive a session's state by: Discord's thresholds
+  // where it is configured and the defaults where it is absent, and the two signals no record
+  // carries. The signals are read at each call, since the Discord block and the local mode rebind
+  // the permission desk and the blocked desk's answer after this point.
+  const surfaceThresholds =
+    discord === null ? DEFAULT_THRESHOLDS : { idleAfterMs: discord.idleAfterMs, exitedAfterMs: discord.exitedAfterMs };
+  const surfaceSignals = (record: SessionRecord): { needsAttention: boolean; blocked: boolean } => ({
+    needsAttention: permissions.waiting().has(record.sessionId),
+    blocked: standingBlocked(record),
+  });
   // The local mode: no Discord setting at all, and a door or a web page a person can read a
   // conversation through. Such a host carries its conversations on the local surface, built below
   // in the place the Discord block builds the thread surface. A half-configured Discord is a
@@ -2390,6 +2448,10 @@ export async function startBroker(
   // injected clock.
   let refresh: NodeJS.Timeout | null = null;
   let inFlight: Promise<void> = Promise.resolve();
+  // The local mode's blocked desk timer and its running pass, which the teardown clears and waits
+  // for as it does the Discord refresh and its pass. Null and settled on any other host.
+  let blockedTimer: NodeJS.Timeout | null = null;
+  let blockedInFlight: Promise<void> = Promise.resolve();
   let gateway: MessageSource | null = null;
   // The sender gate as the outbound router's roster seam reads it: null until the Discord block
   // below loads it, which is the one place it is loaded, so a broker without Discord resolves no
@@ -2810,6 +2872,71 @@ export async function startBroker(
         questionDesk.noteAlert(sessionId, digest, { threadId, messageId });
       });
     }
+    // The talk ring exists wherever the local mode does, since each needs a door or a web page.
+    const ring = talkRing;
+    if (ring !== null) {
+      // The blocked-state desk, reading the stream the Discord block's desk reads through the same
+      // seam. Its thread for a session is the session's lineage, so its windows count per lineage,
+      // and a session with none goes again next tick as one with no thread does. Its alert is one
+      // talk ring line composed as plain text, landed with no message id, and it mentions no one.
+      const desk = createBlockedDesk({
+        eventsPath: config.boardEventsPath,
+        threadFor: sessionLineage,
+        alert: async (lineage, text) => {
+          ring.push(lineage, { kind: "blocked", author: null, senderClass: null, text });
+          return { status: "ok", value: { messageId: null }, rate: NO_RATE_INFO };
+        },
+        operatorIds: [],
+        waitsOn: createDeskWaitsOn({
+          rosterPath: config.boardRosterPath,
+          sessions: () => registry.list(),
+          log: note,
+        }),
+        compose: renderPlainBlockedAlert,
+        now: Date.now,
+        log: note,
+      });
+      standingBlocked = desk.standing;
+      // Ticked by a timer of its own at the Discord refresh's default interval, since no refresh
+      // pass runs here. Unreferenced, so it holds no process open; the teardown clears it and waits
+      // for the pass it started. A tick that throws or rejects is logged content-free, and the next
+      // one goes again: a rejection left unhandled would be fatal to the process under Node 24. The
+      // callback returns the kept pass, which never rejects, so a test's injected timer can await it.
+      const setTimer =
+        options.blockedDeskTimer ??
+        ((callback: () => Promise<void>, ms: number): NodeJS.Timeout => setInterval(callback, ms));
+      blockedTimer = setTimer(() => {
+        try {
+          blockedInFlight = desk.tick().catch(() => {
+            note("broker: a blocked desk pass failed; the error detail is withheld, it can carry content");
+          });
+        } catch {
+          note("broker: a blocked desk pass failed; the error detail is withheld, it can carry content");
+        }
+        return blockedInFlight;
+      }, DEFAULT_REFRESH_INTERVAL_MS);
+      blockedTimer.unref();
+      // The model change's line, under its own window at the model-change ceilings, never the
+      // question alert's or the desk's, keyed by lineage.
+      announceModelChange = modelChangeLine({
+        talkTap: ring,
+        lineageOf: sessionLineage,
+        volume: createAlertVolume({
+          now: Date.now,
+          pingCeiling: MAX_MODEL_CHANGE_PINGS_PER_WINDOW,
+          postCeiling: MAX_MODEL_CHANGE_ALERTS_PER_WINDOW,
+          windowMs: ALERT_WINDOW_MS,
+        }),
+        log: note,
+      });
+      // The change the pre-doorway hold caught, released through the line as the Discord block
+      // releases it through its message.
+      if (heldModelChange !== null) {
+        const change = heldModelChange;
+        heldModelChange = null;
+        announceModelChange(change);
+      }
+    }
   }
 
   // The sender gate the inbound router classes an author by: the Discord block's allowlist, or the
@@ -3191,6 +3318,8 @@ export async function startBroker(
       statusTimer = null;
       if (refresh !== null) clearInterval(refresh);
       refresh = null;
+      if (blockedTimer !== null) clearInterval(blockedTimer);
+      blockedTimer = null;
       typingKeeper?.stop();
       // Ahead of the gateway, whose client the voice connection signals through.
       if (voice !== null) void voice.stop().catch(() => {});
@@ -3234,13 +3363,13 @@ export async function startBroker(
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : config.port;
   // Said once, where the listener that serves it is bound. The line names the paths the door
-  // serves, three at participant standing and all seven at operator standing, and the standing the
+  // serves, three at participant standing and all eight at operator standing, and the standing the
   // host gives the door, as the token `participant` or `operator`, and neither the key nor the file
   // it was read from. It is where a host's operator reads the standing the door is running at.
   if (doorRoutes !== null) {
     const doorPaths =
       config.doorStanding === "operator"
-        ? "/door/lineages, /door/lines, /door/line, /door/pending, /door/answer, /door/permission and /door/ask"
+        ? "/door/lineages, /door/lines, /door/line, /door/pending, /door/status, /door/answer, /door/permission and /door/ask"
         : "/door/lineages, /door/lines and /door/line";
     note(`broker: the local door is on, serving ${doorPaths} on the loopback listener, at ${config.doorStanding} standing`);
     // On an operator host alone, where the pending read lists asks: whether it has a roster to
@@ -3277,15 +3406,9 @@ export async function startBroker(
     const pass = createWebPass({
       config,
       sources,
-      thresholds:
-        discord === null
-          ? DEFAULT_THRESHOLDS
-          : { idleAfterMs: discord.idleAfterMs, exitedAfterMs: discord.exitedAfterMs },
+      thresholds: surfaceThresholds,
       records: () => registry.list(),
-      signals: (record) => ({
-        needsAttention: permissions.waiting().has(record.sessionId),
-        blocked: standingBlocked(record),
-      }),
+      signals: surfaceSignals,
       log: note,
     });
     webPass = pass;
@@ -3645,6 +3768,7 @@ export async function startBroker(
     if (tailTimer !== null) clearInterval(tailTimer);
     if (statusTimer !== null) clearInterval(statusTimer);
     if (refresh !== null) clearInterval(refresh);
+    if (blockedTimer !== null) clearInterval(blockedTimer);
     typingKeeper?.stop();
     // A held buffer goes down in the same synchronous block, before the first await below: its
     // age-cap timer must not fire into pipes about to be torn down, and a broker asked to stop
@@ -3673,6 +3797,8 @@ export async function startBroker(
     // Discord call and will write the bindings file when it returns. The tailer's pass is awaited
     // for the same reason: shutdown must not race a read still holding a file handle.
     await inFlight;
+    // The local mode's blocked desk pass, for the reason the Discord pass above is awaited.
+    await blockedInFlight;
     await tailInFlight;
     await statusInFlight;
     // The status reader's notices are posted off its pass, so they are awaited apart from it. Not

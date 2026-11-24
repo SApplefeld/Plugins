@@ -3146,31 +3146,72 @@ export function renderModelChange(input: {
   const lines = [
     `${mention}${MODEL_CHANGE_ATTRIBUTION} ${SEPARATOR} now ${to}, was ${from} ${SEPARATOR} for this session`,
   ];
-  const downgrade = input.downgrade;
-  if (downgrade === null) return lines.join("\n");
-  const original = inertField(downgrade.originalModel, MAX_MODEL_NAME_LENGTH);
+  const cause = input.downgrade === null ? null : downgradeSentence(input.downgrade, inertField, ` ${SEPARATOR}`);
+  if (cause !== null) lines.push(cause);
+  return lines.join("\n");
+}
+
+/**
+ * The sentence a forced downgrade adds under a model change's first line, for the thread's message
+ * and the plain line alike, so the two say the same words. `field` makes one untrusted field safe for
+ * its surface and bounds it, and `joiner` is what stands between the refusal and its category: the
+ * separator glyph in a thread, a comma in plain text.
+ */
+function downgradeSentence(
+  downgrade: ModelFallback,
+  field: (value: string, limit: number) => string,
+  joiner: string,
+): string {
+  const original = field(downgrade.originalModel, MAX_MODEL_NAME_LENGTH);
   if (downgrade.cause === "refusal") {
-    const category =
-      downgrade.category === null ? "" : inertField(downgrade.category, MAX_MODEL_DETAIL_LENGTH);
-    lines.push(
-      category === ""
-        ? "A safeguard refusal forced it."
-        : `A safeguard refusal forced it ${SEPARATOR} flagged ${category}.`,
-    );
-    return lines.join("\n");
+    const category = downgrade.category === null ? "" : field(downgrade.category, MAX_MODEL_DETAIL_LENGTH);
+    return category === ""
+      ? "A safeguard refusal forced it."
+      : `A safeguard refusal forced it${joiner} flagged ${category}.`;
   }
-  const choice = downgrade.choice === null ? "" : inertField(downgrade.choice, MAX_MODEL_DETAIL_LENGTH);
-  lines.push(
+  const choice = downgrade.choice === null ? "" : field(downgrade.choice, MAX_MODEL_DETAIL_LENGTH);
+  return (
     `The session's model requires usage credits and the consent prompt was ` +
-      `${choice === "" ? "not answered" : choice} at the console; consenting there restores ` +
-      `${original === "" ? "it" : original}.`,
+    `${choice === "" ? "not answered" : choice} at the console; consenting there restores ` +
+    `${original === "" ? "it" : original}.`
   );
+}
+
+/**
+ * One field of a line the broker composes for the talk ring, which the local door and the web page
+ * show as plain text: the invisible class stripped, and each line break made one space, so no field
+ * breaks a line. The vertical tab and the form feed become a space before the strip, which would
+ * otherwise drop them and join the words on either side. Nothing is escaped, since a markdown escape
+ * would show the reader a backslash before each parenthesis.
+ */
+export function plainLineField(value: string): string {
+  return withoutInvisible(value.replace(/[\v\f]/g, " ")).replace(/\n/g, " ");
+}
+
+/** A model-change or blocked field for the talk ring: screened as `plainLineField` screens it, then cut. */
+function plainField(value: string, limit: number): string {
+  return fit(plainLineField(value), limit);
+}
+
+/**
+ * The line a model change writes to the talk ring on a host with no Discord: `renderModelChange`'s
+ * words in plain text, with no mention and no attribution glyph, and a comma where the thread's
+ * message draws its separator. Each model-borne field is screened as `plainLineField` screens it and
+ * cut to the bounds the thread's message uses.
+ */
+export function renderPlainModelChange(input: { from: string; to: string; downgrade: ModelFallback | null }): string {
+  const from = plainField(input.from, MAX_MODEL_NAME_LENGTH);
+  const to = plainField(input.to, MAX_MODEL_NAME_LENGTH);
+  const lines = [`Model changed: now ${to}, was ${from}, for this session`];
+  const cause = input.downgrade === null ? null : downgradeSentence(input.downgrade, plainField, ",");
+  if (cause !== null) lines.push(cause);
   return lines.join("\n");
 }
 
 /**
  * What the blocked alert says for each answer to who the run waits on: the words a reason follows
- * after a colon, and the whole clause drawn where the event carried no reason.
+ * after a colon, and the whole clause drawn where the event carried no reason. The thread's alert
+ * and the talk ring's plain line both read them.
  */
 const BLOCKED_ON_OPERATOR = {
   lead: "stopped on you",
@@ -3228,6 +3269,40 @@ export function renderBlockedAlert(input: {
   const stopped = reason === "" ? words.bare : `${words.lead}: ${reason}`;
   if (plan === "") return `${mention}${BLOCKED_ATTRIBUTION} ${SEPARATOR} ${stopped}`;
   return `${mention}${BLOCKED_ATTRIBUTION} ${SEPARATOR} ${plan} - ${stopped}`;
+}
+
+/** The plain line's clause for a run the broker cannot place and whose event gave no reason. */
+const BLOCKED_UNPLACED_PLAIN_BARE = "stopped; the reason is in this conversation";
+
+/**
+ * The line a block episode writes to the talk ring on a host with no Discord, in `renderBlockedAlert`'s
+ * words and shape as plain text: `Blocked: <plan> - <stopped>`, or `Blocked: <stopped>` where the plan
+ * screens to nothing. It takes the thread alert's input so the desk can compose with either, and
+ * writes no mention whatever list it is handed.
+ *
+ * `plan` and `reason` arrive from the kit's event stream, which anything with append access to the
+ * operator's home directory can write. Each is cut to the events reader's own bound through `fit`,
+ * then screened as `plainLineField` screens a field, so a line break cannot start a line that reads
+ * as the broker's and an invisible character cannot hide or reorder text. A field that screens to
+ * white space alone counts as empty. For a run the broker cannot place with no reason given, the
+ * clause points at this conversation rather than a thread.
+ */
+export function renderPlainBlockedAlert(input: {
+  operatorIds: readonly string[];
+  plan: string;
+  reason: string | null;
+  state: "asked" | "unasked" | "unknown";
+}): string {
+  const plan = plainLineField(fit(input.plan, MAX_PLAN_CHARS));
+  const reason = input.reason === null ? "" : plainLineField(fit(input.reason, MAX_REASON_CHARS));
+  const words =
+    input.state === "asked"
+      ? BLOCKED_ON_OPERATOR
+      : input.state === "unasked"
+        ? BLOCKED_UNASKED
+        : { lead: BLOCKED_UNPLACED.lead, bare: BLOCKED_UNPLACED_PLAIN_BARE };
+  const stopped = reason.trim() === "" ? words.bare : `${words.lead}: ${reason}`;
+  return plan.trim() === "" ? `Blocked: ${stopped}` : `Blocked: ${plan} - ${stopped}`;
 }
 
 /**

@@ -1062,14 +1062,15 @@ export type HandlerOptions = {
 /**
  * What `GET /sessions` publishes. The process token is withheld: it is the join key a hook post is
  * authenticated by, so anything that can read one can forge session traffic. The goal is withheld
- * too: it is operator prose off the transcript, held for one display surface, and a debugging route
- * that anything on this machine can read is not that surface. The open-turn stamp is withheld the
- * same way: it is held for the typing keeper alone, and no consumer of this route reads it. The
+ * too: it is operator prose off the transcript, held for the card and for the local door's status
+ * read, which sits behind the door key at operator standing, and a debugging route that anything on
+ * this machine can read is neither. The open-turn stamp is withheld the same way: it is held for
+ * the typing keeper alone, and no consumer of this route reads it. The
  * harness notice is withheld too: it is held for the card alone. The working directory is withheld
  * as well: it is an instruction to open a directory, held for the broker's own reads. The launch
  * instant is withheld: it is held for the web kit card, and no consumer of this route reads it. The
  * title, unlike the goal, is published on purpose: it is session identity of the same class as
- * `name`, which this route already publishes, not operator prose held for one display surface.
+ * `name`, which this route already publishes, not operator prose held for the card and the door.
  */
 export type PublicSessionRecord = Omit<
   SessionRecord,
@@ -1128,7 +1129,7 @@ export function redact(record: SessionRecord): PublicSessionRecord {
       since: task.since,
     })),
     // Published, unlike the goal: session identity of the same class as `name` above, not operator
-    // prose held for one display surface.
+    // prose held for the card and the door's status read.
     title: record.title,
   };
 }

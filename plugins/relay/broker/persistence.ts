@@ -28,7 +28,8 @@ const FORMAT_VERSION = 1;
 
 /**
  * A record as the file carries it: every field but the goal and the open-turn stamp. The goal is
- * operator prose off a transcript that only the card reads and that a load never restores anyway.
+ * operator prose off a transcript, read only by the card and the local door's status read, and a
+ * load never restores it anyway.
  * `turnActiveAt` is not a fact a restart can know: nothing on disk says whether a turn was open at
  * the moment the broker died, so it is never written and always starts null on load (see
  * `cleanRecord` below), the conservative read that treats a restart mid-turn as a closed one.

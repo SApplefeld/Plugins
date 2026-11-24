@@ -7,6 +7,7 @@
 // from being addressable: the relay never forwards a chat_id, so there is nothing here to honor.
 import {
   appendNarration,
+  plainLineField,
   renderAnswer,
   renderMirror,
   renderPeerIn,
@@ -16,7 +17,8 @@ import {
   renderTaskNotice,
 } from "../discord/render.ts";
 import type { MirrorKind } from "../discord/render.ts";
-import { withoutInvisible } from "../sanitize.ts";
+import { sliceCodePoints, withoutInvisible } from "../sanitize.ts";
+import { MAX_MENTION_LENGTH, MAX_REPLY_MENTIONS } from "../../relay/protocol.ts";
 import type { Registry } from "../registry.ts";
 // The peer classification is read here rather than duplicated, so the two paths a peer message
 // reaches a thread by cannot answer differently about one message. A runtime import back into the
@@ -241,11 +243,20 @@ export type OutboundRouterOptions = {
    * router before it loads the gate or connects the gateway, and a broker without Discord never
    * has either. A gate that reads null, or a router built without this seam, resolves every name
    * to nothing and the reply posts as one naming nobody does, with every name reported unresolved.
+   * A router in the local mode reads neither, since it matches no name (see `localMode`).
    */
   roster?: {
     gate: () => SenderGate | null;
     memberName: MemberNameLookup;
   };
+  /**
+   * Whether the broker runs in the local mode, with no Discord and a door or a web page, read at
+   * each reply because the broker decides the mode after it builds this router. In that mode a
+   * reply's names are matched against nobody and pinged on no one: they ride the reply's ring line
+   * alone, its result carries no `unresolved` list, and its log line counts the names as carried.
+   * Absent or false, names resolve against `roster` as above.
+   */
+  localMode?: () => boolean;
 };
 
 /**
@@ -439,6 +450,27 @@ function capBeside<T>(map: Map<string, T>, kept: string): void {
 }
 
 /**
+ * The names a reply's ring line carries, from the names the session asked to mention, in the order
+ * asked: each screened as `plainLineField` screens a plain line field and trimmed of white space at
+ * both ends, one left empty dropped, each cut to `MAX_MENTION_LENGTH` code points and trimmed again
+ * at its end, a repeat of an earlier name dropped, and the first `MAX_REPLY_MENTIONS` kept. They are
+ * the names as asked, whether or not the roster matched them, since the ring's readers match them
+ * against the people they know and draw them as plain text.
+ */
+function lineMentions(requested: readonly string[]): string[] {
+  const kept: string[] = [];
+  for (const name of requested) {
+    const screened = plainLineField(name).trim();
+    if (screened === "") continue;
+    const cut = sliceCodePoints(screened, MAX_MENTION_LENGTH).trimEnd();
+    if (kept.includes(cut)) continue;
+    kept.push(cut);
+    if (kept.length === MAX_REPLY_MENTIONS) break;
+  }
+  return kept;
+}
+
+/**
  * How the Claude Code harness opens the envelope it wraps a channel message in before injecting it
  * into the session as a user prompt.
  *
@@ -521,7 +553,7 @@ export type ReplyResult =
       /**
        * The requested names that resolved to no roster member, as sent, each once. Present only
        * when there is one, so a reply naming nobody, or whose every name resolved, reports the
-       * bare `sent` it always has.
+       * bare `sent` it always has. Never present in the local mode, which matches no name.
        */
       unresolved?: string[];
       /**
@@ -557,7 +589,9 @@ export type OutboundRouter = {
    * a file the reader refuses is reported as `file-refused` and nothing posts. `mentions` is the
    * list of display names the session asked to ping, as the session gave them, resolved against
    * the roster through `roster` and pinged on the first message under the thread's reply-ping
-   * window; a sent result names what did not resolve and whether the pings were quieted.
+   * window; a sent result names what did not resolve and whether the pings were quieted. In the
+   * local mode no name is resolved or pinged and the result names none. On every host the reply's
+   * ring line carries the names as `lineMentions` cleans them, resolved or not.
    */
   reply: (processToken: string, text: string, file?: string, mentions?: readonly string[]) => Promise<ReplyResult>;
   /**
@@ -1046,9 +1080,9 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
   /**
    * The roster IDs a reply's requested names resolve to, and the names that resolved to nobody,
    * for a request naming at least one. With no roster seam or no gate loaded every name is
-   * unresolved, each once: a broker without Discord cannot ping, and says so per name rather than
-   * failing the reply. The names are never logged, since they are conversation content the
-   * session wrote; the log carries counts alone.
+   * unresolved, each once: such a broker cannot ping, and says so per name rather than failing the
+   * reply. A broker in the local mode never asks, since it matches no name. The names are never
+   * logged, since they are conversation content the session wrote; the log carries counts alone.
    */
   async function resolveReplyMentions(
     requested: readonly string[],
@@ -1487,14 +1521,24 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       // thread's chain is taken on the tick it arrived, which is what orders it against a mirror
       // accepted right behind it. A reply naming someone takes its place once its names resolve,
       // the rule a reply with a file already follows once its file is read.
+      //
+      // In the local mode no name is resolved, so such a reply never awaits here either: the broker
+      // pings nobody there, and the names ride the reply's ring line alone.
+      const local = options.localMode?.() === true;
       const names =
-        mentions.length === 0 ? { resolved: [], unresolved: [] } : await resolveReplyMentions(mentions);
-      // Counts only, logged once the chain has decided whether the reply rang.
-      const noteNames = (outcome: string): void => {
+        mentions.length === 0 || local ? { resolved: [], unresolved: [] } : await resolveReplyMentions(mentions);
+      // The names the reply's ring line carries, on every host, resolved or not.
+      const carried = lineMentions(mentions);
+      // Counts only, logged once the chain has decided whether the reply rang. In the local mode
+      // the count is of the names the reply's ring line carried, none where no line was written.
+      const noteNames = (outcome: string, landed: boolean): void => {
         if (mentions.length === 0) return;
         log(
-          `routing: the reply from session ${located.sessionId} named ${String(mentions.length)}, ` +
-            `resolved ${String(names.resolved.length)}, ${outcome}`,
+          local
+            ? `routing: the reply from session ${located.sessionId} named ${String(mentions.length)}, ` +
+                `carried ${String(landed ? carried.length : 0)}`
+            : `routing: the reply from session ${located.sessionId} named ${String(mentions.length)}, ` +
+                `resolved ${String(names.resolved.length)}, ${outcome}`,
         );
       };
 
@@ -1512,7 +1556,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       // message.
       const plain = renderAnswer(text);
       if (plain.length === 0) {
-        noteNames("pinged nobody");
+        noteNames("pinged nobody", false);
         return { status: "failed", error: "the message was empty" };
       }
 
@@ -1530,6 +1574,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       // A run whose first message never landed handed its slot back and pinged nobody.
       noteNames(
         run.pinged && run.landed > 0 ? "pinged" : run.quieted ? "quieted for volume" : "pinged nobody",
+        run.error === null,
       );
       // What the relay is told beside `sent`, each field present only when it has something to say.
       const report = {
@@ -1548,7 +1593,14 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
         // The page's copy of the file is reserved here so the line carries its link, and written
         // only after the taps below and the receipt the run already marked, never awaited.
         const copy = attachment === undefined ? null : reserveForPage(located.sessionId, attachment);
-        tapTalk(located.sessionId, { kind: "reply", author: null, senderClass: null, text, files: copy === null ? [] : [copy.link] });
+        tapTalk(located.sessionId, {
+          kind: "reply",
+          author: null,
+          senderClass: null,
+          text,
+          files: copy === null ? [] : [copy.link],
+          mentions: carried,
+        });
         tapVoice(located.sessionId, text);
         tapGate(located.sessionId, text);
         if (copy !== null) writeForPage(located.sessionId, copy.write);

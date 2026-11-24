@@ -1,9 +1,9 @@
 // The local door: loopback routes a program on the broker's own host uses to read the talk ring, to
 // hand a session a line a named person wrote and, on a host that gives the door operator standing,
-// to read what a session waits on and settle it, and to read a persona's open asks and answer one.
-// They sit on the loopback listener between the relay routes and the hook intake, and exist only
-// while a door key is loaded. Three are served at either standing and four more at operator
-// standing alone, seven in all.
+// to read what a session waits on and settle it, to read a persona's open asks and answer one, and
+// to read a session's status. They sit on the loopback listener between the relay routes and the
+// hook intake, and exist only while a door key is loaded. Three are served at either standing and
+// five more at operator standing alone, eight in all.
 //
 //   Every request carries the header X-Channels-Door: the door key file's contents.
 //
@@ -19,8 +19,11 @@
 //        `limit` of them, the oldest kept, so a caller pages forward. `since` is digits and 0 when
 //        absent; `limit` is 1 to the ring's capacity and the capacity when absent. `missed` is how
 //        many sequence numbers after `since` the ring no longer holds. A line is
-//        {"seq", "at", "kind", "author", "senderClass", "text", "door"}, its text whole, and `door`
-//        is true for a line this door handed in. No line carries a file.
+//        {"seq", "at", "kind", "author", "senderClass", "text", "door", "mentions"}, its text
+//        whole, and `door` is true for a line this door handed in. `mentions` is the list of names a
+//        reply asked to mention, in plain text, each once, at most 10 of at most 100 code points,
+//        and empty on every other line. The door matches no name to anyone: its reader does. No
+//        line carries a file.
 //     -> 400 on a missing or empty lineage or a malformed since or limit
 //     -> 404 on a lineage no registry record carries
 //
@@ -39,7 +42,7 @@
 //        keeps its connection open reads; and on any other body past 64 KiB that ends within 256 KiB.
 //        Past 256 KiB that body's connection is dropped with no answer.
 //
-//   The four below are served only on a host whose door runs at operator standing. On any other
+//   The five below are served only on a host whose door runs at operator standing. On any other
 //   host a request to one is not the door's, and gets the answer any unknown path on the loopback
 //   listener gets.
 //
@@ -61,6 +64,22 @@
 //        {"id", "title", "question", "recommend", "blocking", "openedAt", "reraisedAt", "brief"}:
 //        `question` is the text the operator's page draws for the ask, each time is an ISO 8601
 //        string or null, and `title`, `recommend` and `brief` are null where the ask has none.
+//     -> 400 on a missing or empty lineage
+//     -> 404 on a lineage no registry record carries
+//
+//   GET /door/status?lineage=<l>
+//     -> 200 {"lineage": "...", "live": true, "state": "working", "model": "..." | null,
+//        "lastActivityAt": "<ISO time>" | null, "goal": "..." | null}
+//        These six keys and no other. `live` is whether a session not yet ended carries the
+//        lineage. Where none does, `state` is `exited` and the other three are null. Where one
+//        does, `state` is `working`, `needs you`, `blocked`, `idle` or `exited`, derived as the web
+//        page derives it, so a live session silent past its thresholds reads `idle` or `exited`.
+//        `lastActivityAt` is the time of the session's latest hook event. `model` is the model
+//        running now and `goal` the goal the session works on, each in plain text: the invisible
+//        class stripped and each line break made one space, then cut with an ellipsis to 64 and
+//        300 UTF-16 units. Each is null where the session has none or the screen leaves nothing,
+//        and `goal` is null in `idle` and `exited` too, since a goal the session has met would read
+//        as current.
 //     -> 400 on a missing or empty lineage
 //     -> 404 on a lineage no registry record carries
 //
@@ -126,7 +145,7 @@
 //        code points, an action outside agree and answer, and an answer whose words is no string
 //     -> 413 and 415 as POST /door/line answers them
 //
-//   On each of the seven
+//   On each of the eight
 //     -> 403 {"error": "loopback only"} where the peer or the Host header is not loopback
 //     -> 401 {"error": "door key required"} where the header is missing or is not the key
 //     -> 405 with an `allow` header on any other method, OPTIONS included
@@ -176,6 +195,9 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AskEntry } from "./decisions/ledger.ts";
+import { MAX_MODEL_NAME_LENGTH, plainLineField } from "./discord/render.ts";
+import { deriveSurfaceState, toView } from "./discord/state.ts";
+import type { StateThresholds, ViewSignals } from "./discord/state.ts";
 import type { DoorAsk } from "./door-asks.ts";
 import { isAllowedHost, isLoopback, readCappedBody } from "./intake.ts";
 import type { QuestionEntryView } from "./question-desk.ts";
@@ -184,7 +206,7 @@ import type { SessionRecord } from "./registry.ts";
 import { createRepeatLog } from "./repeat-log.ts";
 import type { RepeatLogSurface } from "./repeat-log.ts";
 import type { DoorAnswerStatus, DoorDeliveryStatus, DoorVerdictStatus } from "./routing/inbound.ts";
-import { isBlankText } from "./sanitize.ts";
+import { fit, isBlankText } from "./sanitize.ts";
 import type { PendingPermission, Verdict } from "./security/permission.ts";
 import {
   MAX_ASK_ID_LENGTH,
@@ -210,6 +232,9 @@ const MAX_LINE_BODY_BYTES = 64 * 1024;
 /** The bounds on a post body's lineage and name, in code points. */
 const MAX_LINEAGE_LENGTH = 256;
 const MAX_NAME_LENGTH = 100;
+
+/** The bound on the goal a status read answers, in UTF-16 units, the cut marker included. */
+const MAX_STATUS_GOAL_LENGTH = 300;
 
 /** A line id: 1 to 64 letters, digits and hyphens. */
 const LINE_ID = /^[A-Za-z0-9-]{1,64}$/;
@@ -288,8 +313,14 @@ export type DoorRoutesOptions = {
     openAsk: (lineage: string, askId: string) => Readonly<AskEntry> | null;
     askAct: AskActs["askAct"];
   };
+  /**
+   * What a live session's state is derived by: the two signals no record carries, and the
+   * thresholds of the web pass, both as the web pass reads them for the same record. Present only
+   * on a host whose door runs at operator standing, and `/door/status` is served only where it is.
+   */
+  status?: (record: SessionRecord) => { signals: Required<ViewSignals>; thresholds: StateThresholds };
   log?: (message: string) => void;
-  /** The clock the line id memory and the refusal log read, in milliseconds. */
+  /** The clock the line id memory, the refusal log and the status read's state read, in milliseconds. */
   now?: () => number;
 };
 
@@ -298,6 +329,7 @@ type DoorRoute =
   | "/door/lines"
   | "/door/line"
   | "/door/pending"
+  | "/door/status"
   | "/door/answer"
   | "/door/permission"
   | "/door/ask";
@@ -308,6 +340,7 @@ const ROUTE_METHOD: Readonly<Record<DoorRoute, "GET" | "POST">> = {
   "/door/lines": "GET",
   "/door/line": "POST",
   "/door/pending": "GET",
+  "/door/status": "GET",
   "/door/answer": "POST",
   "/door/permission": "POST",
   "/door/ask": "POST",
@@ -330,7 +363,10 @@ function bounded(value: unknown, max: number): value is string {
   return value.length <= max * 2 && [...value].length <= max;
 }
 
-/** A line as the door shows it: the ring's line without its files, its receipt and its receipt key. */
+/**
+ * A line as the door shows it: the ring's line without its files, its receipt and its receipt key.
+ * The names a reply mentions pass as the ring holds them, since the door's reader matches them.
+ */
 function shown(line: HeldLine): Record<string, unknown> {
   return {
     seq: line.seq,
@@ -340,15 +376,26 @@ function shown(line: HeldLine): Record<string, unknown> {
     senderClass: line.senderClass,
     text: line.text,
     door: line.door === true,
+    mentions: line.mentions,
   };
+}
+
+/**
+ * A record's text field as the status read answers it: screened as a plain line field and cut to
+ * `limit` UTF-16 units, or null where the record holds none or the screen leaves nothing, as the
+ * status card draws no goal that screens to nothing.
+ */
+function plainOrNull(value: string | null, limit: number): string | null {
+  const plain = value === null ? "" : plainLineField(value);
+  return plain === "" ? null : fit(plain, limit);
 }
 
 /**
  * Returns a handler that reports whether it took the request, so the caller can fall through to the
  * hook intake for everything else. It takes a request whose path before any `?` is exactly one of
  * the door paths it serves, compared as the raw string with no decoding, and no other: the three
- * every door serves, and each of `/door/pending`, `/door/answer`, `/door/permission` and
- * `/door/ask` whose callback the options hold.
+ * every door serves, and each of `/door/pending`, `/door/status`, `/door/answer`,
+ * `/door/permission` and `/door/ask` whose callback the options hold.
  */
 export function createDoorRoutes(
   options: DoorRoutesOptions,
@@ -459,6 +506,43 @@ export function createDoorRoutes(
       permissions: held.permissions.map(viewPermission),
       // Listed with or without a live session, since an ask outlives the session that filed it.
       asks: options.asks === undefined ? [] : options.asks(lineage),
+    });
+  }
+
+  function status(
+    response: ServerResponse,
+    query: URLSearchParams,
+    statusOf: NonNullable<DoorRoutesOptions["status"]>,
+  ): void {
+    const lineage = query.get("lineage");
+    if (lineage === null || lineage === "") {
+      refuse(response, "/door/status", 400, "lineage is missing");
+      return;
+    }
+    const records = options.records();
+    if (!records.some((record) => record.lineage === lineage)) {
+      refuse(response, "/door/status", 404, "no session carries that lineage");
+      return;
+    }
+    // The six keys are composed here, field by field, so a field added to a session's record does
+    // not reach the door unless it is named here.
+    const live = liveByLineage(records, lineage);
+    if (live === null) {
+      send(response, 200, { lineage, live: false, state: "exited", model: null, lastActivityAt: null, goal: null });
+      return;
+    }
+    const { signals, thresholds } = statusOf(live);
+    const state = deriveSurfaceState(toView(live, signals), now(), thresholds);
+    // The goal is hidden where the session is idle or exited, as the status card hides it: one that
+    // has stopped working may have met its goal, which would then read as current.
+    const stopped = state === "idle" || state === "exited";
+    send(response, 200, {
+      lineage,
+      live: true,
+      state,
+      model: plainOrNull(live.model, MAX_MODEL_NAME_LENGTH),
+      lastActivityAt: new Date(live.lastHookAt).toISOString(),
+      goal: stopped ? null : plainOrNull(live.goal, MAX_STATUS_GOAL_LENGTH),
     });
   }
 
@@ -707,10 +791,10 @@ export function createDoorRoutes(
     send(response, 200, { status });
   }
 
-  // The three every door serves, and each of the other four whose callback this door holds. A
+  // The three every door serves, and each of the other five whose callback this door holds. A
   // path with no handler here is not the door's, and its request is left for the hook intake to
   // answer as it answers any path it does not know.
-  const { pending: waitingOn, answerDoor, settleDoor, askDoor } = options;
+  const { pending: waitingOn, status: statusOf, answerDoor, settleDoor, askDoor } = options;
   const handlers: Partial<
     Record<DoorRoute, (request: IncomingMessage, response: ServerResponse, query: URLSearchParams) => void | Promise<void>>
   > = {
@@ -720,6 +804,9 @@ export function createDoorRoutes(
     ...(waitingOn === undefined
       ? {}
       : { "/door/pending": (_request, response, query) => pending(response, query, waitingOn) }),
+    ...(statusOf === undefined
+      ? {}
+      : { "/door/status": (_request, response, query) => status(response, query, statusOf) }),
     ...(answerDoor === undefined
       ? {}
       : { "/door/answer": (request, response) => answer(request, response, answerDoor) }),

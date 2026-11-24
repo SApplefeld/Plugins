@@ -1,6 +1,6 @@
 // The blocked-state desk: the session surface's half of the kit's goal event stream.
 //
-// It holds the session fold's reader state, advances it once per Discord refresh pass, and answers
+// It holds the session fold's reader state, advances it once per tick, and answers
 // two questions from what the fold keeps. Whether a session *stands* blocked, which is what the
 // card and the thread title render, is the standing computation: the latest kept goal event is a
 // `goal-blocked` newer than the session's last engagement. Whether a block *episode* gets its
@@ -16,9 +16,11 @@
 // mentions no one, under a window of its own. An episode posted as `unasked` is read again on each
 // tick while it is fresh, and the first `asked` reading posts the `asked` alert once.
 //
-// The desk exists whenever Discord does, independent of whether the board card is on: the two folds
-// of the stream hold independent offsets in `broker/board/events.ts`, so neither surface starves
-// the other. The feed is lower-privilege than the broker's token-gated surfaces (append access to
+// The broker builds the desk whenever Discord is configured, ticked by the Discord refresh pass, and
+// in the local mode, ticked by a timer of its own, where its alert is a talk ring line composed as
+// plain text. Either way it is independent of whether the board card is on: the two folds of the
+// stream hold independent offsets in `broker/board/events.ts`, so neither surface starves the
+// other. The feed is lower-privilege than the broker's token-gated surfaces (append access to
 // the operator's home directory, no process token), which is why every log line here names a cause
 // and a session id and never the plan or the reason the events carry.
 import {
@@ -135,8 +137,9 @@ export type BlockedDeskOptions = {
   /** The session's thread, or null while it has none, in which case the episode retries next tick. */
   threadFor: (sessionId: string) => string | null;
   /**
-   * The steering writer's alert tier: the phone-reaching write, which also ends the thread's
-   * narration block on a successful post. An empty mention list posts the same text quietly.
+   * The steering writer's alert tier on a host with Discord: the phone-reaching write, which also
+   * ends the thread's narration block on a successful post. An empty mention list posts the same
+   * text quietly. In the local mode, the write of one talk ring line.
    */
   alert: (
     threadId: string,
@@ -151,6 +154,11 @@ export type BlockedDeskOptions = {
    * as `unknown`. The broker builds it with `createDeskWaitsOn`.
    */
   waitsOn: (sessionId: string) => BlockedWaitState;
+  /**
+   * What composes an alert's text from the episode and the wait, `renderBlockedAlert` when not
+   * given. The local mode passes `renderPlainBlockedAlert`, since its line is read as plain text.
+   */
+  compose?: typeof renderBlockedAlert;
   now?: () => number;
   /**
    * The fold's read, one tick's worth. Injected so a test drives the kept state without a real
@@ -188,6 +196,7 @@ export function createBlockedDesk(options: BlockedDeskOptions): BlockedDesk {
   // outage after a recovery is the news it is.
   let unreadableReported = false;
   const waitsOn = options.waitsOn;
+  const compose = options.compose ?? renderBlockedAlert;
   /**
    * Episodes finally posted, as `asked` or `unknown`, insertion-ordered so eviction drops the
    * oldest recorded first. An episode's key is added when its post goes on the wire, so a tick
@@ -299,7 +308,7 @@ export function createBlockedDesk(options: BlockedDeskOptions): BlockedDesk {
       const outcome = await options.alert(
         threadId,
         // The fold's reason goes to the renderer as the fold kept it.
-        renderBlockedAlert({ operatorIds: mention, plan, reason, state: wait }),
+        compose({ operatorIds: mention, plan, reason, state: wait }),
         mention,
       );
       if (outcome.status !== "ok") {

@@ -29,9 +29,21 @@ const MAX_AUTHOR = 240;
  * question raises or, on a host with no Discord, the line saying a question is no longer held, or
  * could not be held, and waits at the console, `inbound` a line handed to the session from Discord,
  * the talk page or the local door, and `notice` a broker-composed one-liner such as a finished
- * background task.
+ * background task. On a host with no Discord, `blocked` says the session's run stopped and waits on
+ * a person, from the kit's goal event stream, and `model-change` says the session's model changed,
+ * with the cause where it was forced. A host with Discord posts both into the thread and writes
+ * neither here.
  */
-export type TalkKind = "reply" | "mirror" | "prompt" | "peer" | "question" | "inbound" | "notice";
+export type TalkKind =
+  | "reply"
+  | "mirror"
+  | "prompt"
+  | "peer"
+  | "question"
+  | "inbound"
+  | "notice"
+  | "blocked"
+  | "model-change";
 
 /** The class the sender roster gives the writer of an `inbound` line; null where no person wrote it. */
 export type TalkSenderClass = "operator" | "participant" | null;
@@ -54,6 +66,8 @@ export type TalkReceipt = ReceiptStage | null;
 /**
  * One entry in a ring. `author` is who wrote it where a person or a peer did, and null for the
  * session's own words. `at` is the ring's clock in epoch milliseconds when the line was pushed.
+ * `mentions` is the names a reply asked to mention, as the outbound router cleaned them, and empty
+ * on every other line. The page's view carries it and the page does not draw it.
  */
 export type TalkLine = {
   seq: number;
@@ -63,6 +77,7 @@ export type TalkLine = {
   senderClass: TalkSenderClass;
   text: string;
   files: TalkFile[];
+  mentions: string[];
   receipt: TalkReceipt;
   /** True where a view's `clip` cut the text; absent where the text is whole. */
   clipped?: true;
@@ -72,7 +87,8 @@ export type TalkLine = {
  * What a tap hands the ring; the ring stamps `seq` and `at`. `files` are the files the line carries,
  * none where it is absent. `tracked` is the thread message the receipt tracker stages this line
  * under, for a line it tracks; the view reads the line's `receipt` through it, and a line with none
- * reads null. `door` is true for a line the local door handed in.
+ * reads null. `door` is true for a line the local door handed in. `mentions` are the names the line
+ * carries, none where it is absent; the reply tap alone passes it.
  */
 export type TalkInput = {
   kind: TalkKind;
@@ -80,6 +96,7 @@ export type TalkInput = {
   senderClass: TalkSenderClass;
   text: string;
   files?: readonly TalkFile[];
+  mentions?: readonly string[];
   tracked?: { threadId: string; messageId: string } | null;
   door?: boolean;
 };
@@ -136,6 +153,7 @@ export function createTalkRing(options: TalkRingOptions = {}): TalkRing {
         senderClass: input.senderClass,
         text: input.text,
         files: (input.files ?? []).map((file) => ({ name: file.name, size: file.size, url: file.url })),
+        mentions: [...(input.mentions ?? [])],
         receipt: null,
         tracked: input.tracked ?? null,
         ...(input.door === true ? { door: true as const } : {}),

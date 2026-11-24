@@ -821,8 +821,9 @@ export const TAIL_REPEAT_LOG: RepeatLogSurface<[detail: string]> = {
  * answered a line and the context size its usage adds up to, a structured record naming why a model
  * was forced down, the goal a `/goal` command set, and the title a `/rename` (or a launch `--name`)
  * wrote. The first three reach the operator on the card, which is why they are neutralized at the
- * render site rather than at the read, and the goal reaches nowhere else: `PublicSessionRecord` and
- * `PersistedRecord` both omit it.
+ * render site rather than at the read. The goal reaches no other surface but the local door's status
+ * read at operator standing, which screens and cuts it in `broker/door.ts`: `PublicSessionRecord`
+ * and `PersistedRecord` both omit it.
  *
  * The title is the exception on both counts. It is written to Discord, as the thread's own name,
  * which the surface repaints with a `PATCH /channels/{threadId}` once the composed name settles; so

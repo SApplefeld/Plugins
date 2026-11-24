@@ -2132,7 +2132,15 @@
 
   /** The thread link is the one URL the page did not build from route text; only Discord's is drawn. */
   const DISCORD_PREFIX = "https://discord.com/";
-  const KIND_WORDS = { mirror: "mirrored", prompt: "prompt", peer: "peer", question: "question", notice: "notice" };
+  const KIND_WORDS = {
+    mirror: "mirrored",
+    prompt: "prompt",
+    peer: "peer",
+    question: "question",
+    notice: "notice",
+    blocked: "blocked",
+    "model-change": "model changed",
+  };
 
   /** The receipt stages as the page words them; a line with none shows no word. */
   const RECEIPT_WORDS = { delivered: "delivered", "picked-up": "read", answered: "answered", noted: "noted", warned: "warned" };

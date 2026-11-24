@@ -260,7 +260,7 @@ export type SessionRecord = {
    * it, and null for a session running under none.
    *
    * Held raw and neutralized at the render site, the way an option label is: nothing but a display
-   * surface reads it. A goal that ended is not observable, since one that clears on completion need
+   * surface and the local door's status read, which screens it as plain text, read it. A goal that ended is not observable, since one that clears on completion need
    * not write anything, so the card drops it on idle or exited rather than trusting this field to
    * say when it stopped being true.
    */
@@ -524,7 +524,8 @@ export type Registry = {
    * unended holds that ID: a line arriving after a session ended cannot move what its card says.
    *
    * The goal is never logged and never persisted. It is one more piece of operator prose off a
-   * transcript, so it lives where the card can read it and nowhere else.
+   * transcript, so it lives where the card and the local door's status read can read it and nowhere
+   * else.
    */
   noteGoal: (sessionId: string, goal: string | null) => SessionRecord | null;
   /**
