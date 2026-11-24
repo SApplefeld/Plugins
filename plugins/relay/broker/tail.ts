@@ -907,46 +907,114 @@ const MAX_OPTIONS_PER_QUESTION = 4;
  * whole, and an option decided on the front of a sentence with no cue that there is more is the
  * reading the whole question surface exists to prevent.
  * A description that is absent, or empty once the invisible class is stripped and the rest trimmed,
- * reads as null and renders as absent.
+ * reads as null and renders as absent. `askedQuestionsWide` below reads by these same rules, through
+ * the same code, with wider ceilings.
  */
 export function askedQuestions(input: unknown): AskedQuestion[] {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return [];
   const questions = (input as Record<string, unknown>)["questions"];
   if (!Array.isArray(questions)) return [];
-  const readable: AskedQuestion[] = [];
-  for (const entry of questions.slice(0, MAX_QUESTIONS_PER_ASK)) {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
-    const fields = entry as Record<string, unknown>;
-    const question = fields["question"];
-    if (typeof question !== "string" || withoutInvisible(question).trim() === "") continue;
-    const header = fields["header"];
-    const rawOptions = fields["options"];
-    const options: AskedOption[] = [];
-    if (Array.isArray(rawOptions)) {
-      for (const option of rawOptions.slice(0, MAX_OPTIONS_PER_QUESTION)) {
-        if (typeof option !== "object" || option === null || Array.isArray(option)) continue;
-        const fields = option as Record<string, unknown>;
-        const label = fields["label"];
-        if (typeof label !== "string" || withoutInvisible(label).trim() === "") continue;
-        const description = fields["description"];
-        options.push({
-          label,
-          description:
-            typeof description === "string" && withoutInvisible(description).trim() !== ""
-              ? fit(description, MAX_HELD_DESCRIPTION_LENGTH)
-              : null,
-        });
-      }
+  return readAskedEntries(questions, MAX_QUESTIONS_PER_ASK, MAX_OPTIONS_PER_QUESTION).questions;
+}
+
+/** The most questions the wide reading takes from one ask. */
+const MAX_WIDE_QUESTIONS_PER_ASK = 16;
+
+/** The most option entries the wide reading takes from one question. */
+const MAX_WIDE_OPTIONS_PER_QUESTION = 16;
+
+/**
+ * A reading of an ask's questions, and the entries its two ceilings left out: the question entries
+ * past the last one it reads, and, summed over the questions it returns, the option entries past the
+ * last one it reads of each. An entry skipped as unreadable is in neither count.
+ */
+export type AskedQuestionsReading = {
+  questions: AskedQuestion[];
+  questionsLeftOut: number;
+  optionsLeftOut: number;
+};
+
+/**
+ * The wider reading of the array an `AskUserQuestion` call wrote, the shape a held entry's
+ * `questionsInput` has: at most sixteen questions and sixteen option entries each, with counts of
+ * what those ceilings cut. It is the text of an ask `askedQuestions` did not carry whole, which a
+ * question line writes so a reader with no thread picker sees more of it: up to sixteen questions
+ * and sixteen options each, each description cut as the bounded reader cuts it, and the rest
+ * counted.
+ *
+ * It is `askedQuestions` with wider ceilings and nothing else: both read each entry and each option
+ * through `readAskedEntries`, so every field reaching a client's page through this reading passed the
+ * same skip rules, the same invisible-class test and the same description cut. Anything but an array
+ * reads as nothing.
+ */
+export function askedQuestionsWide(questionsInput: unknown): AskedQuestionsReading {
+  if (!Array.isArray(questionsInput)) return { questions: [], questionsLeftOut: 0, optionsLeftOut: 0 };
+  return readAskedEntries(questionsInput, MAX_WIDE_QUESTIONS_PER_ASK, MAX_WIDE_OPTIONS_PER_QUESTION);
+}
+
+/**
+ * The questions the first `maxQuestions` entries of a `questions` array hold, each with the options
+ * its first `maxOptions` option entries hold, by the rules `askedQuestions` states. The counts are of
+ * entries past each ceiling, read or not, and never of an entry skipped inside it.
+ */
+function readAskedEntries(entries: readonly unknown[], maxQuestions: number, maxOptions: number): AskedQuestionsReading {
+  const questions: AskedQuestion[] = [];
+  let optionsLeftOut = 0;
+  for (const entry of entries.slice(0, maxQuestions)) {
+    const asked = readAskedEntry(entry, maxOptions);
+    if (asked === null) continue;
+    questions.push(asked.question);
+    optionsLeftOut += asked.optionsLeftOut;
+  }
+  return { questions, questionsLeftOut: Math.max(0, entries.length - maxQuestions), optionsLeftOut };
+}
+
+/** One entry of a `questions` array, or null where it holds no readable question. */
+function readAskedEntry(
+  entry: unknown,
+  maxOptions: number,
+): { question: AskedQuestion; optionsLeftOut: number } | null {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
+  const fields = entry as Record<string, unknown>;
+  const question = fields["question"];
+  if (typeof question !== "string" || withoutInvisible(question).trim() === "") return null;
+  const header = fields["header"];
+  const rawOptions = fields["options"];
+  const options: AskedOption[] = [];
+  let optionsLeftOut = 0;
+  if (Array.isArray(rawOptions)) {
+    for (const option of rawOptions.slice(0, maxOptions)) {
+      const read = readAskedOption(option);
+      if (read !== null) options.push(read);
     }
-    readable.push({
+    optionsLeftOut = Math.max(0, rawOptions.length - maxOptions);
+  }
+  return {
+    question: {
       question,
       header:
         typeof header === "string" && withoutInvisible(header).trim() !== "" ? header : null,
       multiSelect: fields["multiSelect"] === true,
       options,
-    });
-  }
-  return readable;
+    },
+    optionsLeftOut,
+  };
+}
+
+/** One entry of a question's `options` array, or null where it holds no readable label. */
+function readAskedOption(option: unknown): AskedOption | null {
+  if (typeof option !== "object" || option === null || Array.isArray(option)) return null;
+  const fields = option as Record<string, unknown>;
+  const label = fields["label"];
+  if (typeof label !== "string" || withoutInvisible(label).trim() === "") return null;
+  const description = fields["description"];
+  return {
+    label,
+    description:
+      typeof description === "string" && withoutInvisible(description).trim() !== ""
+        ? fit(description, MAX_HELD_DESCRIPTION_LENGTH)
+        : null,
+  };
 }
 
 /**

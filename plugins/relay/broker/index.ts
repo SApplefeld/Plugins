@@ -115,12 +115,14 @@ import { openWatermarks, watermarksFileFor, withMarks } from "./web/watermarks.t
 import { createAskActs } from "./web/ask-act.ts";
 import type {
   QuestionAlert,
+  QuestionDesk,
   QuestionEntryView,
   QuestionTerminalDetail,
   QuestionTerminalState,
 } from "./question-desk.ts";
 import {
   DEFAULT_PROMPT_CLAIM_MS,
+  askedQuestionsWide,
   createEchoMemory,
   createTranscriptTailer,
   questionDigest,
@@ -144,6 +146,7 @@ import { createRelayRoutes } from "./routing/http.ts";
 import { createThreadWriter } from "./routing/writer.ts";
 import type { ThreadWriter } from "./routing/writer.ts";
 import type { MessageSource } from "./routing/gateway.ts";
+import { fit, withoutInvisible } from "./sanitize.ts";
 import type { VoiceBridge } from "./voice/bridge.ts";
 import type { Voice } from "./voice/connection.ts";
 
@@ -339,17 +342,257 @@ export function questionDelivery(options: {
 }
 
 /**
- * Hands the talk ring the question notice a landed alert carried, under the asking session's lineage.
- * A session with no lineage, or a broker with no ring, taps nothing. A throw behind the tap is
- * absorbed so a landed alert is never turned into a failure, and the log line names the session and
- * never the question.
+ * The longest body a question line holds, in UTF-16 units: the questions and their options, before
+ * the sentence that counts a cut. Neither the talk ring nor `GET /door/lines` cuts a line's text, so
+ * this is the line's own bound and no reader's.
+ */
+const MAX_QUESTION_LINE_BODY = 11_000;
+
+/**
+ * The sentence that closes a question line on a host with no Discord where the thread's picker could
+ * not answer the ask: such a host keeps the hold, and the door and the web page take typed text for
+ * it. Exported so the broker test reads the sentence the line writes rather than a copy of it.
+ */
+export const QUESTION_LINE_ANSWER_IN_WORDS = "This question is held for an answer in words, so type your answer.";
+
+/** The phrase after a question that takes several picks. Exported for the broker test, as above. */
+export const QUESTION_LINE_MULTI_SELECT = "(You may pick more than one.)";
+
+/** The opening of the sentence counting what the wide reading left out. Exported as above. */
+export const QUESTION_LINE_LEFT_OUT = "This line leaves out ";
+
+/**
+ * One field of a question as a question line writes it: the invisible class stripped as the reader's
+ * own test strips it, and each line break made one space, so no field breaks a line. The vertical tab
+ * and the form feed become a space before the strip, which would otherwise drop them and join the
+ * words on either side. Nothing is escaped: the line carries text as a reply line does, and the
+ * broker's own web page draws it as plain text.
+ */
+function questionLineField(value: string): string {
+  return withoutInvisible(value.replace(/[\v\f]/g, " ")).replace(/\n/g, " ");
+}
+
+/**
+ * The text of the line a held question writes to the talk ring, which the portal's conversation and
+ * the web page show. Each question is its header and its text on one line, with a
+ * fixed phrase where it takes several picks, then one line per option: its label, and its
+ * description after it where it has one. A label and a question are written whole, and a
+ * description keeps the cut the reader already gave it. The body is cut to
+ * `MAX_QUESTION_LINE_BODY` through `fit`, which marks the cut, and a cut body is followed by one
+ * sentence, outside the cut, counting the UTF-16 units it left out.
+ */
+function questionLineText(questions: readonly AskedQuestion[]): string {
+  const body = questions
+    .map((asked) => {
+      const question = questionLineField(asked.question);
+      const asks = asked.header === null ? question : `${questionLineField(asked.header)}: ${question}`;
+      const lines = [asked.multiSelect ? `${asks} ${QUESTION_LINE_MULTI_SELECT}` : asks];
+      for (const option of asked.options) {
+        const label = questionLineField(option.label);
+        lines.push(
+          option.description === null ? `- ${label}` : `- ${label}: ${questionLineField(option.description)}`,
+        );
+      }
+      return lines.join("\n");
+    })
+    .join("\n");
+  const shown = fit(body, MAX_QUESTION_LINE_BODY);
+  if (shown === body) return body;
+  // `fit` spends one unit of its bound on the mark, so what the line shows of the body is one less.
+  const leftOut = body.length - (shown.length - 1);
+  return `${shown}\nThis question is ${String(leftOut)} characters longer than this line shows.`;
+}
+
+/**
+ * The text of the question line for an ask the thread's picker cannot answer, from the wide reading
+ * of the array the tool wrote, in `questionLineText`'s form. After the body and its cut sentence come
+ * up to two fixed sentences: one counting the questions and options the wide reading's ceilings left
+ * out, written only where either count is above zero, and, on a host with no Discord alone, one
+ * telling the reader to answer in words. A Discord host releases such an ask to the console a moment
+ * after the line is written, so that sentence would be false there.
+ */
+function wideQuestionLineText(questionsInput: readonly unknown[], localMode: boolean): string {
+  const wide = askedQuestionsWide(questionsInput);
+  const lines = [questionLineText(wide.questions)];
+  if (wide.questionsLeftOut > 0 || wide.optionsLeftOut > 0) {
+    const counted = (count: number, noun: string): string => `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
+    lines.push(
+      `${QUESTION_LINE_LEFT_OUT}${counted(wide.questionsLeftOut, "question")} and ${counted(wide.optionsLeftOut, "option")}.`,
+    );
+  }
+  if (localMode) lines.push(QUESTION_LINE_ANSWER_IN_WORDS);
+  return lines.join("\n");
+}
+
+/**
+ * Hands the talk ring the question a landed alert carried, under the asking session's lineage, as
+ * every header, question and option `questionLineText` writes. Where the desk holds the session's
+ * entry for this ask's digest and the thread's picker could not answer it, for any reason
+ * `answerableFromThread` refuses, the line is written from the wide reading of the array the tool
+ * wrote, so the questions and options the bounded reading dropped are shown too. Where no entry is
+ * held for the digest by then, the line is written from the bounded reading. A session with no
+ * lineage, or a broker with no ring, taps nothing. A throw behind the tap is absorbed so a landed
+ * alert is never turned into a failure, and the log line names the session and never the question.
  */
 export function tapQuestion(
   options: {
     talkTap: TalkTap | null;
     lineageOf: (sessionId: string) => string | null;
+    desk: { held: (sessionId: string, digest: string) => QuestionEntryView | null };
+    /** True on a host with no Discord, which keeps every hold for a typed answer. */
+    localMode: boolean;
     log: (line: string) => void;
   },
+  sessionId: string,
+  questions: readonly AskedQuestion[],
+  digest: string,
+): void {
+  try {
+    const lineage = options.lineageOf(sessionId);
+    if (options.talkTap === null || lineage === null) return;
+    const entry = options.desk.held(sessionId, digest);
+    options.talkTap.push(lineage, {
+      kind: "question",
+      author: null,
+      senderClass: null,
+      text:
+        entry !== null && !answerableFromThread(entry.questions, entry.questionsInput)
+          ? wideQuestionLineText(entry.questionsInput, options.localMode)
+          : questionLineText(questions),
+    });
+  } catch {
+    options.log(`routing: the talk tap could not take a question from session ${sessionId}`);
+  }
+}
+
+/**
+ * The sentence that opens the question line a hold writes when it ends unanswered on a host with no
+ * Discord. It is true of an expired hold and of a released one alike: the session is answered with
+ * `{}` and its console picker renders the question.
+ */
+const QUESTION_LINE_AT_CONSOLE = "A question is no longer held here and waits at the machine's console.";
+
+/** The longest question text the line that a hold ended writes, in UTF-16 units. */
+const MAX_HOLD_ENDED_QUESTION = 300;
+
+/**
+ * The text of the line saying a question waits at the machine's console: `QUESTION_LINE_AT_CONSOLE`,
+ * then the text of the first question, with no header, screened as `questionLineField` screens a
+ * field and cut to `MAX_HOLD_ENDED_QUESTION` through `fit`. Where there is no question, the sentence
+ * stands alone. A hold that ended and an ask the desk would not hold both write this one text.
+ */
+function consoleLineText(questions: readonly AskedQuestion[]): string {
+  const first = questions[0];
+  return first === undefined
+    ? QUESTION_LINE_AT_CONSOLE
+    : `${QUESTION_LINE_AT_CONSOLE}\n${fit(questionLineField(first.question), MAX_HOLD_ENDED_QUESTION)}`;
+}
+
+/**
+ * Hands the talk ring, on a host with no Discord, the line saying a held question went to the
+ * machine's console: where an entry ends `expired` or `released`, one `question` line under the
+ * session's lineage, holding `QUESTION_LINE_AT_CONSOLE` and then the text of the bounded reading's
+ * first question, with no header, screened as `questionLineField` screens a field and cut to
+ * `MAX_HOLD_ENDED_QUESTION` through `fit`. Where the reading holds no question, the sentence stands
+ * alone. The line is written whether or not a question line went before it, since a hold released
+ * because its alert was dropped wrote none.
+ *
+ * A release because the same session asked a different question writes nothing, since nothing of
+ * the older ask waits anywhere. `client-gone` writes nothing, since no session is left to wait, and
+ * neither does `shutdown`, since the ring is memory the stopping broker is about to lose. An answered
+ * entry writes nothing, and a host with Discord writes nothing in any state. A session with no
+ * lineage, or a broker with no ring, taps nothing. A throw behind the tap is absorbed so the desk's
+ * other terminal handling still runs, and the log line names the session and never the question.
+ */
+export function tapHoldEnded(
+  options: {
+    talkTap: TalkTap | null;
+    lineageOf: (sessionId: string) => string | null;
+    /** True on a host with no Discord, which keeps every hold for a typed answer. */
+    localMode: boolean;
+    log: (line: string) => void;
+  },
+  sessionId: string,
+  state: QuestionTerminalState,
+  detail: QuestionTerminalDetail,
+): void {
+  if (!options.localMode || (state !== "expired" && state !== "released") || detail.superseded) return;
+  pushConsoleLine(options, sessionId, detail.questions);
+}
+
+/**
+ * The question desk's `hold`, wrapped so that on a host with no Discord an ask the desk refuses to
+ * hold writes the line `tapHoldEnded` writes, under the session's lineage: the session is answered
+ * at once with today's response and its console picker renders the question. Two refusals write it,
+ * an ask whose alert went nowhere and an ask past the held ceiling. A retry the desk refuses because
+ * its hold already carries every response it takes writes nothing, since that ask is still held and
+ * shown; the desk still holds an entry for the ask's digest after that refusal and after neither of
+ * the other two, which is how the two are told apart. A host with Discord writes nothing, as
+ * `tapHoldEnded` writes nothing there. A session with no lineage, or a broker with no ring, taps
+ * nothing. A throw behind the tap is absorbed so the refusal still reaches the intake, and the log
+ * line names the session and never the question.
+ *
+ * An ask refused past the ceiling had its alert dispatched just before, and a landed alert writes
+ * the ask's own question line. Such a refusal writes nothing yet: it records the ask in
+ * `awaitingAlert`, and `consoleLineAfterAlert` writes the line once that alert's delivery has ended,
+ * so the conversation shows the question before the line saying it waits at the console. An ask
+ * whose alert went nowhere has no question line coming, and writes its line at once.
+ */
+export function holdNamingConsole(options: {
+  desk: Pick<QuestionDesk, "hold" | "held">;
+  talkTap: TalkTap | null;
+  lineageOf: (sessionId: string) => string | null;
+  /** True on a host with no Discord, which keeps every hold for a typed answer. */
+  localMode: boolean;
+  log: (line: string) => void;
+  /** Refused asks whose dispatched alert has not yet ended, keyed by `consoleLineKey`. */
+  awaitingAlert: Set<string>;
+}): QuestionDesk["hold"] {
+  return (sessionId, questions, questionsInput, response, dispatched) => {
+    if (options.desk.hold(sessionId, questions, questionsInput, response, dispatched)) return true;
+    if (!options.localMode) return false;
+    try {
+      if (options.desk.held(sessionId, questionDigest(questions)) !== null) return false;
+      if (dispatched) {
+        options.awaitingAlert.add(consoleLineKey(sessionId, questions));
+        return false;
+      }
+    } catch {
+      options.log(`routing: the check of a refused ask failed for session ${sessionId}`);
+      return false;
+    }
+    pushConsoleLine(options, sessionId, questions);
+    return false;
+  };
+}
+
+/** The key `awaitingAlert` holds a refused ask under: its session and its digest. */
+function consoleLineKey(sessionId: string, questions: readonly AskedQuestion[]): string {
+  return `${sessionId}\n${questionDigest(questions)}`;
+}
+
+/**
+ * Writes the line naming the console for a refused ask `holdNamingConsole` recorded in
+ * `awaitingAlert`, once that ask's alert delivery has ended, landed or not, and drops the record. An
+ * ask with no record writes nothing, so a delivery for any other ask passes through untouched.
+ */
+function consoleLineAfterAlert(
+  options: {
+    awaitingAlert: Set<string>;
+    talkTap: TalkTap | null;
+    lineageOf: (sessionId: string) => string | null;
+    log: (line: string) => void;
+  },
+  sessionId: string,
+  questions: readonly AskedQuestion[],
+): void {
+  if (!options.awaitingAlert.delete(consoleLineKey(sessionId, questions))) return;
+  pushConsoleLine(options, sessionId, questions);
+}
+
+/** Pushes `consoleLineText` under the session's lineage, absorbing a throw into one log line. */
+function pushConsoleLine(
+  options: { talkTap: TalkTap | null; lineageOf: (sessionId: string) => string | null; log: (line: string) => void },
   sessionId: string,
   questions: readonly AskedQuestion[],
 ): void {
@@ -360,12 +603,10 @@ export function tapQuestion(
       kind: "question",
       author: null,
       senderClass: null,
-      text: questions
-        .map((asked) => (asked.header === null ? asked.question : `${asked.header}: ${asked.question}`))
-        .join("\n"),
+      text: consoleLineText(questions),
     });
   } catch {
-    options.log(`routing: the talk tap could not take a question from session ${sessionId}`);
+    options.log(`routing: the talk tap could not take the console line for session ${sessionId}`);
   }
 }
 
@@ -1171,6 +1412,11 @@ export async function startBroker(
       listen?: (bind: string, listen: (bind: string) => Promise<number>) => Promise<number>;
       retry?: (attempt: () => void, ms: number) => () => void;
     };
+    /**
+     * The question desk's timer, which arms each hold's expiry and bounds the shutdown flush, so a
+     * test ends a hold without waiting it out. The real `setTimeout` when not given.
+     */
+    questionDeskTimer?: (callback: () => void, ms: number) => NodeJS.Timeout;
   } = {},
 ): Promise<Broker> {
   const exit = options.exit ?? ((code: number): void => process.exit(code));
@@ -1513,6 +1759,12 @@ export async function startBroker(
   // web surface or the door is on. The outbound and inbound routers and the question alert push
   // into it; the web block below and the door routes serve it.
   const talkRing = web === null && doorKey === null ? null : createTalkRing();
+  // Asks the question desk refused while their alert was on its way. The desk's `hold` wrapper adds
+  // one, and the question delivery's end writes its line naming the console and drops it.
+  const refusedAwaitingAlert = new Set<string>();
+  // The lineage a registered session's conversation lines go under, or null where it has none.
+  const sessionLineage = (id: string): string | null =>
+    registry.list().find((record) => record.sessionId === id)?.lineage ?? null;
   // The talk page's files, both ways, under the same folder and the same switch as a Discord
   // attachment: present only while the web surface is on, whatever the door is, and absent where
   // attachments are off, so a host that takes no file from Discord takes none from the page and
@@ -1628,10 +1880,30 @@ export async function startBroker(
     drawing,
     log: note,
   });
+  // Whether this host runs in the local mode, as the desk's terminal handler reads it at each call.
+  // The mode is decided below, after the desk exists, and copied here as it is; until then it reads
+  // false, which writes no line.
+  let questionDeskLocalMode = false;
   const questionDesk = createQuestionDesk({
     holdMs: config.questionHoldMs,
     log: note,
-    onTerminal: closeOutQuestion,
+    // The ring's line first, since the close-out returns early for an entry whose alert never landed
+    // and the line is written for such an entry too.
+    onTerminal: (sessionId, state, detail) => {
+      tapHoldEnded(
+        {
+          talkTap: talkRing,
+          lineageOf: sessionLineage,
+          localMode: questionDeskLocalMode,
+          log: note,
+        },
+        sessionId,
+        state,
+        detail,
+      );
+      closeOutQuestion(sessionId, state, detail);
+    },
+    ...(options.questionDeskTimer === undefined ? {} : { setTimer: options.questionDeskTimer }),
   });
   // The transcript tailer exists only while both mirror switches are on. Off means not
   // constructed: no transcript is ever opened, no poll timer runs, and the intake gets no seam
@@ -1655,8 +1927,25 @@ export async function startBroker(
       // The release wrapper above. The delivery is read through a closure rather than passed
       // directly, because `deliverQuestion` is replaced further down once Discord's surfaces or
       // the local mode's exist, and the tailer is constructed before that.
+      // A refused ask's line naming the console waits on its alert's delivery, which ends after the
+      // alert's own question line is written, so it is written in this `finally`.
       deliverQuestion: questionDelivery({
-        deliver: (sessionId, questions) => deliverQuestion(sessionId, questions),
+        deliver: async (sessionId, questions) => {
+          try {
+            return await deliverQuestion(sessionId, questions);
+          } finally {
+            consoleLineAfterAlert(
+              {
+                awaitingAlert: refusedAwaitingAlert,
+                talkTap: talkRing,
+                lineageOf: sessionLineage,
+                log: note,
+              },
+              sessionId,
+              questions,
+            );
+          }
+        },
         desk: questionDesk,
         log: note,
       }),
@@ -1882,6 +2171,7 @@ export async function startBroker(
   // mistake and never this mode, and a host with neither a door nor a web page has no reader, so
   // each keeps the stand-ins and no line is held for it.
   const localMode = discordSetup.state === "none" && (doorKey !== null || web !== null);
+  questionDeskLocalMode = localMode;
 
   // The status reader, built wherever Discord is configured and independent of the tailer: it reads
   // every learned transcript, mirror-off included, for harness error lines and channel pickups,
@@ -1975,8 +2265,18 @@ export async function startBroker(
     // post the desk refuses, and every gate ahead of it, is answered immediately exactly as a
     // broker without a desk answers it. Safe to wire because the answer route exists: the alert's
     // own delivery either upgrades the message to one that can answer the hold or releases it, and
-    // the interaction route resolves it from a tap.
-    questionDesk: { hold: questionDesk.hold },
+    // the interaction route resolves it from a tap. On a host with no Discord, an ask the desk will
+    // not hold writes the line naming the console, as a hold that ended unanswered does.
+    questionDesk: {
+      hold: holdNamingConsole({
+        desk: questionDesk,
+        talkTap: talkRing,
+        lineageOf: sessionLineage,
+        localMode,
+        log: note,
+        awaitingAlert: refusedAwaitingAlert,
+      }),
+    },
     // The clearing seam. A session's turn ending is the one signal this broker gets that the
     // permission prompts it had open are resolved, since a prompt answered at the console is
     // announced nowhere. Read through a closure rather than passed directly, because `permissions`
@@ -2203,11 +2503,14 @@ export async function startBroker(
       tapQuestion(
         {
           talkTap: talkRing,
-          lineageOf: (id) => registry.list().find((record) => record.sessionId === id)?.lineage ?? null,
+          lineageOf: sessionLineage,
+          desk: questionDesk,
+          localMode,
           log: note,
         },
         sessionId,
         questions,
+        questionDigest(questions),
       );
       await afterAlert({ sessionId, threadId, messageId: posted.value.messageId, questions });
       return { status: "sent" };

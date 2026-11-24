@@ -26,8 +26,10 @@ const MAX_AUTHOR = 240;
  * What a line is. `reply` is a reply-tool post and `mirror` the Stop hook's copy of a turn's closing
  * reply, both the session's words. `prompt` is the operator's own typed prompt as the session read
  * it at the console, `peer` a message to or from another session, `question` the notice a held
- * question raises, `inbound` a line handed to the session from Discord, the talk page or the local
- * door, and `notice` a broker-composed one-liner such as a finished background task.
+ * question raises or, on a host with no Discord, the line saying a question is no longer held, or
+ * could not be held, and waits at the console, `inbound` a line handed to the session from Discord,
+ * the talk page or the local door, and `notice` a broker-composed one-liner such as a finished
+ * background task.
  */
 export type TalkKind = "reply" | "mirror" | "prompt" | "peer" | "question" | "inbound" | "notice";
 

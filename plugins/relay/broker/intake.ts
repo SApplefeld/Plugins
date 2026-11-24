@@ -472,8 +472,12 @@ export function parseIntakeHeaders(headers: HeaderLookup, body: string): ParsedI
       event === "PreToolUse" && toolName === "AskUserQuestion"
         ? askedQuestions(fields["tool_input"])
         : null,
-    // The verbatim companion to the bounded parse above, for the question desk's answered
-    // resolution alone; every other consumer keeps reading the bounded form.
+    // The verbatim companion to the bounded parse above, which the desk keeps on the held entry.
+    // Two consumers read its content: the desk's answered resolution, and `askedQuestionsWide` in
+    // tail.ts, which the question line in index.ts reads for an ask the thread cannot answer;
+    // `answerableFromThread` reads only its shape, the entry count and each entry's option count.
+    // Any reader that shows this array goes through the shared reading code, `readAskedEntries`,
+    // which screens it as the bounded reader does.
     questionsInput:
       event === "PreToolUse" && toolName === "AskUserQuestion"
         ? rawQuestions(fields["tool_input"])

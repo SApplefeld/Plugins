@@ -138,6 +138,11 @@ export type QuestionTerminalDetail = {
   questions: readonly AskedQuestion[];
   /** What an answered hold submitted; null under every other terminal state. */
   answers: QuestionAnswers | null;
+  /**
+   * True where the hold was released because the same session asked a different question, so
+   * nothing of this ask waits anywhere; false under every other release and every other state.
+   */
+  superseded: boolean;
 };
 
 export type QuestionDesk = {
@@ -404,6 +409,8 @@ type ClosedAsk = {
   questions: readonly AskedQuestion[];
   state: QuestionTerminalState;
   answers: QuestionAnswers | null;
+  /** The detail's own `superseded`, kept so the notice that reads this record reports it. */
+  superseded: boolean;
   /** The ask's alert failed after this record was written, so no notice is on its way for it. */
   noticeLost: boolean;
   /**
@@ -509,6 +516,7 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
         questions: detail.questions,
         state,
         answers: detail.answers,
+        superseded: detail.superseded,
         noticeLost: false,
         consoleRead: false,
       });
@@ -557,6 +565,7 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
     state: QuestionTerminalState,
     body: unknown | null,
     answers: QuestionAnswers | null = null,
+    superseded = false,
   ): boolean {
     const entry = held.get(sessionId);
     if (entry === undefined) return false;
@@ -572,6 +581,7 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
       alert: entry.alert,
       questions: entry.questions,
       answers,
+      superseded,
     });
     return true;
   }
@@ -633,6 +643,7 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
         alert: entry.alert,
         questions: entry.questions,
         answers: null,
+        superseded: false,
       });
     });
   }
@@ -715,7 +726,7 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
         // A different ask from the same session: the session has moved on, so the older hold is
         // answering a question nobody is parked on. Released rather than replaced-in-place,
         // because its responses belong to the older ask's tool call.
-        settle(sessionId, "released", {});
+        settle(sessionId, "released", {}, null, true);
       }
       if (!dispatched) {
         // No alert went out for this ask and no live entry carries one, so a new entry would park
@@ -797,6 +808,7 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
           alert: closed.alert,
           questions: closed.questions,
           answers: null,
+          superseded: false,
         });
         return true;
       }
@@ -858,6 +870,7 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
             alert,
             questions: closed.questions,
             answers: closed.answers,
+            superseded: closed.superseded,
           },
         };
       }
