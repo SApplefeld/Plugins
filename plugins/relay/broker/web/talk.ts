@@ -27,12 +27,12 @@ const MAX_AUTHOR = 240;
  * reply, both the session's words. `prompt` is the operator's own typed prompt as the session read
  * it at the console, `peer` a message to or from another session, `question` the notice a held
  * question raises or, on a host with no Discord, the line saying a question is no longer held, or
- * could not be held, and waits at the console, `inbound` a line handed to the session from Discord,
- * the talk page or the local door, and `notice` a broker-composed one-liner such as a finished
- * background task. On a host with no Discord, `blocked` says the session's run stopped and waits on
- * a person, from the kit's goal event stream, and `model-change` says the session's model changed,
- * with the cause where it was forced. A host with Discord posts both into the thread and writes
- * neither here.
+ * could not be held, and was handed back to its session to ask as a message, `inbound` a line
+ * handed to the session from Discord, the talk page or the local door, and `notice` a
+ * broker-composed one-liner such as a finished background task. On a host with no Discord,
+ * `blocked` says the session's run stopped and waits on a person, from the kit's goal event stream,
+ * and `model-change` says the session's model changed, with the cause where it was forced. A host
+ * with Discord posts both into the thread and writes neither here.
  */
 export type TalkKind =
   | "reply"
@@ -220,8 +220,8 @@ export type TalkQuestionOption = { index: number; label: string; description: st
 
 /**
  * One held ask. `answerable` is `answerableFromThread` over the entry, the rule the Discord thread
- * draws its picker under: false, the page offers only the console release. `alerted` is whether the
- * thread's alert has landed, which a typed answer needs.
+ * draws its picker under: false, the page offers only Ask in a message, which hands it back.
+ * `alerted` is whether the thread's alert has landed, which a typed answer needs.
  */
 export type TalkQuestion = {
   entryId: string;

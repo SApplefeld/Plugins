@@ -638,15 +638,17 @@ export type TranscriptTailerOptions = {
    */
   notePickup?: (sessionId: string, at: number) => void;
   /**
-   * Reports that an ask reached its resolution line, which Claude Code writes when the picker
-   * closes: the question has been answered at the console. The question desk's seam, where it flips
-   * a thread message that has been telling the operator to answer there. Called for every question
+   * Reports that an ask reached its resolution line, which Claude Code writes when the ask's tool
+   * call ends: the console answered its picker, or the call was refused. The question desk's seam,
+   * where it flips a thread message whose hook stopped waiting to answered at the console, and takes
+   * an ask the desk handed back to its session with no redraw. Called for every question
    * the transcript yields, whether or not this session's alert path already handled that ask, since
    * what a session has open is the desk's to know and not this module's.
    *
-   * True means a message was flipped, and a flipped ask is one this pass does not also alert: the
-   * thread now says the console answered it, and an alert behind that would post the same ask as
-   * one still waiting there.
+   * True means the desk accounted for the ask: it flipped a message, took a handed-back ask, or found
+   * the ask's notice on its way. Such an ask is one this pass does not also alert, since the thread
+   * already carries or is about to carry its message, and an alert behind that would post the same
+   * ask twice.
    */
   answeredAtConsole: (sessionId: string, questions: readonly AskedQuestion[]) => boolean;
   /**
@@ -707,8 +709,8 @@ export type TranscriptTailer = {
   /**
    * Posts one emission-time question alert for a session whose mirror verdict is on, through the
    * same `deliverQuestion` seam the poll's transcript yield uses. Fed by the `AskUserQuestion`
-   * PreToolUse hook, which fires while the console's picker is open, long before the transcript
-   * line exists. Fails toward silence on every gate: a session with no verdict seen, a
+   * PreToolUse hook, which fires when the session asks, before any picker opens and long before the
+   * transcript line exists. Fails toward silence on every gate: a session with no verdict seen, a
    * suppressed one, or an empty parse contributes nothing, and a question whose digest is
    * already outstanding (the CLI re-posting an identical payload) is skipped rather than pinged
    * twice. An alert that lands records a one-shot digest in the entry's bounded outstanding set
@@ -1668,12 +1670,13 @@ export const CHANNEL_RELAY_SERVER_NAMES: readonly string[] = ["channel-relay", "
  *
  * A line yields a question item when its `type` is `assistant` and a block in `message.content`
  * is a `tool_use` block naming `AskUserQuestion`: the one tool call the console answers with a
- * picker. Claude Code withholds this line from the transcript while the picker is open and
- * writes it at answer time, so what this yield carries is the resolution-time reading; the
- * emission-time alert rides the tool's PreToolUse hook through `question()`, and the digest
- * recorded there is what keeps this yield from alerting the same question twice. What is yielded
- * is the bounded structured reading `askedQuestions` above takes of the block's `input`, never
- * the block itself, and a block yielding zero readable questions yields nothing.
+ * picker. Claude Code withholds this line from the transcript while the call is open and writes
+ * it when the call is answered, so what this yield carries is the resolution-time reading. Whether
+ * a call the broker refused with the hand-back writes the line, and in this shape, is unmeasured;
+ * a refused call that writes none leaves its digest outstanding until the bounded set evicts it; the emission-time alert rides the tool's PreToolUse hook through `question()`, and the
+ * digest recorded there is what keeps this yield from alerting the same question twice. What is
+ * yielded is the bounded structured reading `askedQuestions` above takes of the block's `input`,
+ * never the block itself, and a block yielding zero readable questions yields nothing.
  *
  * A line yields a queued prompt when its `type` is `attachment` and its `attachment` is an object
  * whose `type` is `queued_command`, whose `commandMode` is `prompt`, whose `origin.kind` is
@@ -2397,8 +2400,8 @@ export function createTranscriptTailer(options: TranscriptTailerOptions): Transc
           continue;
         }
         if (item.kind === "question") {
-          // The questions the console held this session on, landing here at answer time because
-          // Claude Code writes the line when the picker closes. The hook path usually alerted
+          // The questions this session asked, landing here when the call is answered because Claude
+          // Code writes the line then; whether a refused call writes it too is unmeasured. The hook path usually alerted
           // this same question at emission and recorded its digest, so a match here is that one
           // duplicate, consumed as it is skipped; no digest means an unupgraded hook set or a
           // hook alert that never landed, and then this yield is the question's only signal,
@@ -2406,8 +2409,8 @@ export function createTranscriptTailer(options: TranscriptTailerOptions): Transc
           // could not be made is dropped and never retried, and the error is discarded unread,
           // because it can quote the question.
           //
-          // This line exists because the picker closed, so the ask it names has been answered at
-          // the console. Reported before the dedupe and independently of it: the outstanding set is
+          // This line exists because the ask's tool call ended, answered at the console or, where
+          // Claude Code writes a line for it, refused by the hand-back, and the desk tells the two apart. Reported before the dedupe and independently of it: the outstanding set is
           // bounded and evicts, and a question whose alert is still on the operator's phone has to
           // stop saying it is waiting even when its digest was pushed out.
           let flipped = false;

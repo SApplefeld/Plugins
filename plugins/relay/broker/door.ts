@@ -172,7 +172,7 @@
 // and the control is the boundary around the host. The inbound router decides the class, in one
 // function, and refuses an answer and a verdict at any other standing. At either standing the door
 // takes no other act: no workers-board act, no broker restart, no voice command, no pick or submit
-// of a question's options and no release of a question to the console. Of the page's item acts it
+// of a question's options and no hand-back of a question to its session. Of the page's item acts it
 // takes one, at operator standing: an answer to an open ask, which is the page's Agree or its
 // Answer. It takes no Dismiss, no Agree to several asks at once, no Steer, no Rollout and no
 // Publish. A line, an answer, a verdict and an answer to an ask each leave a copy in the session's

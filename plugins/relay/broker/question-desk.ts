@@ -1,16 +1,17 @@
 // The question desk: holds a credited AskUserQuestion PreToolUse hook response open so the answer
-// can arrive from the session's Discord thread instead of the console picker.
+// can arrive from the session's Discord thread or the operator's page instead of the console picker.
 //
 // While a PreToolUse hook response is held, the console shows the tool call waiting and renders no
 // picker, so the held response body is the only answer channel that exists. Five triggers end a
 // hold, all through one guarded resolution path so an entry resolves exactly once: answered (the
 // response carries `permissionDecision: "allow"` with `updatedInput`, and the turn proceeds with
-// the injected answers), released (a `{}` no-decision body, measured to render the picker normally
-// in about a second), expired (the desk's own timer, the same `{}`), client gone (the response
-// socket closed first, so nothing can be written), and shutdown (every held entry answered `{}`
-// before the sockets are torn down). The fail direction throughout is the release: a lost hold
-// must never eat a question, so every failure lands on today's behavior, an alerted phone and a
-// console picker.
+// the injected answers), released (the hand-back, `questionHandBack`, which refuses the call with a
+// fixed reason telling the session to ask the question in words, as an ordinary message), expired
+// (the desk's own timer, the same hand-back), client gone (the response socket closed first, so
+// nothing can be written), and shutdown (every held entry handed back before the sockets are torn
+// down). The fail direction throughout is the hand-back: nobody reaches the console, so a lost hold
+// must never leave a question on its picker, and every failure ends with the session asking the
+// question as a message the portal and the thread show.
 //
 // This module's standing rule, shared with the tailer: no question content in any log line, ever.
 // Log lines carry session IDs, counts, and states; never a question, an option, or an answer.
@@ -30,9 +31,9 @@ import { questionDigest } from "./tail.ts";
  *
  * Bounded by count for the reason MAX_OPEN_REQUESTS is: a wall-clock eviction would quietly
  * release a question an operator is still reading. At the ceiling the newest post is refused
- * rather than the oldest released, and a refused post is answered immediately, which is exactly
- * today's behavior; a session parks on one question at a time, so sixteen is many hosts' worth of
- * headroom before the cap can matter.
+ * rather than the oldest released, and a refused post is answered immediately with the hand-back;
+ * a session parks on one question at a time, so sixteen is many hosts' worth of headroom before
+ * the cap can matter.
  */
 export const MAX_HELD_QUESTIONS = 16;
 
@@ -42,15 +43,53 @@ export const MAX_HELD_QUESTIONS = 16;
  * A retry attaches to the entry it matches rather than creating one, so the host-wide cap above
  * cannot bound it: without this ceiling a CLI reposting an identical question would pin a socket
  * per attempt for the whole hold. Past it the newest attempt is refused, which answers that post
- * immediately, the same fail direction the entry cap takes; the attempts already attached still
- * receive the answer.
+ * immediately with the hand-back, the same fail direction the entry cap takes, and the entry it
+ * matched is released, so the attempts already attached are handed back with it and the page and
+ * the thread keep no card for a question the session now asks in words.
  */
 export const MAX_RESPONSES_PER_ENTRY = 4;
 
 /**
- * How long shutdown waits for the released bodies to reach the wire before the sockets are torn
+ * The reason the hand-back refuses a question tool call with, which Claude Code shows the session's
+ * model. A fixed string of the broker's own wording: it carries no text from the question, so no
+ * rule on log lines or on content reaches it.
+ */
+export const QUESTION_HAND_BACK_REASON =
+  "The user cannot answer this question here, because nobody can reach this session's console. " +
+  "Do not call AskUserQuestion again for this question. Ask it in words instead: write the question " +
+  "and its options to the user as an ordinary message, the way you send the user any other message, " +
+  "then end your turn and wait for the reply.";
+
+/**
+ * The hand-back: the body every question tool call is answered with where no answer can come from
+ * the portal or the thread. It refuses the call with `QUESTION_HAND_BACK_REASON`, so the session
+ * asks the question in words, as an ordinary message, and the portal and the thread show that
+ * message as they show any reply. An empty body there would draw the console's picker instead, which
+ * is a question nobody sees.
+ *
+ * The one builder of the body, for the desk's own ends of a hold and for the intake's answer to a
+ * question post the desk does not take, so the two cannot come to disagree about the wire shape.
+ */
+export function questionHandBack(): {
+  hookSpecificOutput: {
+    hookEventName: "PreToolUse";
+    permissionDecision: "deny";
+    permissionDecisionReason: string;
+  };
+} {
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: QUESTION_HAND_BACK_REASON,
+    },
+  };
+}
+
+/**
+ * How long shutdown waits for the handed-back bodies to reach the wire before the sockets are torn
  * down. `closeAllConnections` destroys a socket, which drops a write still buffered, and the
- * session sees that as the connection reset the release exists to avoid. The wait is bounded, and
+ * session sees that as the connection reset the hand-back exists to avoid. The wait is bounded, and
  * bounded over the whole set rather than per response, so one stuck socket cannot hold the
  * process open: past it the teardown proceeds and that one response degrades to a reset.
  */
@@ -68,11 +107,12 @@ const REPEAT_WINDOW_MS = 60_000;
 /**
  * How a hold ended, for the terminal-state notifier.
  *
- * `answered-at-console` is the one state that arrives after the hold is already over: the response
- * was released to the console picker and the operator answered it there, which the transcript's own
- * resolution line reports minutes or hours later. It is a state of the thread message rather than of
- * a held response, and it is what stops that message from still saying a question is waiting at a
- * console that has already been answered.
+ * `answered-at-console` is the one state that arrives after the hold is already over: the session's
+ * own hook stopped waiting first, the `client-gone` end, so its console drew the picker, and the
+ * question was answered there, which the transcript's own resolution line reports minutes or hours
+ * later. It is a state of the thread message rather than of a held response, and it is what stops
+ * that message from still saying a question is waiting at a console that has already been answered.
+ * A hold the desk ended with the hand-back never reaches it: no picker was drawn for that ask.
  */
 export type QuestionTerminalState =
   | "answered"
@@ -149,11 +189,12 @@ export type QuestionDesk = {
   /**
    * Takes ownership of a held response. True means the caller must not write to that response
    * again, because the desk answers it at resolution or it is already dead; false means the desk
-   * refused and the caller answers it exactly as it would have without a desk. A second post for
-   * a session already held attaches to the same entry when its questions digest identically (the
-   * CLI retrying one ask: both responses are answered the same way at resolution) and replaces
-   * the entry when they do not (the older hold is released with `{}`; the newer ask is the one
-   * still standing).
+   * refused and the caller answers it with the hand-back, since nothing will answer it later. A
+   * second post for a session already held attaches to the same entry when its questions digest
+   * identically (the CLI retrying one ask: both responses are answered the same way at resolution)
+   * and replaces the entry when they do not (the older hold is released with the hand-back; the
+   * newer ask is the one still standing). A retry refused past `MAX_RESPONSES_PER_ENTRY` also
+   * releases the entry it matched, before the false return.
    *
    * `dispatched` reports whether this post's own alert went out. It gates the creation of an
    * entry and nothing else: a new hold with no alert behind it is a question parked where nobody
@@ -191,19 +232,24 @@ export type QuestionDesk = {
    */
   answerTyped: (sessionId: string, response: string) => boolean;
   /**
-   * Reports that an ask this desk held was answered at the console, so its thread message stops
-   * saying the question is still waiting there.
+   * Reports that the transcript wrote the resolution line of an ask this desk held, which a console
+   * answer writes and a call the desk refused can write too. Where the ask's hold ended `client-gone`,
+   * its console drew the picker, so the line is that answer and the thread message stops saying the
+   * question is still waiting there. Where the desk ended the hold with the hand-back, no picker was
+   * drawn and the line is no answer: the record is taken and nothing is redrawn.
    *
-   * Fed by the transcript's resolution-time yield, which lands when the picker closes: by then the
+   * Fed by the transcript's resolution-time yield, which lands when the tool call ends: by then the
    * hold is over and the entry is gone, so what this reaches is the small record of recently closed
-   * asks rather than a live entry. One-shot per ask, and it reports whether it found one. A session
-   * still holding this ask answers false and is left standing: the console renders no picker under
-   * a hold, so it cannot be the surface that answered.
+   * asks rather than a live entry. One-shot per ask, and it reports whether it found one, true for
+   * a taken hand-back record too, so the tailer posts no second alert for it. A session still
+   * holding this ask answers false and is left standing: the console renders no picker under a
+   * hold, so it cannot be the surface that answered.
    *
    * An ask that closed before its alert's notice came back answers true too, since that notice is
-   * the ask's alert and a second would post it again. An answered record is left for the notice to
-   * draw, and any other record takes the console's answer in place for the notice to draw instead.
-   * A record whose alert was lost is passed over, since no notice is on its way for it.
+   * the ask's alert and a second would post it again. An answered or a handed-back record is left as
+   * it is for the notice to draw, and a `client-gone` record takes the console's answer in place for
+   * the notice to draw instead. A record whose alert was lost is passed over, since no notice is on
+   * its way for it.
    */
   answeredAtConsole: (sessionId: string, digest: string) => boolean;
   /**
@@ -215,9 +261,10 @@ export type QuestionDesk = {
    * finding nothing held, reads here how the ask ended and where the notice is, and draws the
    * closed line onto it. The newest such record for the session and ask, null where there is none.
    *
-   * Read once. A record answered from the page or at the console is spent by the read; a record
-   * whose state leaves the question at the console keeps the notice's place, so the console's own
-   * answer flips that notice as it flips every other release.
+   * Read once. A record answered from the page or at the console is spent by the read; a record in
+   * any other state keeps the notice's place for the transcript's resolution line, which flips that
+   * notice where the hold ended `client-gone` and takes the record without a redraw where the desk
+   * handed the question back.
    */
   closedBeforeAlert: (
     sessionId: string,
@@ -225,13 +272,14 @@ export type QuestionDesk = {
     alert: QuestionAlert,
   ) => { state: QuestionTerminalState; detail: QuestionTerminalDetail } | null;
   /**
-   * Releases whatever the session holds with `{}`, so the console picker renders normally: the
-   * operator's own release.
+   * Releases whatever the session holds with the hand-back, so the session asks the question in
+   * words: the operator's own release.
    */
   release: (sessionId: string) => boolean;
   /**
    * Reports that an ask's alert will never be a notice this desk can draw on: its post failed or
-   * threw, or came back with no message id. Releases the session's hold for that ask with `{}`.
+   * threw, or came back with no message id. Releases the session's hold for that ask with the
+   * hand-back.
    * Then, of the ask's records whose notice had not come back, an answered one is kept and marked
    * as waiting on no notice, and every other one, the one this release just wrote included, is
    * dropped.
@@ -293,16 +341,16 @@ export type QuestionDesk = {
    */
   submit: (entryId: string) => QuestionSubmission;
   /**
-   * Releases the entry an opaque component id names, so the console picker renders: the
-   * Answer-at-console button. Digest-checked through the entry itself, so a stale id whose ask has
-   * been replaced releases nothing.
+   * Releases the entry an opaque component id names with the hand-back, so the session asks the
+   * question in words: the Ask-in-a-message button. Digest-checked through the entry itself, so a
+   * stale id whose ask has been replaced releases nothing.
    */
   releaseEntry: (entryId: string) => boolean;
   /**
-   * Releases every held entry with `{}`, then waits, briefly and boundedly, for those bodies to
-   * reach the wire. Shutdown's half: the socket teardown that follows destroys connections, and a
-   * body still buffered when its socket is destroyed is dropped, which the session sees as a
-   * connection reset rather than the clean release.
+   * Releases every held entry with the hand-back, then waits, briefly and boundedly, for those
+   * bodies to reach the wire. Shutdown's half: the socket teardown that follows destroys
+   * connections, and a body still buffered when its socket is destroyed is dropped, which the
+   * session sees as a connection reset rather than the hand-back.
    */
   releaseAll: () => Promise<void>;
 };
@@ -367,24 +415,24 @@ type HeldEntry = {
 export const MAX_REPEAT_KEYS = 64;
 
 /**
- * How many closed asks are remembered, for the console-answer flip and for the notice of an ask that
- * closed before its alert landed, oldest evicted.
+ * How many closed asks are remembered, for the transcript's resolution line and for the notice of an
+ * ask that closed before its alert landed, oldest evicted.
  *
- * A record outlives its entry only to name the message a later console answer rewrites, or to tell
- * a notice still on its way how its ask ended. The first window is one operator walking to a
- * keyboard and the second one Discord round trip. Small on purpose: the record holds question text,
+ * A record outlives its entry only to name the message a later console answer rewrites, to take the
+ * resolution line a handed-back call can write so the tailer posts no second alert, or to tell a
+ * notice still on its way how its ask ended. The first window is one operator walking to a keyboard
+ * and the second one Discord round trip. Small on purpose: the record holds question text,
  * which is content, so it is bounded the way every other content this module touches is. Past the
  * bound the oldest record is dropped, whose cost is a thread message left reading "answer it at the
- * console" for a question already answered, or a notice left reading as open for one already
- * closed, never a lost question.
+ * console" for a question already answered, a second alert for a question the session was told to
+ * ask in words, or a notice left reading as open for one already closed, never a lost question.
  */
 export const MAX_CLOSED_ASKS = 8;
 
 /**
- * A hold that ended with its thread message telling the operator to answer at the console, or that
- * ended before its alert landed.
+ * A hold that ended unanswered with a message in the thread, or that ended before its alert landed.
  *
- * The console answer arrives long after the entry is gone, and the message it has to rewrite is the
+ * The transcript's resolution line arrives long after the entry is gone, and the message it has to rewrite is the
  * one the entry carried, so what the edit needs outlives the entry here: the ask's identity
  * (session and digest), the message, and the questions the edit renders. An answered hold with a
  * message records nothing, because the thread already carries its answer and the console never
@@ -393,7 +441,7 @@ export const MAX_CLOSED_ASKS = 8;
  * A hold that ended with no message records its state and what it was answered with, and `alert`
  * stays null until the notice its alert posted reads the record: that read is the only edit the
  * notice gets. A console answer reported before that read rewrites such a record's state to
- * `answered-at-console` in place, unless the record is already answered.
+ * `answered-at-console` in place where its hold ended `client-gone`, and leaves any other state.
  *
  * An answered record whose alert was then lost is kept with `noticeLost` set: no notice is on its
  * way, so the console's resolution line passes over it and the tailer posts its fallback alert,
@@ -500,10 +548,11 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
     state: QuestionTerminalState,
     detail: QuestionTerminalDetail,
   ): void {
-    // Every state that leaves the operator a question to answer at the console is remembered, so
-    // the console's own answer can rewrite the message this state is about to write. An answered
-    // hold leaves nothing to answer, and the console-answer flip itself is already the last word on
-    // that message. A hold that ended with no message is remembered whatever its state, because the
+    // Every state that ends a hold unanswered is remembered, so the transcript's resolution line for
+    // the ask finds it later: after `client-gone` that line is a console answer and rewrites the
+    // message this state is about to write, and after a hand-back it is taken without a redraw. An
+    // answered hold leaves nothing to answer, and the console-answer flip itself is already the
+    // last word on that message. A hold that ended with no message is remembered whatever its state, because the
     // notice its alert posted is still on its way and this record is how that notice learns it.
     const remembered =
       state !== "answered-at-console" && (detail.alert === null || state !== "answered");
@@ -549,8 +598,9 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
       });
       response.end(text);
     } catch {
-      // The socket death stands; the question is still whole at the console. The error detail is
-      // discarded because a write error can quote the body, and the body carries answers.
+      // The socket death stands, and the session sees it as a connection reset rather than the
+      // hand-back. The error detail is discarded because a write error can quote the body, and the
+      // body carries answers.
       log(`question desk: could not answer session ${sessionId}'s held response; the socket is gone`);
     }
   }
@@ -676,7 +726,10 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
     );
   }
 
-  /** The release trigger, shared by the session-keyed seam and the Answer-at-console button. */
+  /**
+   * The release trigger, shared by the session-keyed seam, the Ask-in-a-message button and the
+   * retry refused past its ceiling. It answers every response the entry carries with the hand-back.
+   */
   function releaseHold(sessionId: string, digest?: string): boolean {
     const entry = held.get(sessionId);
     if (entry === undefined) return false;
@@ -687,7 +740,7 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
       );
       return false;
     }
-    return settle(sessionId, "released", {});
+    return settle(sessionId, "released", questionHandBack());
   }
 
   return {
@@ -707,13 +760,17 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
       const existing = held.get(sessionId);
       if (existing !== undefined && existing.digest === digest) {
         if (existing.responses.length >= MAX_RESPONSES_PER_ENTRY) {
-          // Rate-limited, unlike every other line here: a CLI retrying past this cap posts for the
-          // life of the hold, and one line per attempt would push every other line out of the log
-          // through rotation.
+          // Rate-limited, unlike every other line here: a CLI that retries past this cap is one
+          // that retries without end, and one line per attempt would push every other line out of
+          // the log through rotation.
           repeats(
             `refused a retry for session ${sessionId}, its hold already carries ` +
               `${String(MAX_RESPONSES_PER_ENTRY)} responses`,
           );
+          // The caller hands this post back, and the session asks the question in words, so the
+          // entry it matched is released too: its attached calls are handed back with it, and the
+          // page and the thread keep no card for a question that is now asked as a message.
+          releaseHold(sessionId, digest);
           return false;
         }
         // The CLI retrying the one ask it is parked on. Both responses answer identically at
@@ -725,13 +782,14 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
       if (existing !== undefined) {
         // A different ask from the same session: the session has moved on, so the older hold is
         // answering a question nobody is parked on. Released rather than replaced-in-place,
-        // because its responses belong to the older ask's tool call.
-        settle(sessionId, "released", {}, null, true);
+        // because its responses belong to the older ask's tool call, which is taken as dead and
+        // is handed back like any other.
+        settle(sessionId, "released", questionHandBack(), null, true);
       }
       if (!dispatched) {
         // No alert went out for this ask and no live entry carries one, so a new entry would park
-        // the session on a question the operator was never shown. Refused instead, which answers
-        // the post at the console: today's behavior, the direction every failure here takes.
+        // the session on a question the operator was never shown. Refused instead, which has the
+        // caller hand the post back, the direction every failure here takes.
         log(`question desk: refused a hold for session ${sessionId}, its question alerted nowhere`);
         return false;
       }
@@ -743,9 +801,9 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
         return false;
       }
       const timer = setTimer(() => {
-        // Margin below the installed hook timeout (the fragment pin holds it there), so the
-        // release is always this clean `{}` and never a CLI-side timeout error.
-        settle(sessionId, "expired", {});
+        // Margin below the installed hook timeout (the fragment pin holds it there), so the hold
+        // always ends in this hand-back and never in a CLI-side timeout error.
+        settle(sessionId, "expired", questionHandBack());
       }, options.holdMs);
       watch(sessionId, response);
       // Six random bytes, which is the whole of what a component id has to be: unguessable enough
@@ -803,6 +861,11 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
         // Consumed as it is matched, so the flip happens exactly once however many times the ask's
         // resolution is reported.
         recentlyClosed.splice(at, 1);
+        // Only a hold whose own hook stopped waiting left a picker at the console. Any other record
+        // here is a hold this desk handed back, whose refused call is taken to have written the
+        // line (unmeasured), so it is taken with no redraw: the message already says how the hold
+        // ended.
+        if (closed.state !== "client-gone") return true;
         notifyTerminal(sessionId, digest, "answered-at-console", {
           entryId: closed.entryId,
           alert: closed.alert,
@@ -815,10 +878,12 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
       // A record of this ask whose notice has not come back names no message to edit yet, and that
       // notice is the ask's alert, on its way. So the report answers true, which stops the tailer
       // posting a second alert beside it. An answered record stays as it is: the line is the
-      // resolution of that answer, and the notice draws it when it comes back. A record in any other
-      // state takes the console's answer in place, so the notice is drawn answered at the console
-      // rather than waiting there. A record whose alert was lost has no notice on its way, so it is
-      // passed over: the line answers false and the tailer's fallback notice is what reads it.
+      // resolution of that answer, and the notice draws it when it comes back. A handed-back record
+      // stays as it is too, since its line is the refused call's and no answer, so the notice draws
+      // the hand-back. A `client-gone` record takes the console's answer in place, so the notice is
+      // drawn answered at the console rather than waiting there. A record whose alert was lost has no
+      // notice on its way, so it is passed over: the line answers false and the tailer's fallback
+      // notice is what reads it.
       let pending = false;
       for (const closed of recentlyClosed) {
         if (closed.alert !== null || closed.sessionId !== sessionId || closed.digest !== digest) continue;
@@ -827,7 +892,7 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
         // Remembered on the record, since this line comes once: should the alert it waits on then
         // be lost, the fallback this line did not post is posted by the loss.
         closed.consoleRead = true;
-        if (closed.state !== "answered") {
+        if (closed.state === "client-gone") {
           closed.state = "answered-at-console";
           closed.answers = null;
         }
@@ -856,9 +921,14 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
           continue;
         }
         // An answer, from the page or the console, is the notice's last word, so its record is
-        // spent. Any other state leaves the question at the console, so the record keeps the
-        // notice's place for the console's own answer to flip.
-        if (closed.state === "answered" || closed.state === "answered-at-console") {
+        // spent, and so is a hand-back whose resolution line already came. Any other state keeps
+        // the notice's place for that line: after `client-gone` it is the console's answer and
+        // flips the notice, and after a hand-back it is taken with no redraw and no second alert.
+        if (
+          closed.state === "answered" ||
+          closed.state === "answered-at-console" ||
+          closed.consoleRead
+        ) {
           recentlyClosed.splice(at, 1);
         } else {
           closed.alert = alert;
@@ -998,7 +1068,7 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
       for (const sessionId of [...held.keys()]) {
         const entry = held.get(sessionId);
         if (entry !== undefined) written.push(...entry.responses);
-        settle(sessionId, "shutdown", {});
+        settle(sessionId, "shutdown", questionHandBack());
       }
       await flushed(written);
     },

@@ -1174,7 +1174,7 @@ export type QuestionHandlerOptions = {
  * and required the same-origin JSON headers. A body that is not the expected object answers 400.
  * Otherwise `{status}`: `no-session` or `ended` where no live session carries the lineage; `closed`
  * where the entry is not one the desk holds for that session; `unanswerable` for a select or submit
- * on an ask `answerableFromThread` refuses, which the console release alone may end; `selected`;
+ * on an ask `answerableFromThread` refuses, which the hand-back alone may end; `selected`;
  * `answered`, or `incomplete` with the `questionNumber` still unanswered, which submits nothing;
  * `released`. Each answer that names a live session is logged as one line naming the route, the
  * session, the action and the status; nothing else of the body reaches a log.
@@ -1214,7 +1214,7 @@ export function registerQuestionHandler(register: WebHandler["register"], option
       if (action === "console") {
         return answer({ status: options.desk.releaseEntry(entryId) ? "released" : "closed" });
       }
-      // The thread's rule for drawing a picker at all: an ask it cannot answer whole is the console's.
+      // The thread's rule for drawing a picker at all: an ask it cannot answer whole is handed back.
       if (!answerableFromThread(entry.questions, entry.questionsInput)) return answer({ status: "unanswerable" });
 
       if (action === "submit") {

@@ -244,8 +244,7 @@ export function createInteractionRouter(options: InteractionRouterOptions): Inte
 
       // The whole callback budget, checked before anything the desk cannot take back. A press
       // resolved on the desk and then left unanswered is a session proceeding while the operator's
-      // client reports the tap as failed and sends them to a console picker the hold is blinding,
-      // so an empty bucket drops the press whole instead.
+      // client reports the tap as failed, so an empty bucket drops the press whole instead.
       const at = now();
       if (!budget.affordable(at)) {
         log(`routing: an interaction in thread ${interaction.threadId} was dropped, the bucket is empty`);
@@ -272,7 +271,7 @@ export function createInteractionRouter(options: InteractionRouterOptions): Inte
         await answer(interaction, null);
         const released = options.desk.releaseEntry(reference.entryId);
         log(
-          `routing: session ${entry.sessionId}'s question was released to the console from the thread` +
+          `routing: session ${entry.sessionId}'s question was handed back to its session from the thread` +
             (released ? "" : "; the hold had already ended"),
         );
         return;

@@ -6,7 +6,7 @@
 // under it with the gloss the call wrote for each. The components are the picker: a string select
 // per question, or, for the single-question ask small enough to fit one row, the options themselves
 // as buttons so the phone answer is one tap. A control row closes the message with Send answers and
-// Answer at console. An ask too long for one message's text spills, and what spills rides plain
+// Ask in a message. An ask too long for one message's text spills, and what spills rides plain
 // continuation messages the caller posts below the interactive one: the render yields their texts
 // alongside the message, each carrying in full every question block the body could not.
 //
@@ -53,7 +53,7 @@ export const MAX_BUTTON_LABEL_LENGTH = 80;
 /**
  * The most options a single-select question may have and still render as buttons.
  *
- * One row holds five components, and the row is shared with the Answer-at-console button, so four
+ * One row holds five components, and the row is shared with the Ask-in-a-message button, so four
  * options is what fits. Past it the ask takes the select path, which costs a tap to open the menu.
  */
 export const MAX_FAST_PATH_OPTIONS = MAX_BUTTONS_PER_ROW - 1;
@@ -100,10 +100,10 @@ const PROMPT_FURNITURE_ROOM = 200;
 /**
  * The room every question's block is allowed, given what each of them wants and the room they share.
  *
- * The notice's rule is first-come, and this message cannot take it: the notice sends the operator to
- * a console that holds the whole question, where a question past the cut loses nothing that matters,
- * while this is the message being answered, and a question drawn nowhere in the body is one whose
- * options would be picked unread. So every question is guaranteed a share.
+ * The notice's rule is first-come, and this message cannot take it: the notice answers nothing, so a
+ * question past its cut loses nothing that matters, while this is the message being answered, and a
+ * question drawn nowhere in the body is one whose options would be picked unread. So every question
+ * is guaranteed a share.
  *
  * An equal share is the obvious way to guarantee one and it is the wrong one, because what a
  * question wants varies by more than the count does: measured against the real asks this host has
@@ -186,7 +186,7 @@ function titleRoom(room: number): number {
  * own and nothing downstream fails loudly for them: the writer neutralizes through `inertMessage`,
  * which cuts to the ceiling rather than refusing, so a message composed past it posts with its tail
  * eaten and no marker saying so. That tail is the later questions, on the one message whose job is
- * telling the operator what is waiting at a console. Four questions at the readability cap compose
+ * telling the operator which questions closed. Four questions at the readability cap compose
  * past 2,400 units against a 1,900 ceiling; at this budget they compose inside it, since a title is
  * about 110 units of number, header, and separators around the question itself.
  */
@@ -313,15 +313,15 @@ export type QuestionMessage = {
 /**
  * Whether this ask can be answered from the thread at all.
  *
- * Four ways it cannot, and the caller's answer to every one of them is today's behavior: the plain
- * notice, and the hold released to the console picker.
+ * Four ways it cannot, and the caller's answer to every one of them is the plain notice, and the hold
+ * handed back to the session, which asks the question in a message.
  *
  * A question with no readable option has no select to build and no button to press, so it could
  * never be completed here however long it is held. An ask the reader did not carry whole is refused
  * on two separate counts: `questions` is the bounded parse and `questionsInput` is the array the
  * tool wrote, and an answered hold submits a map built over the first while the session reads it
  * against the second, so a question the reader dropped is a question the session gets no answer
- * for, and an option the reader dropped is a choice the console still offers and this thread would
+ * for, and an option the reader dropped is a choice the call still offers and this thread would
  * not. And two questions asked in the same words share one key in that map, where one answer would
  * silently stand for both.
  */
@@ -402,19 +402,18 @@ function titleLine(
 /**
  * What a question's block ends with when its share had no room for the rest of its options.
  *
- * Both wordings point at the two surfaces that hold the withheld text whole, and never at the
- * menu: the menu is the picker, and every field inside it is cut to a hundred units and
+ * Both wordings point at the continuations below, which hold the withheld text whole, and never at
+ * the menu: the menu is the picker, and every field inside it is cut to a hundred units and
  * ellipsized to the width of a phone, so it is the one place a marker must not send a reader to
- * decide from. "Below or at the console" rather than "below" alone, because the console holds
- * every ask whole unconditionally while the continuations are capped in number: past the cap a
- * late question's block may not reach them, and the marker has to stay true for it. The layouts
- * still differ in what they say is withheld: a button row already shows every option's label, so
- * what rides below for it is the notes beside them and nothing else.
+ * decide from. The continuations are capped in number, and an ask past the cap ends its last
+ * continuation on `continuationTail`, which tells the reader how to have the session write the
+ * rest out. The layouts still differ in what they say is withheld: a button row already shows
+ * every option's label, so what rides below for it is the notes beside them and nothing else.
  */
 function moreOptionsTail(count: number, fast: boolean): string {
   return fast
-    ? `_(+${String(count)} more on the buttons, notes in full below or at the console)_`
-    : `_(+${String(count)} more, in full below or at the console)_`;
+    ? `_(+${String(count)} more on the buttons, notes in full below)_`
+    : `_(+${String(count)} more, in full below)_`;
 }
 
 /**
@@ -424,10 +423,11 @@ function moreOptionsTail(count: number, fast: boolean): string {
  * as the whole question: the operator would answer the front third of a sentence without a cue
  * that there is more. So a block never ends looking whole when it is not; whichever field the
  * share cut, the block ends on a marker and the full block rides below. Worded like the options
- * marker, and like it naming the console too, for the ask past the continuation cap.
+ * marker, and like it pointing below alone: an ask past the continuation cap says so on its last
+ * continuation.
  */
 function questionTail(): string {
-  return "_(question continued in full below or at the console)_";
+  return "_(question continued in full below)_";
 }
 
 /**
@@ -530,7 +530,7 @@ export const MAX_CONTINUATION_MESSAGES = 6;
  * among the undrawn lines and no count of options would stand for it.
  */
 function continuationTail(count: number): string {
-  return `_(the rest of this ask is not drawn here, including ${String(count)} of its options, read it in full at the console)_`;
+  return `_(the rest of this ask is not drawn here, including ${String(count)} of its options, tap Ask in a message to have the session write it out in full)_`;
 }
 
 /**
@@ -743,7 +743,7 @@ export function renderQuestionPrompt(input: {
             1,
           ),
         ),
-        button(`${PREFIX}:${entryId}:console`, "Answer at console", 2),
+        button(`${PREFIX}:${entryId}:console`, "Ask in a message", 2),
       ],
     });
   } else {
@@ -754,7 +754,7 @@ export function renderQuestionPrompt(input: {
       type: 1,
       components: [
         button(`${PREFIX}:${entryId}:send`, "Send answers", 1),
-        button(`${PREFIX}:${entryId}:console`, "Answer at console", 2),
+        button(`${PREFIX}:${entryId}:console`, "Ask in a message", 2),
       ],
     });
   }
@@ -767,7 +767,7 @@ export function renderQuestionPrompt(input: {
   const headline = fast
     ? "**Waiting on you**"
     : `**${String(count)} question${count === 1 ? "" : "s"}**`;
-  const lines = [`${mention}❓ ${headline} ${SEPARATOR} answer here or at the console`];
+  const lines = [`${mention}❓ ${headline} ${SEPARATOR} answer here`];
   const numbered = (at: number): number | null => (count === 1 ? null : at + 1);
   // What each question would draw unheld, then the shares that fit those wants inside one message.
   // Measured before anything is drawn, because a share cannot be decided from a question in
@@ -858,18 +858,25 @@ function answerRoom(asked: AskedQuestion): number {
  * The message a resolved hold is edited to, one line per terminal state.
  *
  * Every state edits and every edit strips the components, because a message whose buttons answer a
- * hold that has ended is a tap that reports a failure to the operator and changes nothing. The four
- * release states say the same thing in their own words, since what the operator does next is the
- * same in all of them: the console picker is up. The two answered states carry no such instruction,
- * because nothing is left to do: the thread's own answer renders what was submitted, so the thread
- * carries the answer rather than only the fact of one, and the console's answer closes the message
- * a release state left pointing at a picker that has since been answered.
+ * hold that has ended is a tap that reports a failure to the operator and changes nothing. A
+ * release, an expired hold and a shutdown each answer the session with the hand-back, so each
+ * line gives its reason and then says the session was told to ask the question again in a message,
+ * which is where the operator answers it. A release of an older ask the session replaced with a
+ * newer one, `superseded`, says only that it was replaced, because the session has moved on to the
+ * newer question. A hold whose session stopped waiting, `client-gone`, had no response left
+ * to answer, so its session's own console drew the picker and the line says to answer it there.
+ * The two answered states carry no instruction, because nothing is left to do: the thread's own
+ * answer renders what was submitted, so the thread carries the answer rather than only the fact of
+ * one, and the console's answer closes the message the `client-gone` line left pointing at a
+ * picker that has since been answered.
  */
 export function renderQuestionOutcome(input: {
   state: "answered" | "answered-at-console" | "released" | "expired" | "client-gone" | "shutdown";
   questions: readonly AskedQuestion[];
   answers: Readonly<Record<string, string | readonly string[]>> | null;
   response: string | null;
+  /** True for a release of an older ask the session replaced with a newer one. */
+  superseded?: boolean;
 }): string {
   if (input.state === "answered-at-console") {
     // What was answered rides along without what it was answered with: the console's picks reach
@@ -887,17 +894,25 @@ export function renderQuestionOutcome(input: {
     ].join("\n");
   }
   if (input.state !== "answered") {
-    const reason = {
-      released: "released to the console",
-      expired: "the hold expired",
-      "client-gone": "the session stopped waiting",
-      shutdown: "the broker restarted",
-    }[input.state];
+    const replaced = input.state === "released" && input.superseded === true;
+    const reason = replaced
+      ? "replaced by a newer question"
+      : {
+          released: "handed back to the session",
+          expired: "the hold expired",
+          "client-gone": "the session stopped waiting",
+          shutdown: "the broker restarted",
+        }[input.state];
+    const next = replaced
+      ? ""
+      : input.state === "client-gone"
+        ? ", answer it at the console"
+        : ", the session was told to ask it again in a message";
     // The titles ride along, because this edit replaces the only copy of the question the thread
-    // has: a bare closing line would leave the operator walking to a console without knowing what
-    // is waiting there.
+    // has: a bare closing line would leave the operator reading the session's message, or the
+    // newer question, without knowing which question this one was.
     return [
-      `❓ **Question closed** ${SEPARATOR} ${reason}, answer it at the console`,
+      `❓ **Question closed** ${SEPARATOR} ${reason}${next}`,
       ...input.questions.map((asked, at) =>
         titleLine(
           asked,

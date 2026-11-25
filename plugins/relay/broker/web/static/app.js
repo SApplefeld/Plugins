@@ -2704,10 +2704,10 @@
    */
   const PENDING_WORDS = {
     answered: "Answered.",
-    released: "Released to the console; answer it there.",
+    released: "Handed back. The session will ask it in a message.",
     resolved: "Sent.",
     closed: "That has already closed; nothing was changed.",
-    unanswerable: "This question can only be answered at the console.",
+    unanswerable: "Buttons cannot answer this question. Have the session ask it in a message.",
     "no-session": "No live session; nothing was sent.",
     ended: "That session has ended; nothing was sent.",
     "no-thread": "The session has no Discord thread yet; nothing was sent.",
@@ -2786,9 +2786,9 @@
   /**
    * One held ask. Where the thread could answer it, each question's options are buttons that post
    * a pick by position, and Submit posts the whole; a multi-select toggles an option in or out of
-   * what is chosen. Where the thread could not, the questions are drawn as text and the console
-   * release is the one control, as the thread's own notice offers. The typed composer line answers
-   * the whole ask once the thread's alert has landed, as a typed Discord reply does.
+   * what is chosen. Where the thread could not, the questions are drawn as text and Ask in a
+   * message, which hands the question back to the session, is the one control. The typed composer
+   * line answers the whole ask once the thread's alert has landed, as a typed Discord reply does.
    */
   function questionCard(entry) {
     const id = txt(entry.entryId);
@@ -2829,7 +2829,7 @@
         controls.append(typed);
       }
     }
-    controls.append(pendingButton("ask-console", "Answer at console", "ask-" + id + "-console", () => postPending("question", { entryId: id, action: "console" })));
+    controls.append(pendingButton("ask-console", "Ask in a message", "ask-" + id + "-console", () => postPending("question", { entryId: id, action: "console" })));
     card.append(controls);
     return card;
   }

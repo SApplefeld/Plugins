@@ -115,9 +115,8 @@ export const ALERT_WINDOW_MS = 60_000;
 /**
  * Distinct question alerts one thread may ping with in a window.
  *
- * One, because a question is not answerable from the thread: the ping only sends the operator to
- * the console, a real session asks questions minutes apart and parks on each, and one ping a
- * minute is a person's reading pace for a notice they cannot act on remotely. Past it the alert
+ * One, because a real session asks questions minutes apart and parks on each, and one ping a
+ * minute is a person's reading pace; the question message itself carries the answer. Past it the alert
  * still lands; it stops ringing.
  */
 export const MAX_QUESTION_PINGS_PER_WINDOW = 1;
@@ -145,9 +144,9 @@ export const MAX_QUESTION_ALERTS_PER_WINDOW = 4;
  *
  * Its own window instance wherever it is built, never the question alert's or the permission
  * desk's: shared stamps would let one class spend another's slots. Past it the post is refused and
- * the hold is released to the console, the direction every delivery failure on this path takes,
- * because the message the refusal would leave undrawn is named by a marker in the interactive
- * message above it.
+ * the hold is released and the question handed back to its session, the direction every delivery
+ * failure on this path takes, because the message the refusal would leave undrawn is named by a
+ * marker in the interactive message above it.
  */
 export const MAX_QUESTION_CONTINUATIONS_PER_WINDOW = 8;
 

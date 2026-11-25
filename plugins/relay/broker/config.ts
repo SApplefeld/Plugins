@@ -69,7 +69,8 @@ export type BrokerConfig = {
   interimPollMs: number;
   /**
    * How long the question desk holds a credited AskUserQuestion hook response open for a thread
-   * answer before releasing it to the console picker with a no-decision `{}`.
+   * answer before handing the question back to the session with a deny that tells it to ask in a
+   * message.
    */
   questionHoldMs: number;
   /**
@@ -409,11 +410,11 @@ const MAX_INTERIM_POLL_MS = 5 * 60 * 1000;
 /**
  * Four hours. Exported because it is a shared contract, not a private default: the installed
  * fragment's PreToolUse `timeout` must exceed every legal hold so the release is always the
- * broker's clean `{}` rather than a CLI-side timeout error, and settings-fragment.test.ts pins the
+ * broker's own hand-back rather than a CLI-side timeout error, and settings-fragment.test.ts pins the
  * fragment against this value so the two cannot drift apart.
  */
 export const DEFAULT_QUESTION_HOLD_MS = 4 * 60 * 60 * 1000;
-// A near-zero hold is today's behavior with extra steps; below a second the release would race the
+// A near-zero hold is an immediate hand-back with extra steps; below a second the release would race the
 // alert that makes the hold worth keeping.
 const MIN_QUESTION_HOLD_MS = 1_000;
 // The ceiling is the default on purpose: the fragment pin only holds the default under the

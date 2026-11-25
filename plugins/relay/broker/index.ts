@@ -216,8 +216,8 @@ export async function settlesWithin(work: Promise<void>, ms: number): Promise<bo
  * A requested restart's end: stop the broker, then exit with the relaunch code. The exit runs even
  * when the stop throws or outlasts its ceiling, because a broker half torn down serves nobody and
  * the relaunch loop starts a whole one in its place. A stop cut off or failed stops short of the
- * teardown's own question release, so the held questions are released here first: each lands on
- * its session's console picker rather than as a reset socket. A failure is logged here, because
+ * teardown's own question release, so the held questions are released here first: each is handed
+ * back to its session to ask in words rather than ending as a reset socket. A failure is logged here, because
  * the exit that follows ends the process before any caller could log it.
  */
 export async function stopForRestart(steps: {
@@ -400,8 +400,8 @@ function questionLineText(questions: readonly AskedQuestion[]): string {
  * of the array the tool wrote, in `questionLineText`'s form. After the body and its cut sentence come
  * up to two fixed sentences: one counting the questions and options the wide reading's ceilings left
  * out, written only where either count is above zero, and, on a host with no Discord alone, one
- * telling the reader to answer in words. A Discord host releases such an ask to the console a moment
- * after the line is written, so that sentence would be false there.
+ * telling the reader to answer in words. A Discord host releases such an ask a moment after the line
+ * is written, handing it back to its session, so that sentence would be false there.
  */
 function wideQuestionLineText(questionsInput: readonly unknown[], localMode: boolean): string {
   const wide = askedQuestionsWide(questionsInput);
@@ -459,31 +459,31 @@ export function tapQuestion(
 
 /**
  * The sentence that opens the question line a hold writes when it ends unanswered on a host with no
- * Discord. It is true of an expired hold and of a released one alike: the session is answered with
- * `{}` and its console picker renders the question.
+ * Discord, an expired hold and a released one alike. Either way the session is answered with the
+ * desk's hand-back, which tells it to ask the question in words.
  */
-const QUESTION_LINE_AT_CONSOLE = "A question is no longer held here and waits at the machine's console.";
+const QUESTION_LINE_HANDED_BACK = "A question is no longer held here. The session was told to ask it again as a message.";
 
 /** The longest question text the line that a hold ended writes, in UTF-16 units. */
 const MAX_HOLD_ENDED_QUESTION = 300;
 
 /**
- * The text of the line saying a question waits at the machine's console: `QUESTION_LINE_AT_CONSOLE`,
+ * The text of the line saying a question was handed back to its session: `QUESTION_LINE_HANDED_BACK`,
  * then the text of the first question, with no header, screened as `plainLineField` screens a
  * field and cut to `MAX_HOLD_ENDED_QUESTION` through `fit`. Where there is no question, the sentence
  * stands alone. A hold that ended and an ask the desk would not hold both write this one text.
  */
-function consoleLineText(questions: readonly AskedQuestion[]): string {
+function handBackLineText(questions: readonly AskedQuestion[]): string {
   const first = questions[0];
   return first === undefined
-    ? QUESTION_LINE_AT_CONSOLE
-    : `${QUESTION_LINE_AT_CONSOLE}\n${fit(plainLineField(first.question), MAX_HOLD_ENDED_QUESTION)}`;
+    ? QUESTION_LINE_HANDED_BACK
+    : `${QUESTION_LINE_HANDED_BACK}\n${fit(plainLineField(first.question), MAX_HOLD_ENDED_QUESTION)}`;
 }
 
 /**
- * Hands the talk ring, on a host with no Discord, the line saying a held question went to the
- * machine's console: where an entry ends `expired` or `released`, one `question` line under the
- * session's lineage, holding `QUESTION_LINE_AT_CONSOLE` and then the text of the bounded reading's
+ * Hands the talk ring, on a host with no Discord, the line saying a held question was handed back
+ * to its session: where an entry ends `expired` or `released`, one `question` line under the
+ * session's lineage, holding `QUESTION_LINE_HANDED_BACK` and then the text of the bounded reading's
  * first question, with no header, screened as `plainLineField` screens a field and cut to
  * `MAX_HOLD_ENDED_QUESTION` through `fit`. Where the reading holds no question, the sentence stands
  * alone. The line is written whether or not a question line went before it, since a hold released
@@ -509,66 +509,70 @@ export function tapHoldEnded(
   detail: QuestionTerminalDetail,
 ): void {
   if (!options.localMode || (state !== "expired" && state !== "released") || detail.superseded) return;
-  pushConsoleLine(options, sessionId, detail.questions);
+  pushHandBackLine(options, sessionId, detail.questions);
 }
 
 /**
  * The question desk's `hold`, wrapped so that on a host with no Discord an ask the desk refuses to
- * hold writes the line `tapHoldEnded` writes, under the session's lineage: the session is answered
- * at once with today's response and its console picker renders the question. Two refusals write it,
- * an ask whose alert went nowhere and an ask past the held ceiling. A retry the desk refuses because
- * its hold already carries every response it takes writes nothing, since that ask is still held and
- * shown; the desk still holds an entry for the ask's digest after that refusal and after neither of
- * the other two, which is how the two are told apart. A host with Discord writes nothing, as
+ * hold writes the line `tapHoldEnded` writes, under the session's lineage: the intake hands the
+ * question back to the session at once. Two refusals write it, an ask whose alert went nowhere and
+ * an ask past the held ceiling. A retry the desk refuses because its hold already carries every
+ * response it takes writes nothing here: the desk releases that ask's entry, which hands back every
+ * call it held, and the release's `tapHoldEnded` writes the ask's one line. The desk held an entry
+ * for the ask's digest before that refusal and before neither of the other two, so the check runs
+ * ahead of the hold, which is how the two are told apart. A host with Discord writes nothing, as
  * `tapHoldEnded` writes nothing there. A session with no lineage, or a broker with no ring, taps
  * nothing. A throw behind the tap is absorbed so the refusal still reaches the intake, and the log
  * line names the session and never the question.
  *
  * An ask refused past the ceiling had its alert dispatched just before, and a landed alert writes
  * the ask's own question line. Such a refusal writes nothing yet: it records the ask in
- * `awaitingAlert`, and `consoleLineAfterAlert` writes the line once that alert's delivery has ended,
- * so the conversation shows the question before the line saying it waits at the console. An ask
+ * `awaitingAlert`, and `handBackLineAfterAlert` writes the line once that alert's delivery has ended,
+ * so the conversation shows the question before the line saying it was handed back. An ask
  * whose alert went nowhere has no question line coming, and writes its line at once.
  */
-export function holdNamingConsole(options: {
+export function holdWritingHandBackLine(options: {
   desk: Pick<QuestionDesk, "hold" | "held">;
   talkTap: TalkTap | null;
   lineageOf: (sessionId: string) => string | null;
   /** True on a host with no Discord, which keeps every hold for a typed answer. */
   localMode: boolean;
   log: (line: string) => void;
-  /** Refused asks whose dispatched alert has not yet ended, keyed by `consoleLineKey`. */
+  /** Refused asks whose dispatched alert has not yet ended, keyed by `handBackLineKey`. */
   awaitingAlert: Set<string>;
 }): QuestionDesk["hold"] {
   return (sessionId, questions, questionsInput, response, dispatched) => {
-    if (options.desk.hold(sessionId, questions, questionsInput, response, dispatched)) return true;
-    if (!options.localMode) return false;
-    try {
-      if (options.desk.held(sessionId, questionDigest(questions)) !== null) return false;
-      if (dispatched) {
-        options.awaitingAlert.add(consoleLineKey(sessionId, questions));
-        return false;
+    let retry = false;
+    if (options.localMode) {
+      try {
+        retry = options.desk.held(sessionId, questionDigest(questions)) !== null;
+      } catch {
+        options.log(`routing: the check of a refused ask failed for session ${sessionId}`);
+        retry = true;
       }
-    } catch {
-      options.log(`routing: the check of a refused ask failed for session ${sessionId}`);
+    }
+    if (options.desk.hold(sessionId, questions, questionsInput, response, dispatched)) return true;
+    if (!options.localMode || retry) return false;
+    if (dispatched) {
+      options.awaitingAlert.add(handBackLineKey(sessionId, questions));
       return false;
     }
-    pushConsoleLine(options, sessionId, questions);
+    pushHandBackLine(options, sessionId, questions);
     return false;
   };
 }
 
 /** The key `awaitingAlert` holds a refused ask under: its session and its digest. */
-function consoleLineKey(sessionId: string, questions: readonly AskedQuestion[]): string {
+function handBackLineKey(sessionId: string, questions: readonly AskedQuestion[]): string {
   return `${sessionId}\n${questionDigest(questions)}`;
 }
 
 /**
- * Writes the line naming the console for a refused ask `holdNamingConsole` recorded in
+ * Writes the handed-back line for a refused ask `holdWritingHandBackLine` recorded in
  * `awaitingAlert`, once that ask's alert delivery has ended, landed or not, and drops the record. An
  * ask with no record writes nothing, so a delivery for any other ask passes through untouched.
  */
-function consoleLineAfterAlert(
+function handBackLineAfterAlert(
   options: {
     awaitingAlert: Set<string>;
     talkTap: TalkTap | null;
@@ -578,12 +582,12 @@ function consoleLineAfterAlert(
   sessionId: string,
   questions: readonly AskedQuestion[],
 ): void {
-  if (!options.awaitingAlert.delete(consoleLineKey(sessionId, questions))) return;
-  pushConsoleLine(options, sessionId, questions);
+  if (!options.awaitingAlert.delete(handBackLineKey(sessionId, questions))) return;
+  pushHandBackLine(options, sessionId, questions);
 }
 
-/** Pushes `consoleLineText` under the session's lineage, absorbing a throw into one log line. */
-function pushConsoleLine(
+/** Pushes `handBackLineText` under the session's lineage, absorbing a throw into one log line. */
+function pushHandBackLine(
   options: { talkTap: TalkTap | null; lineageOf: (sessionId: string) => string | null; log: (line: string) => void },
   sessionId: string,
   questions: readonly AskedQuestion[],
@@ -595,10 +599,10 @@ function pushConsoleLine(
       kind: "question",
       author: null,
       senderClass: null,
-      text: consoleLineText(questions),
+      text: handBackLineText(questions),
     });
   } catch {
-    options.log(`routing: the talk tap could not take the console line for session ${sessionId}`);
+    options.log(`routing: the talk tap could not take the handed-back line for session ${sessionId}`);
   }
 }
 
@@ -768,6 +772,7 @@ export function questionCloseOut(options: {
       questions: detail.questions,
       answers: answers !== null && answers.kind === "answers" ? answers.answers : null,
       response: answers !== null && answers.kind === "response" ? answers.response : null,
+      superseded: detail.superseded,
     });
     // What each state writes is composed before it takes its place in the queue, so an edit waiting
     // behind another writes what its own trigger meant rather than what the message says by the
@@ -873,7 +878,7 @@ const ATTACHMENT_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Turns the notice a question's alert landed as into the interactive message that answers it, or
- * releases the hold so the question lands on today's behavior.
+ * releases the hold so the question is handed back to the session.
  *
  * The notice is posted first and the components follow it by edit, because the entry id every
  * component is addressed by does not exist until the hold does, and the hold is created after the
@@ -889,8 +894,8 @@ const ATTACHMENT_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
  * `CONTINUATION_POST_PACE_MS` and the hold is re-read before each one, so an ask answered, expired,
  * or shut down partway through stops posting where it stands.
  *
- * Every branch but the upgrade releases the hold, and all of them land on today's behavior, an
- * alerted phone and a console picker: a post that came back with no message id has nothing to edit,
+ * Every branch but the upgrade releases the hold, and all of them land on an alerted phone and a
+ * question handed back to the session to ask in words: a post that came back with no message id has nothing to edit,
  * an ask this thread cannot answer faithfully would be parked behind components that never finish
  * or answer with a map the session cannot read, a continuation the thread refused would leave the
  * marker above it pointing at nothing, and a refused upgrade would leave a readable message with no
@@ -977,8 +982,7 @@ export function questionUpgrade(options: {
     }
     if (!answerableFromThread(entry.questions, entry.questionsInput)) {
       // The alert is noted before the release, so the release is an alerted close: the close-out
-      // rewrites this notice to the line naming the console, and the console's own answer later
-      // flips that same message.
+      // rewrites this notice as released, and the question goes back to the session to ask in words.
       options.desk.noteAlert(sessionId, digest, { threadId, messageId });
       options.desk.releaseEntry(entry.id);
       return;
@@ -999,8 +1003,9 @@ export function questionUpgrade(options: {
     });
     // The overflow goes up first and in order, so the markers the edit below draws always point at
     // messages already in the thread. A refused post ends the upgrade instead of skipping the text:
-    // the release's own terminal edit rewrites this message into the line naming the console, which
-    // is what the reader gets in place of a prompt whose markers name nothing.
+    // the release's own terminal edit rewrites this message into the closed line saying the session
+    // was told to ask in a message, which is what the reader gets in place of a prompt whose markers
+    // name nothing.
     for (const [at, text] of prompt.continuations.entries()) {
       await options.wait(CONTINUATION_POST_PACE_MS);
       // Read after the pace and before every post, because each post is a round trip and the hold
@@ -1048,8 +1053,8 @@ export function questionUpgrade(options: {
     // The ask that ended mid-posting leaves nothing to release: its close-out has already run.
     if (upgraded === null || upgraded.status === "ok") return;
     // The release's own terminal edit rewrites this message: the alert is on the entry by now, so
-    // what the operator ends up reading is the closed-out line naming the console, not the notice
-    // this edit failed to replace.
+    // what the operator ends up reading is the closed-out line saying the session was told to ask in
+    // a message, not the notice this edit failed to replace.
     const released = options.desk.releaseEntry(entryId);
     options.log(
       `broker: session ${sessionId}'s question kept the plain notice and ` +
@@ -1079,7 +1084,7 @@ export function questionUpgrade(options: {
  *
  * A refusal is reported as a failed write rather than a silent skip, because the caller's answer to
  * a continuation that did not land is to release the hold: the interactive message's markers name
- * the continuations, so a marker with nothing under it is worse than the console picker the release
+ * the continuations, so a marker with nothing under it is worse than the hand-back the release
  * falls back to. The refusal names no thread and no content, so the caller's log line stays as
  * content-free as every other one on this path.
  */
@@ -1800,7 +1805,7 @@ export async function startBroker(
   // into it; the web block below and the door routes serve it.
   const talkRing = web === null && doorKey === null ? null : createTalkRing();
   // Asks the question desk refused while their alert was on its way. The desk's `hold` wrapper adds
-  // one, and the question delivery's end writes its line naming the console and drops it.
+  // one, and the question delivery's end writes its handed-back line and drops it.
   const refusedAwaitingAlert = new Set<string>();
   // The lineage a registered session's conversation lines go under, or null where it has none.
   const sessionLineage = (id: string): string | null =>
@@ -1883,7 +1888,7 @@ export async function startBroker(
   // block replaces it, and so does the local mode where a path exists that can answer a question:
   // the door at operator standing or the web page. Everywhere else it stays, so a question is held
   // only where something can answer it: the alert drops as the routing layer drops, a report of no
-  // thread, nothing queued, nothing retried, and the question goes to the console's picker.
+  // thread, nothing queued, nothing retried, and the question is handed back to the session.
   let deliverQuestion: (
     sessionId: string,
     questions: readonly AskedQuestion[],
@@ -1904,11 +1909,11 @@ export async function startBroker(
   let tailTimer: NodeJS.Timeout | null = null;
   let tailInFlight: Promise<void> = Promise.resolve();
   // The question desk holds a credited question post's hook response open so the answer can ride
-  // back from the thread; every trigger but an answer releases with `{}` to today's behavior, the
-  // console picker. Constructed unconditionally, like the relay hub: on a host with no path that
+  // back from the thread; every trigger but an answer releases with the hand-back, which tells the
+  // session to ask the question in words. Constructed unconditionally, like the relay hub: on a host with no path that
   // can answer a question, neither Discord nor the local mode's door at operator standing or web
-  // page, the hold is created and released within the alert's own failure path, which is today's
-  // behavior reached by a longer road.
+  // page, the hold is created and released within the alert's own failure path, so the question is
+  // handed back at once.
   //
   // The terminal-state notifier is the message-edit seam. Every trigger rewrites the ask's own
   // thread message and strips its components, because a message whose buttons answer a hold that
@@ -1971,14 +1976,14 @@ export async function startBroker(
       // The release wrapper above. The delivery is read through a closure rather than passed
       // directly, because `deliverQuestion` is replaced further down once Discord's surfaces or
       // the local mode's exist, and the tailer is constructed before that.
-      // A refused ask's line naming the console waits on its alert's delivery, which ends after the
+      // A refused ask's handed-back line waits on its alert's delivery, which ends after the
       // alert's own question line is written, so it is written in this `finally`.
       deliverQuestion: questionDelivery({
         deliver: async (sessionId, questions) => {
           try {
             return await deliverQuestion(sessionId, questions);
           } finally {
-            consoleLineAfterAlert(
+            handBackLineAfterAlert(
               {
                 awaitingAlert: refusedAwaitingAlert,
                 talkTap: talkRing,
@@ -1993,8 +1998,9 @@ export async function startBroker(
         desk: questionDesk,
         log: note,
       }),
-      // The console-answer flip. A resolution line means the picker closed, and the desk holds the
-      // one message that has been telling the operator to answer there; the digest is what names
+      // The console-answer flip. A resolution line means the ask's tool call ended: a picker the
+      // console answered after the session's hook stopped waiting, whose message the desk flips, or a
+      // call the desk handed back, which it takes with no redraw; the digest is what names
       // the ask across the two modules, computed from the same bounded parse on both sides.
       answeredAtConsole: (sessionId, questions) =>
         questionDesk.answeredAtConsole(sessionId, questionDigest(questions)),
@@ -2319,14 +2325,14 @@ export async function startBroker(
     // The status reader learns on its own seam, so a host with no tailer still teaches it paths.
     ...(status === null ? {} : { status: { learn: status.learn } }),
     // The hold seam. A qualifying question post's response is held open here rather than answered,
-    // so the answer can ride back from the thread through the components the alert grows; every
-    // post the desk refuses, and every gate ahead of it, is answered immediately exactly as a
-    // broker without a desk answers it. Safe to wire because the answer route exists: the alert's
-    // own delivery either upgrades the message to one that can answer the hold or releases it, and
-    // the interaction route resolves it from a tap. On a host with no Discord, an ask the desk will
-    // not hold writes the line naming the console, as a hold that ended unanswered does.
+    // so the answer can ride back from the thread through the components the alert grows; a post
+    // the desk refuses is answered immediately with the hand-back. Safe to wire because the answer
+    // route exists: the alert's own delivery either upgrades the message to one that can answer the
+    // hold or releases it, and the interaction route resolves it from a tap. On a host with no
+    // Discord, an ask the desk will not hold writes the handed-back line, as a hold that ended
+    // unanswered does.
     questionDesk: {
-      hold: holdNamingConsole({
+      hold: holdWritingHandBackLine({
         desk: questionDesk,
         talkTap: talkRing,
         lineageOf: sessionLineage,
@@ -3804,9 +3810,9 @@ export async function startBroker(
     // The broker going down is not a session dying, so the pipes are dropped without ending
     // anything. The relays reconnect; the sessions behind them keep working either way.
     relays.closeAll();
-    // Every held question answers `{}` before the sockets are torn down: a destroyed connection
-    // is a visible hook error inside the session, while the release lands it on the console
-    // picker, which is where a question outliving its broker belongs. Awaited, because the
+    // Every held question is handed back before the sockets are torn down: a destroyed connection
+    // is a visible hook error inside the session, while the hand-back tells the session to ask the
+    // question in words, which is where a question outliving its broker belongs. Awaited, because the
     // teardown below destroys sockets and would drop a body still on its way out, arriving inside
     // the session as exactly the reset the release exists to avoid; the wait is bounded inside the
     // desk, so a stuck socket delays shutdown by no more than that bound.

@@ -239,9 +239,12 @@ It carries a conversation only where that file names `CHANNEL_DOOR_KEY_FILE`, th
 "The local door (optional)" below, or `CHANNEL_WEB_BIND`, the web surface under "The web surface
 (optional)". It holds a tool approval or a question for a person to settle only where
 `CHANNEL_DOOR_STANDING` is `operator`, through the door, or where `CHANNEL_WEB_BIND` is set, through
-an operator the web page admits. A question is held only while `CHANNEL_MIRROR` and
-`CHANNEL_INTERIM_MIRROR` are on, as they are by default. Otherwise each approval goes to the console's own dialog and each
-question to the console's picker. Set those values by hand in `broker.env`, then restart the broker.
+an operator the web page admits. Where neither is set, each approval goes to the console's own
+dialog. A question is held only where one of those two is set and `CHANNEL_MIRROR` and
+`CHANNEL_INTERIM_MIRROR` are on, as they are by default. A question goes to the console's picker
+where `CHANNEL_MIRROR` is off, or where a session was launched with its mirror off. With
+`CHANNEL_MIRROR` on, any other question that is not held is handed back to its session, which asks
+it in a message. Set those values by hand in `broker.env`, then restart the broker.
 Such a host may also set `CHANNEL_RESPONSE_GATE`, under "The response gate is off until you turn it
 on" above, and at `shadow` or `live` it needs the key file as any host does.
 The section "A host with no Discord" in `operations.md` says what such a host has and does not

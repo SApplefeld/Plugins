@@ -1042,7 +1042,8 @@ export function renderHarnessNotice(fields: HarnessErrorFields, timeZone?: strin
  * per-field cuts alone do not hold the whole notice inside one message (four capped questions
  * compose past the ceiling); `renderQuestionNotice`'s own whole-message bound below owns that.
  * The cut is left to `fit`'s ellipsis rather than labelled, because nothing here is approved from
- * a partial view: the notice only sends the operator to the console, where the whole question is.
+ * a partial view: the notice answers nothing, and the whole question reaches the reader on the
+ * interactive message that replaces it, or in the session's own message once the hold is handed back.
  */
 export const MAX_QUESTION_LENGTH = 500;
 const MAX_QUESTION_HEADER_LENGTH = 100;
@@ -1094,8 +1095,8 @@ export type AskedOption = {
 /**
  * One question an `AskUserQuestion` call is holding a session on: bounded structured data parsed
  * from the question's `PreToolUse` hook post at emission, or from the session's own transcript at
- * resolution, both through the tailer's one bounded reader, because the console's picker is
- * otherwise invisible from the thread. Defined here rather than in the tailer, the `MirrorKind`
+ * resolution, both through the tailer's one bounded reader, because the question is otherwise
+ * invisible from the thread. Defined here rather than in the tailer, the `MirrorKind`
  * pattern: this renderer owns the vocabulary it knows how to draw, and the tailer imports the
  * type alone. Every string in it is untrusted conversation content.
  */
@@ -1108,9 +1109,9 @@ export type AskedQuestion = {
   options: readonly AskedOption[];
 };
 
-/** What a cut notice ends with, naming how many questions the console holds beyond the cut. */
+/** What a cut notice ends with, naming how many questions lie beyond the cut and where they are read. */
 function moreQuestionsTail(count: number): string {
-  return `(+${count} more question${count === 1 ? "" : "s"} at the console)`;
+  return `(+${count} more question${count === 1 ? "" : "s"}, which the session writes out in a message)`;
 }
 
 /**
@@ -1128,20 +1129,21 @@ function moreQuestionsTail(count: number): string {
  * answer the hold exist.
  *
  * The headline names no surface, because at the moment this is composed there is none to name. A
- * held `PreToolUse` hook response blinds the console for as long as it is held, so a notice
- * pointing at a console picker is untrue for exactly the window this message is the only thing in
- * the thread; and the paths that leave this notice standing all release the hold, which renders
- * that picker a moment later. Saying a question is open is true under both.
+ * held `PreToolUse` hook response blinds the console for as long as it is held, so no picker is
+ * there to point at while this message is the only thing in the thread. The tail names the
+ * hand-back, after which the session asks the question in a message. The one case where no message
+ * follows is a notice the tailer posts at resolution time, after the question was answered at a
+ * console. Saying a question is open is true at the moment the notice is composed.
  *
  * The whole notice is bound to one message, because the per-field cuts alone cannot do that: four
  * questions at their caps compose past four thousand units, and leaving the overflow to the
  * writer's own whole-message cut would eat the tail silently. Questions are appended whole, each
  * with its lines, and the first that would not leave room for the closing tail ends the message
- * with a line naming how many the console still holds. The first question always fits by
+ * with a line naming how many it left out. The first question always fits by
  * arithmetic: the alert line is at most about 80 units with one operator mentioned, each further
  * operator adding at most 24, a Q line at most 620 (3 + a 100-unit header + 2 + a 500-unit
  * question + a 15-unit suffix), an Options line at most 418 (9 + four 100-unit labels + three
- * separators), and the tail at most 34, about 1,160 in all against the 1,900 ceiling, so the notice
+ * separators), and the tail at most 62, about 1,180 in all against the 1,900 ceiling, so the notice
  * never degenerates to a bare tail on a roster of up to thirty operators. Measured in UTF-16 units,
  * the larger of the two counts a length could mean, so holding it holds the code point count too.
  *

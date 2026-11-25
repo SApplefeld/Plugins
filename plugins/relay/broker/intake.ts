@@ -20,14 +20,16 @@
 //     dropped with a 202, because the Stop payload carries the turn's final assistant message and a
 //     refusal there is a visible error inside the session at the end of its longest turns.
 //     PreToolUse is matched to AskUserQuestion alone and is the question alert's emission-time
-//     source: the transcript line for an open question is withheld until the picker is answered,
-//     so this post is the only signal that exists while the operator could still act on it. Its
-//     tool_input is parsed with the tailer's own bounded reader and handed to the tailer's
-//     question seam, which owns the mirror-verdict gate and the delivery; everything else about
-//     the event is ordinary liveness. When a question desk is wired, a qualifying question post's
+//     source: the transcript line for a question is withheld at least until its tool call ends, so
+//     this post is the only signal that exists while the operator could still act
+//     on it. Its tool_input is parsed with the tailer's own bounded reader and handed to the
+//     tailer's question seam, which owns the mirror-verdict gate and the delivery; everything else
+//     about the event is ordinary liveness. When a question desk is wired, a qualifying question post's
 //     response is not answered here at all: the desk holds it open so the answer can ride back
-//     through the hook response from the session's thread, and every disqualified or refused post
-//     answers immediately, exactly as a broker without a desk answers it.
+//     through the hook response from the session's thread. Every disqualified or refused post
+//     answers immediately: a watched session's question post on a host whose mirror is on with the
+//     hand-back, which refuses the call and tells the session to ask in words, and every other
+//     post with the liveness answer.
 //
 // The event name rides in a header rather than the body because two of the three hooks are `http`
 // hooks, whose body is authored by Claude Code and cannot be wrapped. A header is static per hook
@@ -63,6 +65,7 @@ import type {
 } from "./registry.ts";
 import type { MirrorKind } from "./routing/outbound.ts";
 import type { StreamIdentity } from "./routing/relays.ts";
+import { questionHandBack } from "./question-desk.ts";
 import { clean } from "./sanitize.ts";
 import { askedQuestions } from "./tail.ts";
 
@@ -982,9 +985,10 @@ export type HandlerOptions = {
   };
   /**
    * The question desk's hold seam. Optional for the reason the tailer seam is: with no desk wired,
-   * every question post is answered immediately, exactly as a broker without one answers it. A
-   * true return transfers ownership of the response to the desk, and the handler must not write to
-   * it again on any path; false means the desk refused and the handler answers as it always has.
+   * every question post is answered immediately. A true return transfers ownership of the response
+   * to the desk, and the handler must not write to it again on any path; false means the desk
+   * refused and the handler answers it with the hand-back, `questionHandBack`, where the session
+   * and the host both mirror.
    * The last argument carries the tailer's report of whether this post's alert was dispatched, so
    * the desk can hold a question that reached the operator and refuse one that reached nobody.
    */
@@ -1012,7 +1016,12 @@ export type HandlerOptions = {
    * posting into a route that drops everything looks identical to a session nobody typed in.
    */
   mirror: {
-    /** Off, every mirror post is accepted, drained, and dropped; nothing is delivered. */
+    /**
+     * The host's mirror switch. Off, every mirror post is accepted, drained, and dropped; nothing is
+     * delivered. The /hook route reads it too: only on a host whose mirror is on is a question post
+     * the desk does not take handed back to be asked in words, since elsewhere those words would
+     * reach no conversation anybody is shown.
+     */
     enabled: boolean;
     /** The mirror route's own body ceiling. maxBodyBytes above keeps governing /hook alone. */
     maxBytes: number;
@@ -1591,13 +1600,14 @@ export function createHandler(
       // stays on token evidence alone, its parity with /mirror. The seam itself returns before
       // delivery, so the session's hook never waits on Discord; what may wait is the response,
       // which the question desk holds open when the post qualifies, so the answer can arrive
-      // from the thread instead of the console picker.
-      if (parsed.intake.event === "PreToolUse" && options.tail !== undefined) {
+      // from the thread instead of the console picker. Every part of this that reads the tailer
+      // runs only where one exists; the hand-back at its end runs on a host with none too.
+      if (parsed.intake.event === "PreToolUse") {
         const sessionMirror = header(request, "x-channel-mirror");
         if (sessionMirror !== null && FLAG_FALSE.includes(sessionMirror.toLowerCase())) {
-          options.tail.suppress(record.sessionId);
-        } else {
-          if (parsed.intake.sessionId !== null && parsed.intake.sessionId === record.sessionId) {
+          options.tail?.suppress(record.sessionId);
+        } else if (parsed.intake.sessionId !== null && parsed.intake.sessionId === record.sessionId) {
+          if (options.tail !== undefined) {
             options.tail.allow(record.sessionId);
             if (parsed.questions !== null && parsed.questions.length > 0) {
               const dispatched = options.tail.question(record.sessionId, parsed.questions);
@@ -1633,6 +1643,18 @@ export function createHandler(
                 return;
               }
             }
+          }
+          // The hand-back, for a watched session's question tool post the desk did not take: its
+          // parse yielded no question, no desk is wired, no tailer exists because the interim
+          // mirror is off, or the desk refused it. Nothing will answer that call later, and the
+          // liveness answer below would draw the console's picker, a question nobody sees. Gated
+          // on the host's mirror, since on a host that mirrors nothing the question asked in words
+          // would reach no conversation anybody is shown, and on the parse's own tool-name test,
+          // which reads the payload's `tool_name` rather than trusting the hook's matcher:
+          // refusing another tool's call would break the session.
+          if (options.mirror.enabled && parsed.questions !== null) {
+            send(response, 200, questionHandBack());
+            return;
           }
         }
       }
