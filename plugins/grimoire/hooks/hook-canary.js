@@ -26,7 +26,9 @@
 // its own error. What this checks instead is that the personas plugin holding
 // them is installed and enabled, read from Claude Code's install record and the
 // user, project and local settings for the session's cwd, since a machine
-// without it runs no per-call guard at all. Managed settings are not read.
+// without it runs no per-call guard at all. Managed settings are not read. On a
+// one-session load, as --plugin-dir makes, the install record does not describe
+// the session. So the canary says the guards are unknown there, not absent.
 //
 // Coverage limits, accepted: this measures a cache's internal consistency, not
 // its freshness against the repo: a stale but coherent cache reads healthy
@@ -64,6 +66,7 @@ const SETTINGS_MAX_BYTES = 1024 * 1024;  // per settings or install-record read,
 // whose module holds the per-call guards. Only that half is matched, so an
 // install from any marketplace, the plugin's former one included, counts.
 const PERSONAS_PLUGIN = 'personas';
+const ONE_SESSION_DATA_DIR = 'grimoire-inline';    // the last part of CLAUDE_PLUGIN_DATA for a one-session load
 
 function readStdin() {
     try { return fs.readFileSync(0, 'utf8'); } catch { return ''; }
@@ -309,10 +312,35 @@ function personasEnabled(cwd) {
         && enabled[key] === true);
 }
 
-// Records the one failure line saying the guards are absent, when they are. Its
-// answer carries no path, so nothing in it is registered for withholding.
+// True where Claude Code loaded this plugin for one session only: the last
+// part of CLAUDE_PLUGIN_DATA, on either separator and with any trailing one
+// dropped, is exactly the one-session folder name. An unset or empty variable
+// is false. The rule is loadedForOneSession's in doctrine-refresh.js. This body
+// is a copy kept by hand, since the canary loads no file out of the cache it
+// probes. A test holds only the two folder-name constants equal.
+function loadedForOneSession() {
+    const data = process.env.CLAUDE_PLUGIN_DATA;
+    if (typeof data !== 'string' || !data) return false;
+    return data.replace(/[\\/]+$/, '').split(/[\\/]/).pop() === ONE_SESSION_DATA_DIR;
+}
+
+// Records the one failure line saying the guards are absent, when they are,
+// or unknown, where the kit was loaded for one session and the install record
+// cannot show whether the personas plugin is loaded beside it. Its answer
+// carries no path, so nothing in it is registered for withholding.
 function personasCheck(cwd, failures) {
     if (personasEnabled(cwd)) return;
+    if (loadedForOneSession()) {
+        failures.push({
+            hook: 'personas plugin',
+            label: 'install check',
+            expected: 'a personas@<marketplace> install that the settings enable',
+            got: 'guards: unknown (kit loaded for one session, outside the install record)',
+            guards: true,
+            unknown: true
+        });
+        return;
+    }
     failures.push({
         hook: 'personas plugin',
         label: 'install check',
@@ -626,10 +654,27 @@ function report(root, failures) {
 // The report when the personas line is the only failure. The kit's own hooks
 // are healthy, so the cache is not named and the repair is the personas
 // install. The line is this file's fixed text and holds no path, so no render
-// child is spawned for it.
+// child is spawned for it. Where the line says the guards are unknown, the
+// install record does not describe the session, so the text asks for no repair.
 function guardsReport(failures) {
     const lines = failures.map((f) =>
         '  - ' + f.hook + ', ' + f.label + ': expected ' + f.expected + ', got ' + f.got);
+    if (failures.every((f) => f.unknown)) {
+        process.stdout.write(JSON.stringify({
+            hookSpecificOutput: {
+                hookEventName: 'SessionStart',
+                additionalContext:
+                    'Kit hook canary: Claude Code loaded the kit for this session from a directory, not from '
+                    + 'an install, so the install record cannot show whether the personas plugin is loaded. '
+                    + 'Where it is not loaded, no per-call guard (docs writes, read-only seats, the push and '
+                    + 'PR checks, the memq grant) runs in this session.\n'
+                    + lines.join('\n')
+                    + '\nA guard that refuses a call in this session shows the plugin is loaded. This is no '
+                    + 'fault to report where the session was started this way on purpose.'
+            }
+        }));
+        return;
+    }
     process.stdout.write(JSON.stringify({
         hookSpecificOutput: {
             hookEventName: 'SessionStart',

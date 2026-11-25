@@ -70,7 +70,9 @@
 // a redirect's target (echo hi > $(echo docs/x.md)), a path list xargs reads
 // from a file, or a spelling the shell expands into docs/ (do?s/, d{o,}cs/,
 // d\ocs/). A script file that writes docs/ when run with no docs/ token in its
-// command (bash x.sh, node tool.js) is the other. The read list's residuals
+// command (bash x.sh, node tool.js) is the other. A file an agent writes at a
+// path ending in one of the two checker names runs as a read, and it is the
+// script-file miss under a second spelling. The read list's residuals
 // are writes a read word performs only when spelled on purpose: sed's w and e
 // script commands, awk's system(), print | cmd and | getline, gawk's
 // --dump-variables, --pretty-print and --profile and their short forms, git's
@@ -87,7 +89,10 @@
 // the program read through -f. read, test -v and [[ run a substitution inside
 // an array subscript they evaluate (read 'a[$(rm docs/y.md)]' <<< x). A
 // variable the environment exports, such as PATH, changes
-// what a read word runs once an assignment or a read sets it. These are
+// what a read word runs once an assignment or a read sets it. A NODE_OPTIONS
+// value set earlier on the line or in the session makes node load code of the
+// agent's choosing before a checker runs, the same class as the script-file
+// miss. These are
 // examples of the class, which is open. A control
 // character splits or joins commands where the shell and this lexer disagree:
 // Bash keeps a \x01 byte inside a word the lexer splits at, and PowerShell
@@ -104,11 +109,11 @@
 // the harness returns to the session's directory between calls. No record
 // states that for a Workflow-dispatched agent or a teammate, so a relative
 // redirect in such an agent's later call after that cd is a residual.
-// Six false denies are accepted. A line that is wholly a # comment naming a
+// Eleven false denies are accepted. A line that is wholly a # comment naming a
 // docs/ path refuses, though bash runs nothing on it, and on a line that
 // binds a docs/ path or changes into one, a comment anywhere but after a
 // read, a directory switch or a for header's word list refuses. An option's value ending in a docs
-// directory is read as that directory on any command off the read list, so
+// directory is read as that directory on any command that is not a read, so
 // node --test --test-name-pattern=docs x.test.js refuses. A clustered short
 // option whose leading letters end in docs is read as the docs directory,
 // so cp -tmydocs .kit/x.md refuses. An assignment's value naming the docs
@@ -119,7 +124,24 @@
 // cat's quoted heredoc inside a substitution names the docs/ paths its body
 // names to the command around it, since that text is what the substitution
 // hands on: node x.js "$(cat <<'EOF' ...)" refuses on a body naming docs/,
-// as rm $(cat <<'EOF' ...) must.
+// as rm $(cat <<'EOF' ...) must. A checker run after a cd into docs/ refuses,
+// since a node command is never a member of a line of reads, and one given
+// its docs/ path through a variable refuses on the word shapes below. A
+// checker whose source argument is written with
+// a glob or a variable refuses, since the node read admits a word only in one
+// of two shapes: a bare run of ASCII letters, digits and _ . / : - (with a
+// backslash too on PowerShell), which may open with a ~ standing alone or
+// before a separator, or one quoted string wrapping the whole word with only
+// those characters and a space inside, never a ~, whose inside on PowerShell
+// does not end in a backslash. A checker naming a docs/ source after its
+// --record refuses, since every word after a --record is judged as that
+// flag's operand. A
+// checker whose word after node is quoted only in part
+// (C:/Users/'Jo Ann'/x.js) refuses, since the node read admits a quoted word
+// only where one string wraps it whole. And a checker with any word after
+// node holding a character outside those shapes refuses, whether its source
+// path or plugin root holds @ + , = or a non-ASCII name, or a base ref holds
+// a ~ past the start (--base HEAD~1).
 //
 // The tree the guard protects is the session project's own: a target is
 // resolved and judged by containment against the git root at or above the
@@ -297,16 +319,20 @@ const DIRECTORY_SWITCHES: ReadonlySet<string> = new Set([
 
 // The command words a governed agent's simple command may carry while it
 // names a docs/ path, lowercased, since both shells' command words are
-// compared case-insensitively. Each is a read, and nine read only under a
+// compared case-insensitively. Each is a read, and ten read only under a
 // condition `readsOnly` holds them to: sed without -i or --in-place, less
 // without a log-file flag, rg without --pre or --pre-glob, awk with no >
 // after a { in any word of its command, no -i, --include, -l or --load and no
 // inplace operand, find
 // without a primary that runs a command, deletes or writes a file, sort
 // without -o or --output, uniq with at most one operand, file without -C or
-// --compile, and git only with a read subcommand and no --output. A long flag
-// abbreviated to three characters or more (sed --in-pl) counts as the flag it
-// abbreviates. The word is
+// --compile, git only with a read subcommand and no --output, and node only
+// running one of DOCS_READ_SCRIPTS, named by the first word after node, with
+// every word after node spelled as NODE_WORD_BASH or NODE_WORD_POWERSHELL
+// admits, no word but --record itself holding --record once its wrapping
+// quotes come off, and no word after a --record shaped like a docs/ path. A
+// long flag abbreviated to three characters or more (sed --in-pl) counts as
+// the flag it abbreviates. The word is
 // compared as written: a directory prefix (/usr/bin/cat) or a leading
 // VAR=value assignment makes a word the list does not hold, and refuses.
 // fold, od, read, true and [[ take no option that writes a file.
@@ -315,8 +341,14 @@ export const DOCS_READ_COMMANDS: ReadonlySet<string> = new Set([
   "stat", "file", "test", "[", "[[", "find", "sort", "uniq", "cut", "tr", "fold", "od", "read", "true", "jq", "md5sum", "sha256sum",
   "shasum", "realpath", "readlink", "dirname", "basename", "echo", "printf", "git",
   "get-content", "gc", "select-string", "sls", "get-childitem", "gci", "get-item", "gi", "test-path",
-  "resolve-path", "compare-object", "measure-object", "get-filehash",
+  "resolve-path", "compare-object", "measure-object", "get-filehash", "node",
 ]);
+
+// The two kit checkers node runs as a read, by the last two segments of the
+// script's path, since the checkout's plugins/grimoire/scripts/ and an
+// installed plugin's scripts/ folder both end in them. plan-contract.js writes
+// no file, and kit-jev-check.js writes one, the path after its --record.
+const DOCS_READ_SCRIPTS: ReadonlySet<string> = new Set(["scripts/plan-contract.js", "scripts/kit-jev-check.js"]);
 
 // The git subcommands that read, the first operand a git command naming a
 // docs/ path may carry.
@@ -421,15 +453,18 @@ function docsPathsIn(word: string): string[] {
   return [...found];
 }
 
-// One simple command of a shell line: its words in order, with whether each
-// is spelled bare, holding no quote or escape, whether each is the operand
+// One simple command of a shell line: its words in order, with each word's
+// spelling as the agent wrote it, its quotes kept and a substitution as its
+// sentinel, or null where the masked piece splits into a different count of
+// words than the piece, whether each is spelled bare, holding no quote or
+// escape, whether each is the operand
 // of an input redirect, and whether each opens with an unquoted NAME=, the
 // shape bash reads as an assignment whatever the value's quoting; the targets
 // of its output redirects, with whether each is a descriptor duplication's,
 // its operator ending in & (>&2, 2>&1); the quoted heredoc bodies it
 // receives, the pipeline it stands in, and the span of the line it covers.
 type SimpleCommand = {
-  words: string[]; bare: boolean[]; inputs: boolean[]; assignments: boolean[]; outputs: string[]; duplicates: boolean[]; bodies: string[]; pipeline: number; from: number; to: number;
+  words: string[]; spellings: (string | null)[]; bare: boolean[]; inputs: boolean[]; assignments: boolean[]; outputs: string[]; duplicates: boolean[]; bodies: string[]; pipeline: number; from: number; to: number;
 };
 
 // The heredoc introductions the reading took a data body for, each mapped
@@ -504,7 +539,7 @@ function simpleCommands(cmd: string, masked: string, bodies: readonly Span[], in
   const out: SimpleCommand[] = [];
   const n = cmd.length;
   let pipeline = 0;
-  const fresh = (at: number): SimpleCommand => ({ words: [], bare: [], inputs: [], assignments: [], outputs: [], duplicates: [], bodies: [], pipeline, from: at, to: at });
+  const fresh = (at: number): SimpleCommand => ({ words: [], spellings: [], bare: [], inputs: [], assignments: [], outputs: [], duplicates: [], bodies: [], pipeline, from: at, to: at });
   let cur = fresh(0);
   let pending: "out" | "dup" | "in" | null = null;
   let afterPipe = false;
@@ -549,13 +584,15 @@ function simpleCommands(cmd: string, masked: string, bodies: readonly Span[], in
     if (next) piece = piece.slice(0, next.from - p);
     const end = p + piece.length;
     const words = tokens(piece);
-    const spelled = masked.slice(p, end).split(/\s+/).filter(Boolean);
+    const runs = [...masked.slice(p, end).matchAll(/\S+/g)];
+    const spelled = runs.map((m) => m[0]);
     words.forEach((word, i) => {
       if (pending === "out" || pending === "dup") {
         cur.outputs.push(word);
         cur.duplicates.push(pending === "dup");
       } else {
         cur.words.push(word);
+        cur.spellings.push(spelled.length === words.length ? piece.slice(runs[i].index, runs[i].index + spelled[i].length) : null);
         cur.bare.push(spelled.length === words.length && spelled[i] === word);
         cur.inputs.push(pending === "in");
         cur.assignments.push(spelled.length === words.length && ASSIGNMENT_WORD.test(spelled[i]));
@@ -602,8 +639,10 @@ function simpleCommands(cmd: string, masked: string, bodies: readonly Span[], in
 // parenthesis or regular expression, so none of them hides a redirect from it.
 // It reads the word as it is written, so it does not see a brace spelled by an
 // escape such as $'\x7b', carried in a variable or read from a program file,
-// and the documents state that residual.
-function readsOnly(words: readonly string[]): boolean {
+// and the documents state that residual. node's condition also reads
+// `spellings`, each word as the agent wrote it, and `bash`, true where the
+// tool is Bash.
+function readsOnly(words: readonly string[], spellings: readonly (string | null)[], bash: boolean): boolean {
   const word = (words[0] ?? "").toLowerCase();
   if (!DOCS_READ_COMMANDS.has(word)) return false;
   if (words.some((w) => /^(?:tee|tee-object)$/i.test(w))) return false;
@@ -631,6 +670,44 @@ function readsOnly(words: readonly string[]): boolean {
       let k = 0;
       while (k < args.length && args[k].startsWith("-")) k += GIT_VALUE_FLAGS.test(args[k]) ? 2 : 1;
       return k < args.length && GIT_READ_SUBCOMMANDS.has(args[k]);
+    }
+    // Every word after node, the script word included, is judged by its
+    // spelling, as the agent wrote it before its quotes come off. The spelling
+    // is one the shell's constant admits, NODE_WORD_BASH or
+    // NODE_WORD_POWERSHELL, whose comments state each set whole: a bare run of
+    // ASCII letters, digits and _ . / : -, with a backslash too on PowerShell,
+    // which may open with a ~ standing alone or before a separator, or one
+    // quoted string wrapping the whole word with only those characters and a
+    // space inside, never a ~, whose inside on PowerShell does not end in a
+    // backslash. Any other
+    // spelling refuses, so no word holds an expansion, an escape, a splat, an
+    // expression, a stop-parsing token, a here-string, a quote inside it or a
+    // non-ASCII quote. PowerShell still splits a bare word that opens with a
+    // dash at a dot (-x.y reaches the script as -x and .y), and the dot stays
+    // at the head of the later piece, so the pieces joined are the word's text
+    // and a test of the whole word covers each piece. No word but --record
+    // itself holds --record once its wrapping quotes come off, since the flag
+    // is read here only in that spelling and a word holding it among other
+    // text can reach the script as the flag (PowerShell 5.1 hands ,--record
+    // on as --record).
+    // The script is the first word after node, so an option of node's own
+    // (--require runs any file) refuses there, and it matches a checker where,
+    // read with each backslash as a slash and without case, it is one of
+    // DOCS_READ_SCRIPTS or ends in a slash and one of them. The one
+    // write a checker makes is the path after --record, so a command refuses
+    // where any word after its first --record docsPathsIn reads as a docs/
+    // path. Every later word is judged, not only the next, since an input
+    // redirect's operand or a descriptor number the cut leaves as a word
+    // (--record <q.json docs/r.json, --record 2>/dev/null docs/r.json) stands
+    // between the flag and the operand the shell hands on.
+    case "node": {
+      const shape = bash ? NODE_WORD_BASH : NODE_WORD_POWERSHELL;
+      if (spellings.length !== words.length || !spellings.slice(1).every((s) => s !== null && shape.test(s) && !holdsRecord(s))) return false;
+      const script = (args[0] ?? "").replace(/\\/g, "/").toLowerCase();
+      if (!script || script.startsWith("-")) return false;
+      if (![...DOCS_READ_SCRIPTS].some((s) => script === s || script.endsWith(`/${s}`))) return false;
+      const record = args.indexOf("--record");
+      return !args.some((a, i) => record >= 0 && i > record && docsPathsIn(a).length > 0);
     }
     default:
       return true;
@@ -700,10 +777,16 @@ const BASH_DIRECTORY_SWITCHES: ReadonlySet<string> = new Set(["cd", "pushd", "po
 // them; where each of its words is a NAME=value whose NAME= is unquoted or a
 // descriptor number and at least one is such a NAME=value, a bare assignment,
 // since bash runs a quoted 'x=y' or "x"=y as a command word; where its first
-// word is on BASH_DIRECTORY_SWITCHES; or where `readsOnly` holds for its
-// words. So tee, a command with an assignment in front of its command word,
-// xargs, eval, a nested shell, an interpreter, a function definition and a
-// command word that is a variable or a substitution are never members.
+// word is on BASH_DIRECTORY_SWITCHES; or where its first word is not node,
+// compared without case, and `readsOnly` holds for its words. So tee, a
+// command with an assignment in front of its command word, xargs, eval, a
+// nested shell, an interpreter, a function definition and a command word that
+// is a variable or a substitution are never members. node stays among the
+// interpreters though the read list holds it: its condition admits only
+// words in its two shapes and judges the words after --record by their spelling,
+// which a directory switch changes the meaning of, so after a cd into docs/
+// on such a line a relative --record path (r.json) would reach the checker's
+// one write unjudged.
 function lineMember(c: SimpleCommand): boolean {
   const words = [...c.words];
   let k = 0;
@@ -724,13 +807,39 @@ function lineMember(c: SimpleCommand): boolean {
   const reduced = words.slice(k);
   const assigns = (i: number): boolean => c.assignments[k + i] && ASSIGNMENT_WORD.test(reduced[i]);
   if (reduced.every((w, i) => assigns(i) || DESCRIPTOR.test(w)) && reduced.some((_, i) => assigns(i))) return true;
-  return BASH_DIRECTORY_SWITCHES.has(reduced[0]) || readsOnly(reduced);
+  if (reduced[0].toLowerCase() === "node") return false;
+  return BASH_DIRECTORY_SWITCHES.has(reduced[0]) || readsOnly(reduced, c.spellings.slice(k), true);
 }
 
 // The characters an output redirect's target holds where the guard cannot
 // read it to its end: an expansion, a glob, a brace, a home prefix, an
 // escape, or the sentinel a substitution rides as.
 const UNREAD_TARGET = /[$`*?[\]{}~\\\x02]/;
+
+// The spellings a word after node may take on Bash: a bare run of ASCII
+// letters, digits and _ . / : -, which may open with a ~ standing alone or
+// before a /, or one single- or double-quoted string wrapping the whole word
+// with only those characters and a space inside. A home prefix stays allowed,
+// since ~/.claude/plugins/ names an installed checker and a docs/ path spelled
+// with one is still judged by its shape. A backslash escapes on Bash, so it
+// stands in neither form.
+const NODE_WORD_BASH = /^(?:(?:~(?=\/|$))?[A-Za-z0-9_./:-]*|'[A-Za-z0-9_./: -]*'|"[A-Za-z0-9_./: -]*")$/;
+
+// The spellings a word after node may take on PowerShell: those of
+// NODE_WORD_BASH with a backslash allowed too, since PowerShell reads it as a
+// path separator and escapes with the backtick, and a ~ allowed before a \ as
+// well. A quoted string's inside may not end in a backslash, since PowerShell
+// 5.1 hands a word holding a space on inside quotes it adds, and the program
+// reads that backslash as an escape of the closing quote, joining the words
+// after it into one argument.
+const NODE_WORD_POWERSHELL = /^(?:(?:~(?=[\/\\]|$))?[A-Za-z0-9_./:\\-]*|'(?:[A-Za-z0-9_./: \\-]*[A-Za-z0-9_./: -])?'|"(?:[A-Za-z0-9_./: \\-]*[A-Za-z0-9_./: -])?")$/;
+
+// True when a word's spelling, with its wrapping quotes taken off, holds
+// --record and is not exactly --record.
+function holdsRecord(spelling: string): boolean {
+  const text = spelling.replace(/^(['"])([\s\S]*)\1$/, "$2");
+  return text.includes("--record") && text !== "--record";
+}
 
 // True when an output redirect's target is safe on a line of reads: a
 // descriptor number where `duplicate` is true, the operator having ended in &,
@@ -893,7 +1002,7 @@ async function readShell(command: string, placed: DocsJudge, depth: number, join
     named ||= inWords || inBodies || inSubs;
     // A tee or Tee-Object that names no docs/ path itself copies the
     // pipeline's text off docs/, so it reads in the pipeline check.
-    const reads = readsOnly(c.words) || (/^(?:tee|tee-object)$/.test(word) && !names);
+    const reads = readsOnly(c.words, c.spellings, bash) || (/^(?:tee|tee-object)$/.test(word) && !names);
     const seen = pipelines.get(c.pipeline) ?? { names: false, reads: true };
     pipelines.set(c.pipeline, { names: seen.names || names, reads: seen.reads && reads });
   }
