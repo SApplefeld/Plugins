@@ -44,9 +44,12 @@
 //
 //   POST /relay/permission
 //     the same two headers
-//     body: {"request_id": "abcde", "tool_name": "...", "description": "...", "input_preview": "..."}
-//     -> 200 {"status": "received" | "dropped"}, where dropped means the prompt never reached the
-//        operator and no answer is coming
+//     body: {"request_id": "abcde", "tool_name": "...", "description": "...", "input_preview": "...",
+//            "again": true}, where `again`, true only as the boolean true, marks an offer the relay
+//            already made on its current stream connection
+//     -> 200 {"status": "received" | "later" | "dropped"}: received means the prompt is open and its
+//        verdict will come down the stream, later means it was not taken now and an offer made
+//        again can succeed, and dropped means no offer of it can ever succeed
 //     -> 403 on the same terms as a reply
 //
 //     The verdict does not come back on this response. It arrives whenever the operator answers,
@@ -368,15 +371,25 @@ export function createRelayRoutes(
         // The two descriptive fields are optional on the wire. They are written by a tool and are
         // the parts most likely to be missing or malformed, and a prompt that arrives without them
         // is still a prompt the session is parked on: refusing it would park the session for good.
-        const accepted = await options.permissions.request(processToken, {
-          requestId: request_id,
-          toolName: tool_name,
-          description: typeof fields.description === "string" ? fields.description : "",
-          inputPreview: typeof fields.input_preview === "string" ? fields.input_preview : "",
+        // `again` marks an offer the relay already made on this stream connection, and counts only
+        // as the boolean true: any other value is a first offer, whose refusal is logged.
+        const answer = await options.permissions.request(
+          processToken,
+          {
+            requestId: request_id,
+            toolName: tool_name,
+            description: typeof fields.description === "string" ? fields.description : "",
+            inputPreview: typeof fields.input_preview === "string" ? fields.input_preview : "",
+          },
+          fields.again === true,
+        );
+        // Reported honestly rather than always as taken. A relay waits for the verdict on a prompt
+        // it was told was received, offers one it was told `later` again, and forgets one it was
+        // told `dropped`. `dropped` keeps the name a relay built before `later` existed reads as
+        // not taken, and such a relay reads `later` the same way.
+        send(response, 200, {
+          status: answer === "taken" ? "received" : answer === "later" ? "later" : "dropped",
         });
-        // Reported honestly rather than always as taken. A relay told a prompt was received will
-        // wait for a verdict that is never coming, and say nothing about it anywhere.
-        send(response, 200, { status: accepted ? "received" : "dropped" });
         return;
       }
 

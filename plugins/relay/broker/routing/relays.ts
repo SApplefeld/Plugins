@@ -67,6 +67,12 @@ export type RelayEvent =
    * cannot approve its own tool call: only the relay holding the pipe ever sees this.
    */
   | { type: "permission"; requestId: string; behavior: "allow" | "deny" }
+  /**
+   * The session's own turn ended, at `at` in epoch milliseconds, the time its `Stop` arrived. A
+   * session parked on a permission prompt cannot end a turn, so every prompt its relay received
+   * before that time is over, the ones the permission desk never took included. Names no request.
+   */
+  | { type: "permission-turn-ended"; at: number }
   /** Liveness in both directions: it holds the session out of the sweep and proves the pipe drains. */
   | { type: "ping" };
 

@@ -1077,10 +1077,10 @@ export function questionUpgrade(options: {
  * of those, so the continuations carry a ceiling of their own here.
  *
  * Its own window instance, never the question alert's or the permission desk's: shared stamps would
- * let a run of one class spend the other's slots and push it into drop, the starvation the damping
- * exists to prevent. Both ceilings are set to the same number because a continuation carries no
- * mention: there is nothing for the quiet tier to mean here, and the only outcome that matters is
- * the refusal.
+ * let a run of one class spend the other's slots and hold it back, losing a question's writes and
+ * delaying a permission prompt until its relay's next offer. Both ceilings are set to the same
+ * number because a continuation carries no mention: there is nothing for the quiet tier to mean
+ * here, and the only outcome that matters is the refusal.
  *
  * A refusal is reported as a failed write rather than a silent skip, because the caller's answer to
  * a continuation that did not land is to release the hold: the interactive message's markers name
@@ -2063,16 +2063,16 @@ export async function startBroker(
   }
   // Replaced below when Discord is configured, and in the local mode where a path exists that can
   // answer a prompt: the door at operator standing or the web page. Everywhere else there is
-  // nobody to ask, so a prompt is reported and dropped rather than held, since a prompt is held
-  // only where something can answer it: the session is at a terminal, which is where its
-  // permission dialog already is.
+  // nobody to ask, so a prompt is answered `never` and its relay forgets it rather than offering
+  // it again, since a prompt is held only where something can answer it: the session is at a
+  // terminal, which is where its permission dialog already is.
   let permissions: PermissionDesk = {
     request: async () => {
       note(
         "broker: a permission prompt arrived but nothing on this host can answer it: Discord is not " +
           "wholly configured, and the local mode's door at operator standing or web page is not on",
       );
-      return false;
+      return "never";
     },
     resolve: () => false,
     turnEnded: () => {},
@@ -2092,7 +2092,9 @@ export async function startBroker(
     // The asking half only. Answering a prompt belongs to the Discord side, behind the sender
     // gate, and to the local door on a host that gives it operator standing; this layer is
     // reachable by any local process that holds a pipe.
-    permissions: { request: (processToken, request) => permissions.request(processToken, request) },
+    permissions: {
+      request: (processToken, request, again) => permissions.request(processToken, request, again),
+    },
     // The reason names who asked, so the restart's log line does. It is built here because this is
     // where a process token resolves to a session; the route never learns the session. The session
     // is named by its id, never its title, because the title is read from the transcript and
@@ -2346,7 +2348,9 @@ export async function startBroker(
     // announced nowhere. Read through a closure rather than passed directly, because `permissions`
     // is replaced further down once the Discord surfaces exist, and the handler is built before
     // that.
-    permissions: { turnEnded: (sessionId, at) => permissions.turnEnded(sessionId, at) },
+    permissions: {
+      turnEnded: (sessionId, processToken, at) => permissions.turnEnded(sessionId, processToken, at),
+    },
     mirror: {
       enabled: config.mirror,
       maxBytes: config.mirrorMaxBytes,
@@ -2527,8 +2531,8 @@ export async function startBroker(
   // for. `steeringWriter.alert` already ends the thread's narration block on a successful write.
   //
   // Its volume rides its own window instance, never the permission desk's: shared stamps would
-  // let a run of question alerts spend the prompt window's slots and push real permission
-  // prompts into drop, the starvation the damping exists to prevent. Past the ping ceiling the
+  // let a run of question alerts spend the prompt window's slots and hold real permission
+  // prompts back, each one delayed until its relay's next offer. Past the ping ceiling the
   // alert lands without a mention, composed and posted without one alike; past the post ceiling
   // nothing is written, and the refusal is not logged here, because the tailer logs it once,
   // rate-limited, off the result this closure reports.
@@ -2813,8 +2817,8 @@ export async function startBroker(
       operatorIds: gate.operatorIds,
       alertTier: config.modelChangeAlert,
       // Its own window instance, never the question alert's or the permission desk's: shared
-      // stamps would let one class spend another's slots and push it into drop, the starvation
-      // the damping exists to prevent.
+      // stamps would let one class spend another's slots and hold it back, losing an alert and
+      // delaying a permission prompt until its relay's next offer.
       volume: createAlertVolume({
         now: Date.now,
         pingCeiling: MAX_MODEL_CHANGE_PINGS_PER_WINDOW,

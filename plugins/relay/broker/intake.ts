@@ -1007,8 +1007,11 @@ export type HandlerOptions = {
    * configured has to do with one anyway.
    */
   permissions?: {
-    /** Reports that a session's turn ended, which resolves every prompt it had open. */
-    turnEnded: (sessionId: string, at: number) => void;
+    /**
+     * Reports that a session's own turn ended, which resolves every prompt it had open, with the
+     * process token the `Stop` was credited to, whose relay is told so.
+     */
+    turnEnded: (sessionId: string, processToken: string, at: number) => void;
   };
   /**
    * The mirror route's knobs and its seam into the routing layer. Required rather than optional,
@@ -1575,10 +1578,16 @@ export function createHandler(
       // same bar, so a straggler's `Stop` credited on the token alone neither cuts the indicator
       // nor closes the turn the session is running now. Both also pass over a subagent's `Stop`,
       // which ends the subagent rather than the turn; releasing on it would only have the next
-      // reconcile restart the indicator for the turn still open.
-      if (parsed.intake.event === "Stop" && parsed.intake.sessionId === record.sessionId) {
-        options.permissions?.turnEnded(record.sessionId, arrivedAt);
-        if (parsed.intake.fromSubagent !== true) options.turns?.closed(record.sessionId);
+      // reconcile restart the indicator for the turn still open. The permission clear passes over
+      // a subagent's `Stop` too: a session can be parked on a prompt while a background agent
+      // finishes, and clearing on that would drop a prompt the operator has yet to answer.
+      if (
+        parsed.intake.event === "Stop" &&
+        parsed.intake.sessionId === record.sessionId &&
+        parsed.intake.fromSubagent !== true
+      ) {
+        options.permissions?.turnEnded(record.sessionId, parsed.intake.processToken, arrivedAt);
+        options.turns?.closed(record.sessionId);
       }
       learnTranscript(options, record.sessionId, parsed.intake.transcriptPath);
       // The emission-time question alert, from a credited PreToolUse post alone. The question

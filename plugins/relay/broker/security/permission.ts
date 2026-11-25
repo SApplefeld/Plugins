@@ -103,8 +103,9 @@ export const MAX_ALERTS_PER_WINDOW = 3;
  * Past the ping ceiling a prompt is quiet but still costs a write, and the writes come out of the
  * same bucket the replies and the notices spend. This is the point where the volume is past
  * anything a person could answer and the only thing left to protect is the channel itself, so the
- * prompt is dropped. Kept well clear of the ping ceiling: dropping a prompt parks the session it
- * came from, which is the failure this whole project exists to prevent, so it is the last resort
+ * prompt is not posted now, and its relay offers it again once the window has room. Kept well clear
+ * of the ping ceiling: a prompt not posted keeps its session waiting with nobody shown the
+ * question, which is the failure this whole project exists to prevent, so it is the last resort
  * and not the first.
  */
 export const MAX_PROMPTS_PER_WINDOW = 12;
@@ -126,8 +127,9 @@ export const MAX_QUESTION_PINGS_PER_WINDOW = 1;
  *
  * Past this the volume is past anything a person could walk to a console for, and the only thing
  * left to protect is the channel and the post budget the permission prompts share, so the alert
- * is dropped. A dropped alert costs less than a dropped prompt: the question is still whole on
- * the console, which is the only place it can be answered anyway.
+ * is dropped. Unlike a permission prompt held back by its own ceiling, which its relay offers
+ * again, a dropped alert is never sent. That costs little: the question is still whole on the
+ * console, which is the only place it can be answered anyway.
  */
 export const MAX_QUESTION_ALERTS_PER_WINDOW = 4;
 
@@ -200,10 +202,11 @@ export type AlertVolume = {
    * quiet or drop the write that finally lands: a caller retrying through an outage would arrive
    * mentionless for no message anyone ever saw. The newest stamp is the one popped, which is the
    * slot the failed write itself spent so long as no other spend on the thread falls between that
-   * write's spend and its refund: one caller per instance, taking each thread's spend and refund
-   * in turn rather than interleaved. A refund with nothing
-   * spent is a no-op rather than a credit: the window can never hold fewer stamps than the
-   * messages that landed.
+   * write's spend and its refund. A caller whose spends interleave, as the permission desk's do
+   * when two offers to one thread are in flight, can have another write's newer stamp popped. Where
+   * the failed write's own stamp has meanwhile aged out of the window, the window then holds one
+   * stamp fewer than the messages that landed, which costs at most one extra ping and never a lost
+   * message. A refund with nothing spent is a no-op rather than a credit.
    */
   refund: (threadId: string) => void;
 };
@@ -220,7 +223,8 @@ export type AlertVolume = {
  *
  * A factory with an instance per caller, never shared stamps: the permission desk and the
  * question alert each hold their own window, so a flood of one class cannot spend the other's
- * slots and push it into drop, which would recreate the starvation the damping exists to prevent.
+ * slots and hold the other's writes back: a held permission prompt would wait for its relay's
+ * next offer, and a held question alert would be lost.
  * Stamps outside the window are re-filtered on every call, so a thread's entry holds only what
  * still counts against it.
  */
@@ -255,17 +259,19 @@ export function createAlertVolume(options: {
   return Object.assign(spend, { refund });
 }
 
-/** What the operator sees when a prompt could not be put in front of them. */
-export const PROMPT_UNDELIVERED_NOTICE =
-  "A session asked for permission to run a tool and the request could not be posted here, so it " +
-  "is waiting on an answer it cannot be given. Answer it at the keyboard.";
+/**
+ * What the desk tells the relay about one offer of a prompt. `taken`: the prompt is open in the
+ * table, so its verdict will come down the stream. `later`: it could not be taken now and a later
+ * offer can succeed, so the relay offers it again. `never`: no offer of it can ever succeed.
+ */
+export type PermissionAnswer = "taken" | "later" | "never";
 
 /** What the operator sees when a verdict named nothing this thread has open. */
 export function unknownVerdictNotice(requestId: string): string {
   return (
     `No permission request \`${requestId}\` is open in this thread, so nothing was approved or ` +
     "denied. It may already have been answered, or the broker may have restarted since it was " +
-    "asked. Check the session at the keyboard."
+    "asked. If the request appears here again, answer it there."
   );
 }
 
@@ -273,17 +279,26 @@ export function unknownVerdictNotice(requestId: string): string {
 export function unreachableVerdictNotice(requestId: string): string {
   return (
     `Request \`${requestId}\` was answered, but its session has no channel connected, so the ` +
-    "answer was not delivered. The session is still waiting: answer it at the keyboard."
+    "answer was not delivered. If the request appears here again when the session reconnects, " +
+    "answer it there."
   );
 }
 
 export type PermissionDesk = {
   /**
-   * Posts one request from the session currently held by this process token. Reports whether the
-   * prompt actually reached the operator, because a relay told otherwise reports it to the model
-   * rather than believing a prompt is outstanding when it is not.
+   * Posts one request from the session currently held by this process token, and answers whether
+   * it is open in the table now, can be taken by a later offer, or can never be. The relay keeps
+   * every prompt it was given and offers one again while the answer is `later`, so a prompt the
+   * desk could not take now reaches the operator once there is room, a thread or an announced
+   * session for it; on `never` the relay forgets it.
+   *
+   * `again` is the relay's own claim that it has already offered this prompt on its current stream
+   * connection, and the desk does not check it. It decides only whether a refusal writes a log
+   * line, never any check: a refusal of an offer so marked writes none, so an honest relay's
+   * offers of a prompt waiting for hours write one refusal for each stream connection rather than
+   * one each time it is offered.
    */
-  request: (processToken: string, request: PermissionRequest) => Promise<boolean>;
+  request: (processToken: string, request: PermissionRequest, again: boolean) => Promise<PermissionAnswer>;
   /**
    * Applies a verdict given in a thread, if that thread has a request open under that ID and the
    * nonce, when the caller has one, is that request's own. Reports whether it consumed one, and
@@ -331,19 +346,25 @@ export type PermissionDesk = {
    * a working session as needing the operator, leaving live buttons over a request nothing holds,
    * and holding one of the host's MAX_OPEN_REQUESTS slots against every later prompt on the machine.
    *
-   * `Stop` is the only event that can carry this. `PostToolUse` fires under the same process token
-   * for a subagent's tool calls, so a session genuinely parked on a prompt while background agents
-   * work still emits it, and clearing on that would drop a prompt the operator has yet to answer.
-   * What separates the two is that hooks/settings-fragment.json declares no `SubagentStop`, so a
-   * subagent finishing reaches this broker as nothing while the session's own turn ending reaches it
-   * as `Stop`; hooks/settings-fragment.test.ts pins that.
+   * `Stop` is the only event that can carry this, and only the session's own. `PostToolUse` fires
+   * under the same process token for a subagent's tool calls, so a session genuinely parked on a
+   * prompt while background agents work still emits it, and clearing on that would drop a prompt
+   * the operator has yet to answer. A background agent finishing can reach this broker as a `Stop`
+   * whose payload carries an `agent_id`, so the intake calls this only for a `Stop` it does not
+   * read as a subagent's. hooks/settings-fragment.json declares no `SubagentStop`, which
+   * hooks/settings-fragment.test.ts pins.
    *
    * `at` is when the `Stop` arrived, and only entries opened strictly before it are cleared. A
    * prompt raised in the moment a `Stop` was in flight keeps its entry, which is the direction this
    * surface is allowed to fail in: an entry kept too long costs a wrong glyph, and one cleared too
    * early parks a session with nobody able to answer it.
+   *
+   * The relay holding `processToken`, the token the `Stop` was credited to, is sent a
+   * `permission-turn-ended` line carrying `at`, whether or not the table held an entry, since the
+   * relay also holds prompts this desk never took and forgets each it received before that time.
+   * A token with no relay attached is sent nothing and logs nothing.
    */
-  turnEnded: (sessionId: string, at: number) => void;
+  turnEnded: (sessionId: string, processToken: string, at: number) => void;
   /**
    * Clears the open requests of every session the registry now holds as ended.
    *
@@ -436,6 +457,11 @@ type OpenRequest = {
    * a second time in the same thread cannot survive.
    */
   nonce: string;
+  /**
+   * The prompt's post while it is still on the wire, and null once it has settled. A second offer
+   * of the same request waits on it, so it learns whether the prompt reached the thread.
+   */
+  posting: ReturnType<ThreadWriter["alert"]> | null;
 };
 
 /**
@@ -585,11 +611,14 @@ export function createPermissionDesk(options: PermissionDeskOptions): Permission
   return {
     settled: () => cosmetic,
 
-    turnEnded(sessionId, at) {
+    turnEnded(sessionId, processToken, at) {
       clear(
         (entry) => entry.sessionId === sessionId && entry.openedAt < at,
         "its session ended a turn",
       );
+      // Its answer is not read: a relay that is not attached misses the line, and the session's
+      // next own `Stop` sends another.
+      options.relays.deliver(processToken, { type: "permission-turn-ended", at });
     },
 
     sweepEnded() {
@@ -623,47 +652,67 @@ export function createPermissionDesk(options: PermissionDeskOptions): Permission
         }));
     },
 
-    async request(processToken, request) {
+    async request(processToken, request, again) {
       if (!REQUEST_ID.test(request.requestId)) {
-        // Posting it would ping the operator with a prompt no reply of theirs can answer. If Claude
-        // Code ever changes the alphabet it draws these from, this line is what says so.
+        // Posting it would ping the operator with a prompt no reply of theirs can answer, and no
+        // later offer changes that. If Claude Code ever changes the alphabet it draws these from,
+        // this line is what says so.
         log(`permission: refused request id ${request.requestId}, no verdict can name it`);
-        return false;
+        return "never";
       }
+
+      // Each refusal below is one a later offer can cure, so it answers `later`, and its line is
+      // written for the first offer on a stream connection alone: the relay offers again each
+      // interval for as long as the session waits.
+      const refuse = (line: string): "later" => {
+        if (!again) log(line);
+        return "later";
+      };
 
       const record = options.registry.current(processToken);
       if (record === null) {
-        log("permission: a request arrived for a process with no announced session");
-        return false;
+        return refuse("permission: a request arrived for a process with no announced session");
       }
       const threadId = options.threadFor(record.sessionId);
       if (threadId === null) {
-        log(`permission: session ${record.sessionId} has no thread, so its prompt has nowhere to go`);
-        return false;
+        return refuse(`permission: session ${record.sessionId} has no thread, so its prompt has nowhere to go`);
       }
 
       const key = keyFor(threadId, request.requestId);
       // Claude Code derives the ID from the tool use, so a re-sent prompt carries the one already
       // on the operator's phone. Posting it again would ping them a second time for one decision.
       // A request is held from the moment this call commits to posting it until either the post
-      // fails or the operator answers, so a re-send arriving while the first is still on the wire
-      // is deduplicated against it too and a prompt whose post failed leaves nothing behind to
-      // deduplicate against at all.
-      if (open.has(key)) return true;
+      // fails or the operator answers, and a prompt whose post failed leaves nothing behind to
+      // deduplicate against at all. A re-send arriving while the first post is still on the wire
+      // waits for that post to settle and answers from its outcome, as the first offer does: the
+      // relay acts on its newest offer's answer, so a `taken` for a post that then failed would
+      // leave the session parked with no offer to follow. A post that landed answers `taken`, and
+      // one refused answers `later` with the refusal line, written under this offer's own repeat
+      // mark: the re-send can be the first offer on a new stream connection while the first was a
+      // repeat on the old one. The slot is not given back twice, since the first offer refunds it.
+      // A post that threw reports no outcome, so the re-send answers `taken` only where the same
+      // entry is still open, and `later` otherwise. A re-send arriving after the post settled finds
+      // a prompt that reached the thread, and answers `taken` at once.
+      const held = open.get(key);
+      if (held !== undefined) {
+        if (held.posting === null) return "taken";
+        const posted = await held.posting.catch(() => null);
+        if (posted === null) return open.get(key) === held ? "taken" : "later";
+        if (posted.status === "ok") return "taken";
+        return refuse(`permission: request ${request.requestId} was not posted into thread ${threadId}`);
+      }
 
       if (open.size >= MAX_OPEN_REQUESTS) {
-        log(
+        return refuse(
           `permission: refused request ${request.requestId} for session ${record.sessionId}, ` +
             `${String(MAX_OPEN_REQUESTS)} requests are already open`,
         );
-        return false;
       }
       const volume = volumeFor(threadId);
       if (volume === "drop") {
         // Logged rather than answered in-thread: a notice for each suppressed prompt is the same
         // flood in a quieter voice, and it spends the bucket this refusal exists to protect.
-        log(`permission: thread ${threadId} is over its prompt ceiling, dropping ${request.requestId}`);
-        return false;
+        return refuse(`permission: thread ${threadId} is over its prompt ceiling, dropping ${request.requestId}`);
       }
       if (volume === "quiet") {
         log(`permission: thread ${threadId} is over its ping ceiling, posting ${request.requestId} quietly`);
@@ -686,25 +735,34 @@ export function createPermissionDesk(options: PermissionDeskOptions): Permission
         openedAt: now(),
         messageId: null,
         nonce: randomBytes(NONCE_BYTES).toString("hex"),
+        posting: null,
       };
       open.set(key, entry);
-      const posted = await options.writer.alert(
+      const posting = options.writer.alert(
         threadId,
         prompt,
         // Quiet means the message lands without a mention. It is the same prompt, answerable the
         // same way; the phone just stops ringing for a run nobody could keep up with anyway.
         volume === "ping" ? options.operatorIds : [],
       );
+      entry.posting = posting;
+      const posted = await posting;
+      entry.posting = null;
       if (posted.status !== "ok") {
         // Nothing is left held for a prompt the operator never saw. Holding it would make this
         // request ID deduplicate against a message that does not exist, so every later attempt at
         // the same prompt would return without trying, and the session would stay parked in
         // silence. Only this call's own entry is withdrawn, never one a later request has since put
-        // in its place. The operator is told, because a prompt that vanished is worth a keyboard.
+        // in its place. No notice is posted: the relay offers the prompt again, and a notice at
+        // each later offer would flood the thread this post just failed in. The slot this offer
+        // spent is given back, since the window counts prompts that reached the thread and a kept
+        // stamp would quiet or drop the offers that land after an outage. With offers to one thread
+        // interleaved, the refund pops the thread's newest stamp, which may be another offer's. The
+        // window then holds at most one stamp fewer than it should, which costs one extra ping and
+        // never a lost prompt.
         if (open.get(key) === entry) open.delete(key);
-        log(`permission: request ${request.requestId} was not posted into thread ${threadId}`);
-        await notice(threadId, PROMPT_UNDELIVERED_NOTICE);
-        return false;
+        volumeFor.refund(threadId);
+        return refuse(`permission: request ${request.requestId} was not posted into thread ${threadId}`);
       }
       entry.messageId = posted.value.messageId;
       // Nothing is drawn on a request this thread no longer holds: a typed verdict can answer it
@@ -732,7 +790,11 @@ export function createPermissionDesk(options: PermissionDeskOptions): Permission
           );
         }
       }
-      return true;
+      // `taken` even where a verdict, a turn's end or a sweep removed the entry while the post was
+      // in flight, for this offer and for any re-send deduplicated against it: a verdict and a
+      // turn's end each tell the relay themselves, and a sweep removes only a session that has
+      // ended.
+      return "taken";
     },
 
     requestAt(threadId, messageId) {
@@ -746,8 +808,10 @@ export function createPermissionDesk(options: PermissionDeskOptions): Permission
       const key = keyFor(threadId, verdict.requestId);
       const entry = open.get(key);
       // Stale, already answered, cleared because its session stopped waiting on it, named in the
-      // wrong thread, or asked before a broker restart: this table does not survive one, and the
-      // session behind it is not re-prompted. Dropped rather
+      // wrong thread, or asked before a broker restart: this table does not survive one, and a
+      // prompt its relay offers again after the restart is posted anew with a nonce of its own and
+      // a message of its own. A press or a reaction on the old message then answers nothing here,
+      // while a typed verdict naming the id answers the prompt posted again. Dropped rather
       // than matched against anything else open, because a five-letter ID is short enough to repeat
       // and guessing is how a verdict approves the wrong tool. Nothing is logged or written on the
       // way out: the message is still whole and still the caller's to read another way, and only

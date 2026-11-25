@@ -10,7 +10,7 @@ import {
   RELAY_READ_TIMEOUT_MS,
   RELAY_REPLY_IDLE_MS,
 } from "../broker/config.ts";
-import type { PermissionVerdict } from "./permission.ts";
+import type { OfferAnswer, PermissionPrompt, PermissionVerdict } from "./permission.ts";
 import type { SessionFileRead } from "./session-file.ts";
 
 /**
@@ -114,6 +114,16 @@ export type BrokerClientOptions = {
   onMessage: InboundHandler;
   /** Left unset by a relay that declares no permission capability, which then hears no verdicts. */
   onVerdict?: VerdictHandler;
+  /**
+   * Called each time the stream's `hello` issues a reply key, once the key is held, so the relay
+   * can offer again every permission prompt it holds to a broker that may have restarted.
+   */
+  onConnected?: () => void;
+  /**
+   * Called with the time a `permission-turn-ended` line carries, on the broker's clock: the
+   * session's own turn ended then, so no prompt it raised before that time is still open.
+   */
+  onTurnEnded?: (at: number) => void;
   log?: (message: string) => void;
   /** How long to wait before reconnecting a dropped stream. Doubles up to the ceiling. */
   reconnectDelayMs?: number;
@@ -168,15 +178,21 @@ export type BrokerClient = {
    */
   replyCeilingMs: number;
   /**
-   * How long this client waits for the broker to take one permission prompt before it reports the
-   * prompt as not taken.
+   * How long this client waits for the broker to take one permission prompt before it reads the
+   * prompt as not taken now.
    *
    * Its own wait rather than the reply's, and a far shorter one. The broker's work on this route is
    * a single alert post, and the operator's verdict arrives later down the stream rather than on
    * this response, so nothing here waits on a paced run. A session parked on a prompt is a session
-   * waiting on a person, and a broker that has stopped answering is worth reporting in seconds.
+   * waiting on a person, and an offer to a broker that has stopped answering is better ended in
+   * seconds and made again.
    */
   permissionTimeoutMs: number;
+  /**
+   * How long after the answer to its last offer a permission prompt the broker has not taken is
+   * offered again.
+   */
+  permissionRetryMs: number;
   start: () => void;
   stop: () => void;
   /**
@@ -192,16 +208,13 @@ export type BrokerClient = {
    */
   noted: () => Promise<NotedOutcome>;
   /**
-   * Hands the broker one permission prompt to put in front of the operator. It resolves when the
-   * broker has taken the prompt, not when the operator answers: the answer arrives whenever they
-   * give it, down the stream, and holding a socket open for it would outlast the read timeout.
+   * Offers the broker one permission prompt to put in front of the operator, with `again: true` in
+   * the body where `again` is set. It resolves with the broker's answer to the offer, not when the
+   * operator answers: the answer arrives whenever they give it, down the stream, and holding a
+   * socket open for it would outlast the read timeout. A status the broker does not define, a
+   * failed post and a post past the wait each read as `later`, since a later offer may land.
    */
-  permissionRequest: (request: {
-    requestId: string;
-    toolName: string;
-    description: string;
-    inputPreview: string;
-  }) => Promise<boolean>;
+  permissionRequest: (request: PermissionPrompt, again?: boolean) => Promise<OfferAnswer>;
   /**
    * Asks the broker to restart onto the code and configuration on disk. The answer is final once
    * received: the broker writes it before it stops, and the stream this client holds drops right
@@ -228,13 +241,24 @@ const RESTART_TIMEOUT_MS = 15_000;
 const ANNOUNCE_TIMEOUT_MS = 15_000;
 
 /**
- * How long a permission prompt's POST may go unanswered before the prompt is reported as not taken.
+ * How long a permission prompt's POST may go unanswered before the prompt is read as not taken now.
  *
  * What it covers is one alert post and a loopback round trip, so it is generous for the work and
- * short enough that a session parked on a prompt hears "dropped" while the operator could still be
- * reached another way.
+ * well inside the wait before the prompt is offered again.
  */
 const PERMISSION_TIMEOUT_MS = 15_000;
+
+/**
+ * How long after the answer to its last offer a permission prompt the broker has not taken is
+ * offered again.
+ *
+ * It equals the broker's window for posts in one thread, and that window expires a stamp at
+ * exactly this age. The broker stamps each post when the post reaches it, so every post filling
+ * the window was stamped before the broker answered the refused offer. The wait is timed from that
+ * answer's arrival, so the next offer reaches the broker once each of those stamps is a full window
+ * old, and a prompt refused for volume is not refused again by the same stamps.
+ */
+const PERMISSION_RETRY_MS = 60_000;
 
 /**
  * How long Claude Code lets one MCP tool call sit with no progress notification before it gives up
@@ -444,6 +468,9 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
       unreadableLogged = false;
       refusedLogged = false;
       if (replyKey !== null) scheduleAnnouncement();
+      // Only a hello that issued a key gives standing to offer a prompt, so only that one is a
+      // connection the relay offers its held prompts on.
+      if (typeof fields.replyKey === "string") options.onConnected?.();
       return;
     }
     if (fields.type === "refused") {
@@ -472,6 +499,13 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
       if (typeof fields.requestId !== "string") return;
       if (fields.behavior !== "allow" && fields.behavior !== "deny") return;
       options.onVerdict?.({ requestId: fields.requestId, behavior: fields.behavior });
+      return;
+    }
+    if (fields.type === "permission-turn-ended") {
+      // The time a turn ended decides which prompts are forgotten, so a time that is not a finite
+      // number is ignored rather than read as one that ends every prompt or none.
+      if (typeof fields.at !== "number" || !Number.isFinite(fields.at)) return;
+      options.onTurnEnded?.(fields.at);
       return;
     }
     if (fields.type !== "message") return;
@@ -726,6 +760,7 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
     replyIdleMs,
     replyCeilingMs,
     permissionTimeoutMs: PERMISSION_TIMEOUT_MS,
+    permissionRetryMs: PERMISSION_RETRY_MS,
     start: connect,
 
     stop() {
@@ -769,18 +804,20 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
       return { status, error: answer.error };
     },
 
-    async permissionRequest(request) {
-      const answer = await post(
-        "/relay/permission",
-        {
-          request_id: request.requestId,
-          tool_name: request.toolName,
-          description: request.description,
-          input_preview: request.inputPreview,
-        },
-        PERMISSION_TIMEOUT_MS,
-      );
-      return answer.status === "received";
+    async permissionRequest(request, again) {
+      // `again` is left off a first offer rather than sent false, so a first offer is the body an
+      // older broker's route has always read.
+      const body: Record<string, unknown> = {
+        request_id: request.requestId,
+        tool_name: request.toolName,
+        description: request.description,
+        input_preview: request.inputPreview,
+      };
+      if (again === true) body.again = true;
+      const answer = await post("/relay/permission", body, PERMISSION_TIMEOUT_MS);
+      // `failed` is what a post that reached no answer, timed out or was unreadable comes to.
+      if (answer.status === "received" || answer.status === "dropped") return answer.status;
+      return "later";
     },
 
     async restart() {

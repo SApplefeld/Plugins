@@ -22,7 +22,9 @@ import { createBrokerClient, holdsControlCharacter } from "./broker.ts";
 import type { BrokerClient, NotedStatus, ReplyOutcome, ReplyStatus, RestartOutcome } from "./broker.ts";
 import {
   PermissionRequestNotificationSchema,
+  UNREFERENCED_TIMERS,
   channelCapabilities,
+  createPermissionKeeper,
   permissionNotification,
 } from "./permission.ts";
 import {
@@ -386,11 +388,12 @@ export async function startRelay(env: NodeJS.ProcessEnv = process.env): Promise<
     },
     onVerdict: (verdict) => {
       // Fire and forget, for the same reason an inbound message is: the operator's answer is not
-      // something the broker waits on, and a failed write must not take the pipe down.
-      void server.notification(permissionNotification(verdict)).catch((error: unknown) => {
-        process.stderr.write(`relay: could not deliver a permission verdict: ${String(error)}\n`);
-      });
+      // something the broker waits on, and a failed write must not take the pipe down. The keeper
+      // forgets the prompt once the verdict is sent, and offers it again where the send failed.
+      void keeper.verdict(verdict.requestId, () => server.notification(permissionNotification(verdict)));
     },
+    onConnected: () => keeper.connected(),
+    onTurnEnded: (at) => keeper.turnEnded(at),
     log: (message) => process.stderr.write(`${message}\n`),
     // Read afresh at each announcement, so the client tells the broker what the file says then. The
     // home folder is resolved here too, so an account with none fails an attempt and never the
@@ -406,27 +409,30 @@ export async function startRelay(env: NodeJS.ProcessEnv = process.env): Promise<
     },
   });
 
+  // Holds each permission prompt until it is answered or the session's turn ends, and offers it to
+  // the broker until the broker takes it. The client above reaches it only from a stream line or a
+  // prompt, each of which arrives after both are built.
+  const keeper = createPermissionKeeper({
+    offer: (prompt, again) => broker.permissionRequest(prompt, again),
+    timers: UNREFERENCED_TIMERS,
+    now: Date.now,
+    retryMs: broker.permissionRetryMs,
+    log: (line) => process.stderr.write(`${line}\n`),
+  });
+
   if (processToken) {
-    // Registered with the capability above and never without it. The prompt is handed straight to
-    // the broker: this process is a child of the session the prompt is about, so it is the last
-    // thing that should be deciding whether the tool call is allowed.
+    // Registered with the capability above and never without it. The prompt is handed to the
+    // keeper, which offers it to the broker and never decides it: this process is a child of the
+    // session the prompt is about, so it is the last thing that should be deciding whether the tool
+    // call is allowed.
     server.setNotificationHandler(PermissionRequestNotificationSchema, (notification) => {
       const params = notification.params;
-      void broker
-        .permissionRequest({
-          requestId: params.request_id,
-          toolName: params.tool_name,
-          description: params.description ?? "",
-          inputPreview: params.input_preview ?? "",
-        })
-        .then((taken) => {
-          if (!taken) {
-            process.stderr.write("relay: the broker did not take a permission prompt\n");
-          }
-        })
-        .catch((error: unknown) => {
-          process.stderr.write(`relay: could not hand over a permission prompt: ${String(error)}\n`);
-        });
+      keeper.hold({
+        requestId: params.request_id,
+        toolName: params.tool_name,
+        description: params.description ?? "",
+        inputPreview: params.input_preview ?? "",
+      });
     });
   }
 
