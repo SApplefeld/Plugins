@@ -271,6 +271,24 @@ function remember(value: string, held = false): void {
   if (local && (echoes || localWorthy(value))) local.add(value)
 }
 
+// Remembers a password's whole value, closers included, after a pair hid
+// the value without its closer run, so a repeat written with the closers is
+// hidden too. The whole value takes remember()'s two tests, and joins a list
+// only where that list does not already hold the value without the run: a
+// list holding both hides the longer one first, so a later `(value)` would
+// lose its closing parenthesis. Held is read from the whole value as mint
+// reads a value, a value the vault held when a second reading began, and a
+// held value joins no session-wide search. Nothing is counted or minted.
+function rememberWhole(whole: string, core: string): void {
+  const echoes = echoable(whole)
+  const held = gained !== null && byValue.has(whole) && !gained.has(whole)
+  if (echoes && !held && !echo.has(core) && !echo.has(whole)) {
+    echo.add(whole)
+    echoIndex = null
+  }
+  if (local && (echoes || localWorthy(whole)) && !local.has(core)) local.add(whole)
+}
+
 // One pass, on purpose: a LITERAL placeholder gives back the placeholder text
 // it stands for, and that text must not then turn into the secret.
 export function restore(text: string): string {
@@ -376,9 +394,11 @@ let gained: Set<string> | null = null
 // text around it. `of` gives the scan-private placeholder for a vault
 // placeholder and `vault` the reverse, `text` is the text the scan was
 // handed, and `held` is every hash a placeholder body in that text shows,
-// read at the first hide. readText saves and restores the record as it
-// does `local`, so a reading that runs inside another keeps its own, and
-// takes every scan-private placeholder out of the vault on each path out.
+// read by scannedHashes at its first call, the first hide or the first
+// carriesTag check, which can come before any hide. readText saves and
+// restores the record as it does `local`, so a reading that runs inside
+// another keeps its own, and takes every scan-private placeholder out of
+// the vault on each path out.
 type Marks = { text: string; held: Set<string> | null; of: Map<string, string>; vault: Map<string, string> }
 let marks: Marks | null = null
 
@@ -397,19 +417,43 @@ function scanMark(tag: string): string {
   if (m === null || value === undefined) return tag
   let mark = m.of.get(tag)
   if (mark !== undefined) return mark
-  if (m.held === null) {
-    m.held = new Set()
-    if (m.text.includes('REDACTED-')) for (const body of clocked(m.text).matchAll(TAG_BODY)) m.held.add(body[0].slice(-8))
-  }
+  const held = scannedHashes(m)
   for (let i = 0; ; i++) {
     const hash = keyedHash(`MARK\u0000${i}\u0000${tag}`)
     mark = `[REDACTED-SECRET-${hash}]`
-    if (!m.held.has(hash) && !byTag.has(mark) && !byTag.has(`[REDACTED-EMAIL-${hash}]`) && !byTag.has(`[REDACTED-LITERAL-${hash}]`)) break
+    if (!held.has(hash) && !byTag.has(mark) && !byTag.has(`[REDACTED-EMAIL-${hash}]`) && !byTag.has(`[REDACTED-LITERAL-${hash}]`)) break
   }
   m.of.set(tag, mark)
   m.vault.set(mark, tag)
   byTag.set(mark, value)
   return mark
+}
+
+// Every hash a placeholder body in the text of the scan `m` shows, read once
+// per scan, at the first call, into `m.held`.
+function scannedHashes(m: Marks): Set<string> {
+  if (m.held === null) {
+    m.held = new Set()
+    if (m.text.includes('REDACTED-')) for (const body of clocked(m.text).matchAll(TAG_BODY)) m.held.add(body[0].slice(-8))
+  }
+  return m.held
+}
+
+// True where `v` holds a placeholder the vault restores that the text the
+// scan in hand was handed already showed, a LITERAL placeholder
+// escapeLiteralTags wrote and a live one among them. Such a placeholder is
+// carried text, and restore gives back what it stands for, never the
+// placeholder as the text holds it, so a hide whose value holds one cannot be
+// laid over the text the scan was handed. A placeholder a pass of the scan
+// wrote shows a hash no placeholder body in that text shows, save where the
+// text carried the same placeholder too, and then it counts as carried. Read
+// against the scan's own text, so it is false outside a scan.
+function carriesTag(v: string): boolean {
+  if (marks === null || !v.includes('[REDACTED-')) return false
+  const held = scannedHashes(marks)
+  if (held.size === 0) return false
+  for (const t of v.matchAll(TAG)) if (held.has(t[0].slice(-9, -1)) && byTag.has(t[0])) return true
+  return false
 }
 
 // The clock check the current scan runs before each whole-text pass, the
@@ -1241,23 +1285,50 @@ const PW_PAIR_OPENING = new RegExp(
 // value is three or more words with one space between each and none at
 // either end; the value is not the app password shape in any case; and
 // `PW_PAIR_OPENING` above finds no pair opening in the value, its end
-// included. The pair loop never reads a pair inside or across a value it has
-// already taken. Only a quoted pair and the decoded-text test read it, so a
-// name and value record under the label is hidden.
+// included. The pair loop never reads a pair inside a value it has hidden.
+// Only a quoted pair and the decoded-text test read it, so a name and value
+// record under the label is hidden.
 const verdictLine = (p: StrongPair): boolean =>
   p.keyQuote === '' && p.key === 'PASS' && /:[ \t]*$/.test(p.head) && /^\S+(?: \S+){2,}$/.test(p.v) && !APP_PW_WHOLE.test(p.v) && !PW_PAIR_OPENING.test(p.v)
-// The value ends at its own quote, an empty value included, so the pair after
-// it is read on its own. The callers decide what a short value does.
+// A key is read wherever no key character, a letter, a digit, `_`, `.` or
+// `-`, stands directly before it or before its key quote, so a pair after a
+// backtick, a quote, `>` or any other punctuation is read, and a key that is
+// the tail of a longer word (`subpassword`) is not. The test takes no
+// character, so the head starts at the key or its quote, and a pair directly
+// after another pair's closing quote is read. The value ends at its own
+// quote, an empty value included, so the pair after it is read on its own.
+// The callers decide what a short value does. A pair is read in one of two
+// passes, by the character before its key or key quote. The pair loop of
+// scrubAssignments reads a pair at the start of a line or after whitespace,
+// `{`, `,`, `;`, `(` or `[`. The late quoted pass, lateQuotedPairs, reads a
+// pair after any other character, and the pairs inside a value either pass
+// keeps, once the generic token scan has read the text, so a token that scan
+// hides inside the value stays hidden and stays remembered as it stored it.
+// The pair loop closes every pair at its first matching quote. The late
+// quoted pass grows a pair whose value an inner pair runs past, in either
+// pass's pairs, once that scan has read the text.
 const STRONG_QUOTED = new RegExp(
-  String.raw`((?:^|[\s{,;(\[])(\\?["']?)((?:[A-Za-z0-9._-]*[_.-]|pg)?${PW_WORD}|(?:[A-Za-z0-9._-]*[_.-])?${SHORT_PW})\2[ \t]*[:=][ \t]*)(\\?["'])((?:(?!\4)[^\n]){0,200})\4`,
+  String.raw`((?<![A-Za-z0-9._-])(\\?["']?)((?:[A-Za-z0-9._-]*[_.-]|pg)?${PW_WORD}|(?:[A-Za-z0-9._-]*[_.-])?${SHORT_PW})\2[ \t]*[:=][ \t]*)(\\?["'])((?:(?!\4)[^\n]){0,200})\4`,
   'gim',
 )
 // A strong quoted pair as both callers read it, with the span it covers.
-// `keyQuote` is the quote around the key, empty for an unquoted key.
-type StrongPair = { head: string; keyQuote: string; key: string; quote: string; v: string; start: number; end: number }
+// `keyQuote` is the quote around the key, empty for an unquoted key. `close`
+// is set on a pair the late quoted pass grew over an inner pair: the text that
+// closes it, the opening quote where that quote stands directly at the grown
+// end and empty where it does not. A pair without it closes on its opening
+// quote.
+type StrongPair = { head: string; keyQuote: string; key: string; quote: string; v: string; start: number; end: number; close?: string }
+// Which pairs strongQuotedPairs hands back: 'early' a pair at the start of
+// the text or after a character EARLY_LEAD holds, 'all' every pair.
+type PairRead = 'all' | 'early'
+// The characters before a pair the early pass reads: whitespace, which holds
+// a line break, `{`, `,`, `;`, `(` and `[`.
+const EARLY_LEAD = /[\s{,;(\[]/
 // What follows a short capture's closing quote when the value is a real
-// short value: a separator, a closing bracket, whitespace, or the end.
-const SHORT_CLOSE = /^[\s,;\])}]/
+// short value: a separator, a closing bracket, whitespace, a closing
+// backtick, or the end. The backtick ends a short value that closes a
+// Markdown code span.
+const SHORT_CLOSE = /^[\s,;\])}`]/
 // The pairs STRONG_QUOTED finds in a text, each with the value the callers
 // act on. A capture under three characters is a short value where its
 // closing quote is followed by a separator or the end: it is left as written
@@ -1267,14 +1338,27 @@ const SHORT_CLOSE = /^[\s,;\])}]/
 // own quote type, such as an escaped quote or a triple quote. Its value then
 // runs to the first opening quote string at least three characters in, with
 // no newline and at most two hundred characters. Where no such close exists the text is left as written.
-// Values of three characters or more end where the regex ended them.
-function strongQuotedPairs(text: string): StrongPair[] {
+// A value of three characters or more ends where the regex ended it, at the
+// first quote that matches its opening quote, and the scan resumes after that
+// quote. No pair grows here: the late quoted pass grows a pair whose value an
+// inner pair runs past, as lateQuotedPairs states.
+// `read` picks the pairs handed back by the character before a pair, as
+// PairRead states. An early read steps one character past a pair it does not
+// hand back, so a pair inside that pair's span is still found. The early
+// pass reads no pair inside the value of a pair it hands back and keeps; the
+// late pass reads those, as decideQuotedPairs states.
+function strongQuotedPairs(text: string, read: PairRead = 'all'): StrongPair[] {
   const pairs: StrongPair[] = []
   STRONG_QUOTED.lastIndex = 0
   let m: RegExpExecArray | null
   while ((m = STRONG_QUOTED.exec(text)) !== null) {
     const [whole, head, keyQuote, key, quote, v] = m as unknown as string[]
     const start = m.index
+    const early = start === 0 || EARLY_LEAD.test(text[start - 1]!)
+    if (read === 'early' && !early) {
+      STRONG_QUOTED.lastIndex = start + 1
+      continue
+    }
     let end = start + whole!.length
     let value = v!
     if (value.length < 3) {
@@ -1344,7 +1428,72 @@ const PW_NAME = new RegExp(String.raw`^[\w.-]*${PW_WORD}$|^(?:[\w.-]*[_.-])?${SH
 // SQL: an INSERT whose column list names a key or a password.
 const SQL_INSERT = /\bINSERT[ \t]+INTO[ \t]+[\w."`[\]]{1,100}[ \t]*\(([^()\n]{1,1000})\)\s*VALUES\s*/gi
 // `PGPASSWORD=x psql` is the one common env name with no separator.
+// An unquoted `password=` or `passwd=` pair is read in two passes, by the
+// character before its key. KV_PASSWORD reads it at a line's start or after
+// whitespace, `;`, `&`, `?` or `,`. LATE_KV_PASSWORD reads it after any other
+// one character that is not a key character, a letter, a digit, `_`, `.` or
+// `-`, and is neither `$` nor `@`, since after those the word is a variable
+// or a parameter and its value a reference (`@Password=@Password`). The late
+// rule runs in the late passes, once the generic token scan has read the
+// text, so a token that scan hides inside the value stays hidden and stays
+// remembered as that scan stored it. From the end of a `password=` or
+// `passwd=` value, a backtick, `)` or `]` is not part of the value while the
+// value holds more of that closer than of its opener, a backtick counting as
+// unclosed where the value holds an odd number of them. The run stops at the
+// first character that is none of the three or that the value balances. It
+// is written back as text after the value in both passes, whatever stands
+// before the pair, so `(password=abc))` hides `abc`, `set password=abc)`
+// hides `abc`, and `password=getpass()` reads `getpass()`.
+// A `.` or `:` after a closer stops the run, so the closer stays in the
+// value, save in a pair LATE_KV_PASSWORD reads after an opener, whose value
+// ends before the last closer that matches the opener and that it leaves
+// unclosed where no letter or digit follows that closer, as
+// latePasswordPairs states. KV_PASSWORD takes no run off a value where the whole value, or the
+// value without the run, is a stand-in, and judges the whole value. Where the
+// run is cut and the value without it is hidden, the whole value, closers
+// included, also joins each repeat list remember() would put it on that does
+// not already hold the value without the run, so a repeat of it with its
+// closers in the same text or a later one is hidden. Where a list holds the
+// value without the run, a bracketed repeat that list hides keeps its closer
+// shown.
+// A value the allow list holds whole keeps its closers and stays as written.
+// A value whose part without the run the allow list holds stays as written
+// too, its run shown after it.
+// `pwd=` is a shell word, so KV_PASSWORD reads it only after `;`, `&` or
+// `?`, LATE_KV_PASSWORD does not read it, and its value keeps every closing
+// character.
 const KV_PASSWORD = /((?:^|[\s;&?,])-{0,2}(?:[A-Za-z0-9._-]*[_.-]|pg)?(?:password|passwd)=|[;&?]pwd=)([^\s"'&;,]{3,200})/gim
+const LATE_KV_PASSWORD = /([^A-Za-z0-9._$@\s;&?,-]-{0,2}(?:[A-Za-z0-9._-]*[_.-]|pg)?(?:password|passwd)=)([^\s"'&;,]{3,200})/gi
+// The head of KV_PASSWORD's `pwd=` alternative.
+const KV_PWD_HEAD = /^[;&?]pwd=$/i
+
+// The length of the run of closers KV_PASSWORD's value ends before. The
+// counts are taken in one pass over the value, a parenthesis or bracket
+// count kept as closers less openers, and lowered as each closer joins the
+// run, so each test reads the value without the closers already taken.
+function closerRun(v: string): number {
+  let ticks = 0
+  let parens = 0
+  let squares = 0
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i)
+    if (c === 96) ticks++
+    else if (c === 41) parens++
+    else if (c === 40) parens--
+    else if (c === 93) squares++
+    else if (c === 91) squares--
+  }
+  let i = v.length - 1
+  while (i >= 0) {
+    const c = v.charCodeAt(i)
+    if (c === 96 && ticks % 2 === 1) ticks--
+    else if (c === 41 && parens > 0) parens--
+    else if (c === 93 && squares > 0) squares--
+    else break
+    i--
+  }
+  return v.length - 1 - i
+}
 
 // A generated password in quotes, with no name beside it: upper, lower,
 // digit and a symbol from the Terraform and password-manager sets, no space,
@@ -1471,10 +1620,10 @@ const NET_USER = /(\bnet[ \t]+user[ \t]+(?:"[^"\n]{1,64}"|\S+)[ \t]+)(["']?)((?!
 const RABBIT_USER = /(\brabbitmqctl[ \t]+(?:add_user|change_password)[ \t]+\S+[ \t]+)(["']?)([^\s"']{3,200})\2/g
 
 // The late rules. A late pass runs after every hiding pass of a reading and
-// the first rehideLocal, before unpark and widenKnown, and swaps only text
-// that still stands in clear. Every pass before it reads the text it reads
-// with no late pass and stores what it stores, so a late pass adds hides and
-// takes none away.
+// the first rehideLocal, before unpark and widenKnown. Every pass before it
+// reads the text it reads with no late pass and stores what it stores, so a
+// late pass adds hides and takes none away. The late command rules and the
+// late generated-value pass swap only text that still stands in clear.
 // A late command rule names the rule it follows. It reads that rule's value
 // where the command stands inside a string, as in a JSON file or in a shell
 // command that runs another command in double quotes: the quote before the
@@ -1483,6 +1632,16 @@ const RABBIT_USER = /(\brabbitmqctl[ \t]+(?:add_user|change_password)[ \t]+\S+[ 
 // holds no backslash and no square bracket, so no late command rule takes a
 // placeholder into a value. The late generated-value pass reads no value
 // that holds a placeholder's body, so it takes none into a value either.
+// The late quoted pass and the late password pass read a value whatever it
+// holds, and leave some such values as written. A value that is one
+// placeholder stays as it stands, and the late password pass leaves as
+// written a value whose letters and digits all stand inside placeholders.
+// Either pass leaves as written a value that holds a placeholder the scanned
+// text already carried, as carriesTag reads one, since restore gives back
+// what such a placeholder stands for and not the placeholder as the text
+// holds it. Any other value either pass hides takes the placeholders inside
+// it under a placeholder of its own, which restores to the value as first
+// written, and each value an earlier pass stored stays stored.
 // A value can hold the mark of a parked span, so the value a late rule
 // hides can run past its bound of 200 characters once the span is put back;
 // that hides more and shows nothing. Each lazy span keeps its rule's bound
@@ -2443,15 +2602,308 @@ function lateGeneratedValues(text: string, cfg: Config): string {
   })
 }
 
+// The late quoted pass, over the text the passes before it left, the generic
+// token scan among them. Each quoted pair strongQuotedPairs reads after a
+// character the pair loop of scrubAssignments does not read is decided as
+// that loop decides a pair. The pairs inside a value either pass keeps are
+// read here and never in that loop, as decideQuotedPairs states. A value an
+// earlier pass hid whole is one placeholder and stays as it stands. A value
+// an earlier pass hid in part is hidden whole with those placeholders inside
+// it, and its placeholder restores to the value as first written.
+// The pass grows a pair whose value an inner pair runs past, in either
+// pass's pairs, as grownPair states, and decides the grown pair as it
+// decides any pair. A grown pair the pair loop hid in part holds that loop's
+// placeholder inside the value the pass hides, and that placeholder stays
+// in the vault and in the lists as the loop left it. A pair the pass cannot
+// read through the placeholders before it does not grow, and stays as the
+// passes before it left it.
+function lateQuotedPairs(text: string, cfg: Config): string {
+  if (!/pass|secret|key|token|pw/i.test(text)) return text
+  return decideQuotedPairs(clocked(text), cfg, 'late', 0)
+}
+
+// STRONG_QUOTED read through a regex object of its own, so the look for an
+// inner pair leaves the outer scan's position as it stands.
+const STRONG_QUOTED_INNER = new RegExp(STRONG_QUOTED.source, STRONG_QUOTED.flags)
+
+// The end of the first STRONG_QUOTED match in `text`, in text order, that
+// starts at `from` or after it and before `before`, and ends past `end`, or
+// -1 where none does. A match that ends at `end` or before it is passed over,
+// and the search goes on one character past its start, never from its end.
+// Each match is at most the 200 characters of value the pattern allows, so a
+// grown value needs no length test of its own.
+function innerPairPast(text: string, from: number, before: number, end: number): number {
+  STRONG_QUOTED_INNER.lastIndex = from
+  let m: RegExpExecArray | null
+  let past = -1
+  while ((m = STRONG_QUOTED_INNER.exec(text)) !== null && m.index < before) {
+    const to = m.index + m[0].length
+    if (to > end) {
+      past = to
+      break
+    }
+    STRONG_QUOTED_INNER.lastIndex = m.index + 1
+  }
+  STRONG_QUOTED_INNER.lastIndex = 0
+  return past
+}
+
+// A text as the late quoted pass reads it for an inner pair: `view` is the
+// text with each placeholder standing for the value it restores to, as
+// restore writes it, and `tags` holds where each placeholder stands in the
+// text, `at` to `end`, and where its value stands in the view, `vAt` to
+// `vEnd`, in text order.
+type TagView = { view: string; tags: { at: number; end: number; vAt: number; vEnd: number }[] }
+
+function tagView(text: string): TagView {
+  const tags: TagView['tags'] = []
+  if (byTag.size === 0 || !text.includes('[REDACTED-')) return { view: text, tags }
+  let view = ''
+  let last = 0
+  for (const m of text.matchAll(TAG)) {
+    view += text.slice(last, m.index)
+    const vAt = view.length
+    view += byTag.get(m[0]) ?? m[0]
+    last = m.index + m[0].length
+    tags.push({ at: m.index, end: last, vAt, vEnd: view.length })
+  }
+  return { view: view + text.slice(last), tags }
+}
+
+// Where offset `x` of the text, which stands outside every placeholder or at
+// one's first character, stands in the view.
+function viewAt(tv: TagView, x: number): number {
+  let lo = 0
+  let hi = tv.tags.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (tv.tags[mid]!.end <= x) lo = mid + 1
+    else hi = mid
+  }
+  return lo === 0 ? x : x + tv.tags[lo - 1]!.vEnd - tv.tags[lo - 1]!.end
+}
+
+// Where offset `y` of the view stands in the text, or -1 where `y` falls
+// inside a placeholder's value, past its first character.
+function textAt(tv: TagView, y: number): number {
+  let lo = 0
+  let hi = tv.tags.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (tv.tags[mid]!.vEnd <= y) lo = mid + 1
+    else hi = mid
+  }
+  if (lo < tv.tags.length && tv.tags[lo]!.vAt < y) return -1
+  return lo === 0 ? y : y - tv.tags[lo - 1]!.vEnd + tv.tags[lo - 1]!.end
+}
+
+// The pair `p`, which the late quoted pass read in `text`, grown over each
+// inner pair that runs past its span, or `p` as it stands where none does.
+// The look reads the view, so it finds an inner pair whose front a
+// placeholder of an earlier pass holds. It runs only for a pair whose value
+// the pattern itself closed, at three characters or more in the view, and
+// never for a pair the short-value branch closed, whose value holds its own
+// quote, so the README limit on an escaped quote reads as before. An inner
+// pair is a STRONG_QUOTED match that starts at the value's first character
+// or after it and before the value's closing quote, and ends past the span's
+// end. The first such match in text order moves the span's end to its own
+// end, and the value runs from its first character to there. A match that
+// ends inside the span or at its end is passed over, and the look goes on
+// one character past its start, so a pair that begins inside it is still
+// found. The look then runs again over the grown value, where a match may
+// start anywhere before the new end, and a span grows four times at most. An
+// end that falls inside a placeholder's value, past its first character,
+// cannot be written back, so the growth stops at the end before it. A grown
+// pair's value is the text from its first character to the new end, the
+// placeholders in it as they stand, and its closing text is the opening
+// quote where that quote stands directly at the new end and empty where it
+// does not.
+function grownPair(text: string, tv: TagView, p: StrongPair): StrongPair {
+  const from = viewAt(tv, p.start + p.head.length + p.quote.length)
+  const end = viewAt(tv, p.end)
+  const v = tv.view.slice(from, end - p.quote.length)
+  if (v.length < 3 || v.includes(p.quote)) return p
+  let before = end - p.quote.length
+  let grownTo = -1
+  for (let n = 0; n < 4; n++) {
+    const past = innerPairPast(tv.view, from, before, grownTo < 0 ? end : grownTo)
+    if (past < 0 || textAt(tv, past) < 0) break
+    grownTo = past
+    before = past
+  }
+  if (grownTo < 0) return p
+  const to = textAt(tv, grownTo)
+  const close = text.startsWith(p.quote, to) ? p.quote : ''
+  return { ...p, v: text.slice(p.start + p.head.length + p.quote.length, to), end: to + close.length, close }
+}
+
+// The closer that matches each opener a late password pair can stand after.
+const LATE_CLOSER: Record<string, string> = { '`': '`', '(': ')', '[': ']', '{': '}', '<': '>' }
+
+// Where in `v` the first and the last `closer` stand that a late password
+// pair's value, after the opener `opener`, leaves unclosed, each -1 where it
+// leaves none. Read from the value's start, a closer is unclosed where no
+// opener before it in the value is still open. A value that opens and closes
+// a call, `getpass()`, leaves none, and so does `getpass() or default`. A
+// backtick is its own opener, so the value leaves one unclosed where it holds
+// an odd number. The first is then the first backtick, which closes the code
+// span the pair stands in, and the last is the last backtick.
+function unclosedClosers(v: string, opener: string, closer: string): [first: number, last: number] {
+  if (opener === closer) {
+    let ticks = 0
+    for (const c of v) if (c === closer) ticks++
+    return ticks % 2 === 1 ? [v.indexOf(closer), v.lastIndexOf(closer)] : [-1, -1]
+  }
+  let first = -1
+  let last = -1
+  let open = 0
+  for (let i = 0; i < v.length; i++) {
+    if (v[i] === opener) open++
+    else if (v[i] !== closer) continue
+    else if (open > 0) open--
+    else {
+      if (first < 0) first = i
+      last = i
+    }
+  }
+  return [first, last]
+}
+
+// How much of `read` the late password pass hides, read as KV_PASSWORD's
+// value is read: the length of the part hidden, the value without its closer
+// run, or -1 where the pass leaves the value as written. It leaves as written
+// a value the allow list holds whole; a value that is all closers or empty; a
+// value whose letters and digits all stand inside placeholders; a value
+// holding a placeholder the scanned text carried, as carriesTag reads one;
+// and a value without its run that is one placeholder, allowed or a
+// stand-in, as pairOut leaves one.
+function lateHide(cfg: Config, read: string): number {
+  if (cfg.allow.has(read)) return -1
+  const n = read.length - closerRun(read)
+  if (n === 0) return -1
+  const kept = read.slice(0, n)
+  // search() starts at the first character and leaves TAG_BODY's lastIndex as it found it.
+  if (kept.search(TAG_BODY) !== -1 && (!/[\p{L}\p{N}]/u.test(kept.replace(TAG, () => '')) || carriesTag(kept))) return -1
+  return WHOLE_TAG.test(kept) || cfg.allow.has(kept) || isStandIn(kept) ? -1 : n
+}
+
+// The late password pass: each pair LATE_KV_PASSWORD reads, over the text the
+// passes before it left. A value the allow list holds whole stays as written.
+// Where the pair stands after an opener, a backtick, `(`, `[`, `{` or `<`,
+// and the value leaves unclosed the closer that matches it, a backtick, `)`,
+// `]`, `}` or `>`, and a letter or digit follows the first such closer inside
+// the value, the part before that closer is judged first, as lateHide judges
+// a value. Where that part would be left as written, a stand-in such as
+// `self.password` or `getpass()` among them, the pair is left as written up
+// to the closer, and the pass reads on from the closer, so a second pair
+// after it is read on its own and `.cursor()` after it stays as written.
+// Otherwise the last such closer decides where the value ends. Where no
+// letter or digit follows that closer inside the value, the value ends
+// before it, and that closer and what follows it are written back as text.
+// Where a letter or digit follows it, the value is read whole, so a password
+// holding the closer is hidden whole, and a second call or a second pair
+// after the closer is hidden inside the same placeholder. A value that leaves
+// no such closer unclosed takes no end of this kind. What is read is then
+// decided by lateHide: where it is left as written, the pair is, and
+// otherwise the value without its closer run is hidden, the run is written
+// back as text, and the value with its run is remembered by rememberWhole as
+// the KV_PASSWORD pass of scrubAssignments remembers it. The pass takes no
+// stand-in fallback: a value whose part without the run is a stand-in, such
+// as a dotted settings reference, stays as written. A pass that reads on from
+// a closer reads only text it has left as written.
+function latePasswordPairs(text: string, cfg: Config): string {
+  if (!/pass(?:word|wd)=/i.test(text)) return text
+  const whole = clocked(text)
+  let built = ''
+  let last = 0
+  let m: RegExpExecArray | null
+  LATE_KV_PASSWORD.lastIndex = 0
+  while ((m = LATE_KV_PASSWORD.exec(whole)) !== null) {
+    const [pair, head, v] = m as unknown as [string, string, string]
+    const at = m.index
+    if (cfg.allow.has(v)) continue
+    const closer = LATE_CLOSER[head[0]!]
+    const [first, shut] = closer === undefined ? [-1, -1] : unclosedClosers(v, head[0]!, closer)
+    if (first >= 0 && /[\p{L}\p{N}]/u.test(v.slice(first + 1)) && lateHide(cfg, v.slice(0, first)) < 0) {
+      LATE_KV_PASSWORD.lastIndex = at + head.length + first
+      continue
+    }
+    const runsOn = shut >= 0 && /[\p{L}\p{N}]/u.test(v.slice(shut + 1))
+    const read = shut < 0 || runsOn ? v : v.slice(0, shut)
+    const n = lateHide(cfg, read)
+    if (n < 0) continue
+    const kept = read.slice(0, n)
+    const before = hidden
+    const written = pairOut(cfg, head, kept, v.slice(n), whole, at + head.length + n)
+    if (n < read.length && hidden > before) rememberWhole(restore(unpark(read, false)), restore(unpark(kept, false)))
+    built += whole.slice(last, at) + written
+    last = at + pair.length
+  }
+  LATE_KV_PASSWORD.lastIndex = 0
+  return built + whole.slice(last)
+}
+
+// The three keeps of a named value: a value under a key that says it is
+// public, a publishable key among them; a public identifier under a key that
+// says neither secret nor private; and a status word under a short key.
+function keyKeeps(cfg: Config, key: string, v: string): boolean {
+  if (/public|publishable/i.test(key)) return true
+  if (PUBLIC_PREFIX.test(v) && !/secret|private/i.test(key) && isPublicId(v, false, cfg)) return true
+  return shortKeyStatus(key, v)
+}
+
+// A value one of keyKeeps' three keeps holds is left; any other is hidden.
+function keyedValue(cfg: Config, head: string, key: string, v: string, tail = ''): string {
+  return keyKeeps(cfg, key, v) ? head + v + tail : pairOut(cfg, head, v, tail)
+}
+
+// Each pair strongQuotedPairs reads under `read` is decided in place, and a
+// verdict line is left as written; a short value yields no pair and stays as
+// written. The early pass, `read` 'early', closes each pair at its first
+// matching quote, grows none, and reads no pair inside a value it keeps. The
+// late pass, `read` 'late', runs after the generic token scan and reads every
+// pair: it grows a pair as grownPair states and decides the grown pair, a
+// pair inside the grown span is not read on its own, and a grown pair is
+// written back with its own closing text. It decides a pair after a leader
+// the early pass does not read, and leaves as the early pass left it a pair
+// after a leader that pass reads that does not grow. In
+// the late pass, a pair keyKeeps keeps, whichever pass decided it, has its
+// value read for pairs of its own, whatever stands before each, decided the
+// same way, down to pairs three levels below the outermost. So the token
+// scan reads a kept value before any pair inside it is hidden, and a token
+// it hides there stays hidden and stays remembered as it stored it. A hidden
+// value is not read again, and neither is one pairOut leaves as written, a
+// whole placeholder, an allow-listed value or a stand-in. Outside the early
+// pass, a value holding a placeholder the scanned text carried, as
+// carriesTag reads one, is left as written and not hidden. The pairs of a text
+// are collected before any of its values is minted, so the shared regex is
+// never read mid-scan.
+function decideQuotedPairs(text: string, cfg: Config, read: PairRead | 'late', depth: number): string {
+  let at = 0
+  let built = ''
+  const tv = read === 'early' ? null : tagView(text)
+  for (const found of strongQuotedPairs(text, read === 'late' ? 'all' : read)) {
+    if (found.start < at) continue
+    const p = tv === null ? found : grownPair(text, tv, found)
+    if (verdictLine(p)) continue
+    const head = p.head + p.quote
+    const tail = p.close ?? p.quote
+    const kept = keyKeeps(cfg, p.key, p.v)
+    const decided = read === 'late' && p.close === undefined && (p.start === 0 || EARLY_LEAD.test(text[p.start - 1]!))
+    const carried = read !== 'early' && carriesTag(p.v)
+    let written = kept || decided || carried ? head + p.v + tail : pairOut(cfg, head, p.v, tail)
+    if (read !== 'early' && kept && depth < 3 && !WHOLE_TAG.test(p.v) && !cfg.allow.has(p.v) && !isStandIn(p.v)) {
+      written = head + decideQuotedPairs(p.v, cfg, 'all', depth + 1) + tail
+    }
+    built += text.slice(at, p.start) + written
+    at = p.end
+  }
+  return built + text.slice(at)
+}
+
 function scrubAssignments(text: string, cfg: Config): string {
   let out = text
-  // A value under a key that says it is public is left: a publishable key.
-  const value = (head: string, key: string, v: string, tail = ''): string => {
-    if (/public|publishable/i.test(key)) return head + v + tail
-    if (PUBLIC_PREFIX.test(v) && !/secret|private/i.test(key) && isPublicId(v, false, cfg)) return head + v + tail
-    if (shortKeyStatus(key, v)) return head + v + tail
-    return pairOut(cfg, head, v, tail)
-  }
+  const value = (head: string, key: string, v: string, tail = ''): string => keyedValue(cfg, head, key, v, tail)
   // A value whose name sits in a sibling field.
   const sibling = (head: string, name: string, v: string, tail = ''): string => {
     if (PW_NAME.test(name)) return value(head, name, v, tail)
@@ -2459,24 +2911,38 @@ function scrubAssignments(text: string, cfg: Config): string {
     return head + v + tail
   }
   if (/pass|secret|key|token|pw/i.test(out)) {
-    // Each pair strongQuotedPairs reads is decided in place, and a verdict
-    // line is left as written; a short value yields no pair and stays as
-    // written. The pairs are collected before any value is minted, so the
-    // shared regex is never read mid-scan.
-    out = clocked(out)
-    let at = 0
-    let built = ''
-    for (const p of strongQuotedPairs(out)) {
-      if (verdictLine(p)) continue
-      built += out.slice(at, p.start) + value(p.head + p.quote, p.key, p.v, p.quote)
-      at = p.end
-    }
-    out = built + out.slice(at)
+    // The early quoted pass: the pairs at the start of a line or after
+    // whitespace, `{`, `,`, `;`, `(` or `[`. It reads no pair inside a value
+    // it keeps. lateQuotedPairs reads the other pairs and the pairs inside a
+    // kept value, after the generic token scan.
+    out = decideQuotedPairs(clocked(out), cfg, 'early', 0)
     out = clocked(out).replace(APP_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head, v))
     out = clocked(out).replace(STRONG_LINE, (_m, head: string, key: string, v: string) => value(head, key, v))
     out = clocked(out).replace(ENV_PASS, (_m, head: string, _k: string, v: string) => value(head, '', v))
     out = clocked(out).replace(BLOCK_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head, v))
-    out = clocked(out).replace(KV_PASSWORD, (m, head: string, v: string, at: number, whole: string) => pairOut(cfg, head, v, '', whole, at + m.length))
+    // The early password pass, over the pairs KV_PASSWORD reads;
+    // latePasswordPairs reads the pairs after the other leaders. A value
+    // that is all closers holds nothing to hide and stays as written, and so
+    // does a value the allow list holds whole, closers included. No run is
+    // taken off a value where the whole value, or the value without the run,
+    // is a stand-in, and the whole value is judged. Any other value is hidden
+    // without its closer run, and the run is written back as text. Where
+    // that value was minted, the whole value, closers included, is
+    // remembered by rememberWhole beside it, after the pair's own mint, so a
+    // repeat of it with its closers in this text or a later one is hidden,
+    // and that repeat counts its own hide. Remembering it counts no hide and
+    // writes no placeholder at the pair. Both values are read in their
+    // restored forms, the ones stored.
+    out = clocked(out).replace(KV_PASSWORD, (m, head: string, v: string, at: number, whole: string) => {
+      let cut = KV_PWD_HEAD.test(head) || cfg.allow.has(v) || isStandIn(v) ? 0 : closerRun(v)
+      if (cut > 0 && isStandIn(v.slice(0, v.length - cut))) cut = 0
+      if (cut === v.length) return m
+      const kept = v.slice(0, v.length - cut)
+      const before = hidden
+      const written = pairOut(cfg, head, kept, v.slice(v.length - cut), whole, at + m.length - cut)
+      if (cut > 0 && hidden > before) rememberWhole(restore(unpark(v, false)), restore(unpark(kept, false)))
+      return written
+    })
   }
   if (PW_SYMBOL.test(out)) {
     out = clocked(out).replace(QUOTED_VALUE, (m, q: string, v: string, offset: number, whole: string) => {
@@ -2913,6 +3379,8 @@ function readText(text: string, cfg: Config, asWritten: boolean): [out: string, 
     const held = local.size
     out = lateCommandValues(out, cfg)
     out = lateGeneratedValues(out, cfg)
+    out = lateQuotedPairs(out, cfg)
+    out = latePasswordPairs(out, cfg)
     if (local.size > held) out = rehideLocal(out, local)
     const done = unpark(out)
     // A reading in which no known value was hidden again ends here.
