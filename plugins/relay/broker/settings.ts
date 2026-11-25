@@ -110,6 +110,7 @@ export const SETTINGS: readonly Setting[] = [
   { key: "CHANNEL_ATTACHMENTS", kind: "broker", meaning: "Who may attach a file that reaches a session", scope: "fleet", unset: "default" },
   { key: "CHANNEL_ATTACHMENT_MAX_BYTES", kind: "broker", meaning: "The most bytes one attached file may carry", scope: "fleet", unset: "default" },
   { key: "CHANNEL_ATTACHMENT_RETAIN_DAYS", kind: "broker", meaning: "Days a saved file is kept before the broker deletes it", scope: "fleet", unset: "default" },
+  { key: "CHANNEL_ATTACHMENT_DIR", kind: "broker", meaning: "The folder saved attachments rest in", scope: "host", unset: "default" },
 
   // The voice.
   { key: "CHANNEL_VOICE", kind: "broker", meaning: "Whether the broker can join a voice channel", scope: "fleet", unset: "off", stays: "the voice, which loads no voice module" },

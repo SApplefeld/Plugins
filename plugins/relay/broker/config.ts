@@ -217,6 +217,11 @@ export type BrokerConfig = {
   /** A saved attachment older than this many days, by its modified time, is deleted by the daily pass. */
   attachmentRetainDays: number;
   /**
+   * The folder saved attachments rest in, where the host named one, kept as written after the trim.
+   * Null where the folder is the `attachments` child of the state file's folder.
+   */
+  attachmentDir: string | null;
+  /**
    * Whether the broker can join a voice channel on an operator's `voice on`. Off by default, and off
    * is the absence of the machinery: no voice module is loaded and no voice intent is requested.
    */
@@ -959,6 +964,26 @@ function directionLedgerPath(env: NodeJS.ProcessEnv): string {
   return configured;
 }
 
+/**
+ * The folder saved attachments rest in, or null when none is configured, which leaves them in the
+ * `attachments` folder beside the state file.
+ *
+ * Held to the rule the roster path is: a relative or drive-relative path resolves against whatever
+ * directory or drive the broker was launched from, which under a scheduled task is neither of the
+ * operator's choosing, and the retention pass deletes old files in whatever folder this names.
+ *
+ * The refusal never echoes the value: the path typically embeds the operator's OS username, and
+ * this message reaches the log file.
+ */
+function attachmentDir(env: NodeJS.ProcessEnv): string | null {
+  const configured = env.CHANNEL_ATTACHMENT_DIR?.trim();
+  if (configured === undefined || configured === "") return null;
+  if (!namesOneDirectory(configured)) {
+    throw new Error("CHANNEL_ATTACHMENT_DIR expects an absolute path, the value names no fixed folder");
+  }
+  return configured;
+}
+
 /** The Cartesia voice: a voice id in Cartesia's shape, lowercase hex in groups of 8-4-4-4-12. */
 function speechVoice(raw: string | undefined): string {
   const value = raw?.trim();
@@ -1150,6 +1175,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     attachments: attachmentMode(env.CHANNEL_ATTACHMENTS),
     attachmentMaxBytes: integerAtLeast(env.CHANNEL_ATTACHMENT_MAX_BYTES, 1, DEFAULT_ATTACHMENT_MAX_BYTES),
     attachmentRetainDays: integerAtLeast(env.CHANNEL_ATTACHMENT_RETAIN_DAYS, 1, DEFAULT_ATTACHMENT_RETAIN_DAYS),
+    // Unset keeps the folder beside the state file. Read whatever the mode, so a bad value refuses
+    // the restart that writes it.
+    attachmentDir: attachmentDir(env),
     // Off by default: on, the broker hears the operator's voice, and that belongs on a host that
     // asked for it. The idle window and the loopback are read whatever the flag, so a bad value
     // refuses the restart that writes it rather than the one that turns the voice on.

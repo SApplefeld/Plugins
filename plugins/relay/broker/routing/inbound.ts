@@ -43,7 +43,7 @@ import type { RestartAnswer } from "../index.ts";
 import { isLocalConversationId } from "../local-surface.ts";
 import { liveByLineage } from "../registry.ts";
 import type { Registry, SessionRecord } from "../registry.ts";
-import { reducedName } from "./attachments.ts";
+import { reducedName, rootPrefix } from "./attachments.ts";
 import type { AttachmentIntake, InboundAttachment, RefusalCause } from "./attachments.ts";
 import type { TalkFile, TalkTap } from "../web/talk.ts";
 import type { RelayEvent, RelayHub } from "./relays.ts";
@@ -720,9 +720,9 @@ export type InboundRouterOptions = {
   doorStanding?: "participant" | "operator";
   /**
    * The attachment intake, which fetches a delivered message's files and saves them under the
-   * broker's state directory. Absent, a message's attachments are ignored, and a message with no
-   * typed text is dropped as one with nothing to hand a session. Its folder is also the only place
-   * a path restored from the buffers file may point.
+   * attachments folder the broker's start settled. Absent, a message's attachments are ignored, and
+   * a message with no typed text is dropped as one with nothing to hand a session. Its folder is
+   * also the only place a path restored from the buffers file may point.
    */
   attachments?: AttachmentIntake;
   /**
@@ -899,8 +899,9 @@ const SAVED_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
  */
 function savedPath(file: string, root: string | null, sessionId: string): boolean {
   if (root === null || !path.isAbsolute(file) || path.resolve(file) !== file) return false;
-  if (!file.startsWith(root + path.sep)) return false;
-  const segments = file.slice(root.length + 1).split(path.sep);
+  const prefix = rootPrefix(root);
+  if (!file.startsWith(prefix)) return false;
+  const segments = file.slice(prefix.length).split(path.sep);
   if (segments.length !== 2 || segments[0] !== sessionId) return false;
   return segments.every((segment) => SAVED_SEGMENT.test(segment));
 }

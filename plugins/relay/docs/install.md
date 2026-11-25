@@ -106,14 +106,17 @@ week to measure a host's own.
 **Attachments reach a session from operators only, until you widen it.** A file attached to a
 message in a session's thread is saved on this host and the session is told where it is. A long
 paste that Discord turned into `message.txt` arrives as the words of the message instead, where it
-fits the relay's pipe. "Attachments" in `operations.md` gives that limit. Three settings in
-`broker.env` bound it. `CHANNEL_ATTACHMENTS` decides who may send a file: `operator`, the default,
+fits the relay's pipe. "Attachments" in `operations.md` gives that limit. Four settings in
+`broker.env` govern attachments. `CHANNEL_ATTACHMENTS` decides who may send a file: `operator`,
+the default,
 `all` to admit participants too, or `off`, which also stops a session attaching a file to its
 reply. `CHANNEL_ATTACHMENT_MAX_BYTES` caps one file in either direction, 20,971,520 bytes (20 MiB)
 by default, Discord's own default limit per uploaded file. `CHANNEL_ATTACHMENT_RETAIN_DAYS`
-decides how long a saved file is kept, 14 days by default. Like every setting there, each takes
-effect when the broker restarts. Saved
-files sit in an `attachments` folder beside the broker's state file, never in a project. An
+decides how long a saved file is kept, 14 days by default. `CHANNEL_ATTACHMENT_DIR` moves the
+folder saved files sit in, and `operations.md` states the rule for the folder it names. Like
+every setting there, each takes effect when the broker restarts. Saved
+files sit in an `attachments` folder beside the broker's state file, unless
+`CHANNEL_ATTACHMENT_DIR` names another folder, and never in a project. An
 interactive session asks permission to read one, and that prompt reaches Discord like any other.
 `operations.md` lists what is accepted and what each refusal means, and
 `security-model.md` argues the bounds.

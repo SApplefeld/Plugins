@@ -1,5 +1,5 @@
 // Broker entry point. Run as source under Node's type stripping: `node broker/index.ts`.
-import { open as openFile, realpath, stat } from "node:fs/promises";
+import { lstat, open as openFile, realpath, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import path from "node:path";
@@ -134,7 +134,15 @@ import type { TranscriptTailer } from "./tail.ts";
 import { createStatusReader } from "./status-reader.ts";
 import type { StatusReader } from "./status-reader.ts";
 import { createRelayHub } from "./routing/relays.ts";
-import { attachmentsRoot, createAttachmentIntake, createWebFiles, pruneAttachments } from "./routing/attachments.ts";
+import {
+  ATTACHMENT_MARKER,
+  attachmentsRoot,
+  claimAttachmentRoot,
+  createAttachmentIntake,
+  createWebFiles,
+  namesItsOwnFolder,
+  pruneAttachments,
+} from "./routing/attachments.ts";
 import { createInboundRouter, voiceWhenReady } from "./routing/inbound.ts";
 import type { InboundRouter } from "./routing/inbound.ts";
 import { createResponseGateJournal } from "./routing/response-gate.ts";
@@ -877,6 +885,70 @@ export const CONTINUATION_POST_PACE_MS = 1_200;
 const ATTACHMENT_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * Whether the folder CHANNEL_ATTACHMENT_DIR names is still the one the start claimed: a directory
+ * as `lstat` reads it, whose real path is its parent's real path joined to its name, as
+ * `namesItsOwnFolder` checks, holding `ATTACHMENT_MARKER` as a regular file as `lstat` reads it. The
+ * real-path check catches a junction `lstat` reports as a plain directory. Nothing is written. Any
+ * failure to read is a no.
+ */
+async function claimStands(root: string): Promise<boolean> {
+  try {
+    if (!(await lstat(root)).isDirectory()) return false;
+    if (!(await namesItsOwnFolder(root))) return false;
+    return (await lstat(path.join(root, ATTACHMENT_MARKER))).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One retention pass over the attachments folder `root`, writing its counts through `note`. It
+ * reports counts only: a file name is sender-chosen content and stays out of the log, as does the
+ * folder it sat in. It resolves on every path, so a surprise becomes neither an unhandled rejection
+ * nor an uncaught exception out of the timer. Apart from `startBroker` so a test reads its lines.
+ *
+ * A `named` folder, one CHANNEL_ATTACHMENT_DIR names, is checked before each pass, since the claim
+ * is read once at start and the pass runs daily, and a folder replaced by a junction since would
+ * steer the deletes outside it. Where the check fails the pass deletes nothing and writes one line
+ * with no path; the broker keeps saving, and the next pass checks again, so a repaired folder is
+ * pruned again with no restart. The check narrows the gap between a check and a delete and does not
+ * close it. The default folder is the broker's own and takes no check. Either folder's pass skips a
+ * session folder whose real path sits outside the folder, and writes one line counting them.
+ */
+export async function retentionPass(
+  root: string,
+  named: boolean,
+  retainDays: number,
+  now: number,
+  note: (message: string) => void,
+): Promise<void> {
+  try {
+    if (named && !(await claimStands(root))) {
+      note(
+        "broker: attachment retention skipped: the folder CHANNEL_ATTACHMENT_DIR names is not a folder " +
+          "holding the broker's marker",
+      );
+      return;
+    }
+    const { deleted, removed, failed, skipped } = await pruneAttachments(root, retainDays, now);
+    if (deleted > 0 || removed > 0 || failed > 0) {
+      note(
+        `broker: attachment retention deleted ${deleted} file(s), removed ${removed} folder(s), ` +
+          `${failed} failure(s)`,
+      );
+    }
+    if (skipped > 0) {
+      note(
+        `broker: attachment retention skipped ${skipped} session folder(s) whose real path is outside ` +
+          "the attachments folder",
+      );
+    }
+  } catch {
+    // Every failure is dropped here, for the reason above.
+  }
+}
+
+/**
  * Turns the notice a question's alert landed as into the interactive message that answers it, or
  * releases the hold so the question is handed back to the session.
  *
@@ -1520,6 +1592,13 @@ export async function startBroker(
   // exists, with the key named on disk. The word `tailscale` where the CLI gives no address, or
   // one outside the range, loads pending instead, and the surface waits for its address.
   let web: WebConfig | null;
+  // The folder saved attachments rest in, settled once here and handed to every user of it: the
+  // files store, the intake and with it the restore of held buffers, and the retention pass. It is
+  // the folder CHANNEL_ATTACHMENT_DIR names, or the `attachments` child of the state file's folder.
+  const attachmentRoot =
+    config.attachmentDir === null
+      ? attachmentsRoot(path.dirname(config.stateFile))
+      : path.resolve(config.attachmentDir);
   try {
     judgeKey = readJudgeKey(config, warn);
     const stateRoot = path.dirname(config.stateFile);
@@ -1527,6 +1606,10 @@ export async function startBroker(
     speechKey = config.voice ? readSpeechKey(config.speechKeyFile, stateRoot) : null;
     fastKey = config.voice ? readVoiceFastKey(config.voiceFastKeyFile, stateRoot) : null;
     web = loadWebConfig(config, { warn, ...options.web });
+    // A named folder is claimed whatever `config.attachments` reads, since the retention pass runs
+    // on a host with attachments off too and deletes old files in the folder. The default folder is
+    // the broker's own and is never claimed.
+    if (config.attachmentDir !== null) await claimAttachmentRoot(attachmentRoot);
   } catch (error) {
     const message = `broker: refusing to start: ${String(error)}`;
     console.error(message);
@@ -1821,7 +1904,7 @@ export async function startBroker(
   const webFiles =
     (web === null && !operatorDoor) || config.attachments === "off"
       ? null
-      : createWebFiles({ stateDir: path.dirname(config.stateFile) });
+      : createWebFiles({ root: attachmentRoot });
   const outbound = createOutboundRouter({
     registry,
     threadFor: (sessionId) => threadFor(sessionId),
@@ -2443,27 +2526,9 @@ export async function startBroker(
   }, config.sweepIntervalMs);
 
   // The saved-attachment store is bounded by age. The pass runs here, at top level, so a host
-  // started without Discord still prunes what an earlier run left. It reports counts only: a file
-  // name is sender-chosen content and stays out of the log, as does the folder it sat in.
-  const attachmentStore = attachmentsRoot(path.dirname(config.stateFile));
-  const pruneStore = async (): Promise<void> => {
-    try {
-      const { deleted, removed, failed } = await pruneAttachments(
-        attachmentStore,
-        config.attachmentRetainDays,
-        Date.now(),
-      );
-      if (deleted > 0 || removed > 0 || failed > 0) {
-        note(
-          `broker: attachment retention deleted ${deleted} file(s), removed ${removed} folder(s), ` +
-            `${failed} failure(s)`,
-        );
-      }
-    } catch {
-      // The pass resolves on every path. This catch keeps a surprise from becoming an unhandled
-      // rejection or an uncaught exception out of the timer.
-    }
-  };
+  // started without Discord still prunes what an earlier run left.
+  const pruneStore = (): Promise<void> =>
+    retentionPass(attachmentRoot, config.attachmentDir !== null, config.attachmentRetainDays, Date.now(), note);
   // The running pass is kept so shutdown can wait for it, the way the tailer's pass is.
   let pruneInFlight: Promise<void> = pruneStore();
   const retention = setInterval(() => {
@@ -3064,13 +3129,13 @@ export async function startBroker(
           // local mode the post lands on the local surface, which keeps nothing.
           page: { post: (input) => mirrorWriter.reply(input.threadId, input.text, input.file) },
           ...(webFiles === null ? {} : { webFiles }),
-          // Who may attach a file and how large one may be, as configured. Saved files sit under the
-          // folder holding the state file, beside the buffers file and the journal, wherever
-          // CHANNEL_BROKER_STATE put it, and never in a session's project directory.
+          // Who may attach a file and how large one may be, as configured. Saved files sit in the
+          // folder the start settled, which is the `attachments` folder beside the state file unless
+          // CHANNEL_ATTACHMENT_DIR names another, and never in a session's project directory.
           attachments: createAttachmentIntake({
             mode: config.attachments,
             maxBytes: config.attachmentMaxBytes,
-            stateDir: path.dirname(config.stateFile),
+            root: attachmentRoot,
           }),
           // The voice commands, only where the voice is on: off, `voice on` is text for the session.
           // Before the module starts and once the broker is stopping, a command is told the voice is
