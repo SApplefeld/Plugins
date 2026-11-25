@@ -3,7 +3,8 @@
 // to read what a session waits on and settle it, to read a persona's open asks and answer one, and
 // to read a session's status. They sit on the loopback listener between the relay routes and the
 // hook intake, and exist only while a door key is loaded. Three are served at either standing and
-// five more at operator standing alone, eight in all.
+// five more at operator standing alone, so the door serves eight paths at operator standing, and
+// two more, POST /door/upload and GET /door/file, where attachments are on too.
 //
 //   Every request carries the header X-Channels-Door: the door key file's contents.
 //
@@ -19,25 +20,36 @@
 //        `limit` of them, the oldest kept, so a caller pages forward. `since` is digits and 0 when
 //        absent; `limit` is 1 to the ring's capacity and the capacity when absent. `missed` is how
 //        many sequence numbers after `since` the ring no longer holds. A line is
-//        {"seq", "at", "kind", "author", "senderClass", "text", "door", "mentions"}, its text
-//        whole, and `door` is true for a line this door handed in. `mentions` is the list of names a
-//        reply asked to mention, in plain text, each once, at most 10 of at most 100 code points,
-//        and empty on every other line. The door matches no name to anyone: its reader does. No
-//        line carries a file.
+//        {"seq", "at", "kind", "author", "senderClass", "text", "door", "mentions", "files"}, its
+//        text whole, and `door` is true for a line this door handed in. `mentions` is the list of
+//        names a reply asked to mention, in plain text, each once, at most 10 of at most 100 code
+//        points, and empty on every other line. The door matches no name to anyone: its reader does.
+//        `files` is the list of files the line carries, each {"id", "name", "size"}, on every kind
+//        of line and empty on a line with none: `id` is what GET /door/file serves the file by,
+//        `name` the name the files store reduced, and `size` its bytes. It is empty on every line
+//        of a door that does not serve GET /door/file.
 //     -> 400 on a missing or empty lineage or a malformed since or limit
 //     -> 404 on a lineage no registry record carries
 //
 //   POST /door/line
 //     Content-Type: application/json
-//     body: {"lineage": "...", "name": "...", "text": "...", "lineId": "..."}, at most 64 KiB
+//     body: {"lineage": "...", "name": "...", "text": "...", "lineId": "...", "files": ["<id>"]},
+//     at most 64 KiB; files is optional, absent is none, and is at most 10 distinct ids, each one
+//     POST /door/upload answered
 //     -> 200 {"status": "delivered" | "no-session" | "ended" | "no-thread" | "no-channel" | "rate" |
-//        "empty" | "board-act", "truncated": false, "duplicate": false}, the status and the cut the
-//        inbound router answered. A lineage no registry record carries is a good body and answers
-//        no-session, so every delivery outcome is read from one field. board-act is a line refused
-//        on a host whose door runs at operator standing because its text, trimmed, opens with
-//        [PAUSE] or [RESUME]: a session reads such an operator's line as a workers-board act, and
-//        the door carries none. Nothing was delivered, and the same text is refused again.
-//     -> 400 on a body that is not a JSON object of that shape, 415 on another type
+//        "empty" | "board-act" | "unknown-file", "truncated": false, "duplicate": false}, the status
+//        and the cut the inbound router answered. A lineage no registry record carries is a good
+//        body and answers no-session, so every delivery outcome is read from one field. board-act
+//        is a line refused on a host whose door runs at operator standing because its text,
+//        trimmed, opens with [PAUSE] or [RESUME]: a session reads such an operator's line as a
+//        workers-board act, and the door carries none, whatever files the line names. Nothing was
+//        delivered, and the same text is refused again. unknown-file is an id the store does not
+//        hold as an upload for the session the line reaches, as after that session was replaced or
+//        the broker restarted, or any id on a door that takes no file. Nothing was delivered, and
+//        the caller uploads its files again. A delivered line hands the session each file's saved
+//        path, and its thread copy carries the files.
+//     -> 400 on a body that is not a JSON object of that shape, a files member among it that is not
+//        a list of at most 10 distinct ids of the store's shape, 415 on another type
 //     -> 413 on a declared Content-Length past 64 KiB, before the body is read, which a caller that
 //        keeps its connection open reads; and on any other body past 64 KiB that ends within 256 KiB.
 //        Past 256 KiB that body's connection is dropped with no answer.
@@ -144,8 +156,54 @@
 //     -> 400 on a body that is not a JSON object of that shape: an askId that is not 1 to 1,000
 //        code points, an action outside agree and answer, and an answer whose words is no string
 //     -> 413 and 415 as POST /door/line answers them
+//     An answer to an ask carries no file.
 //
-//   On each of the eight
+//   The two below are served only on a host whose door runs at operator standing and whose
+//   attachments are on, CHANNEL_ATTACHMENTS not `off`, and are answered as the five above are on
+//   any other host.
+//
+//   POST /door/upload?lineage=<l>
+//     Content-Type: application/octet-stream
+//     X-Door-File-Name: the file's name, percent-encoded UTF-8
+//     body: the file's bytes, at most the attachment cap, CHANNEL_ATTACHMENT_MAX_BYTES
+//     -> 200 {"id": "<uuid>"}, the id a POST /door/line names the file by. The file is saved as
+//        sent, with no kind list, in the attachments folder of the lineage's live session under
+//        the name the files store reduces, as a file the operator's page sends is, until the
+//        retention prune takes it.
+//     -> 400 on a lineage that is missing, empty or given twice, a name that is missing, empty or
+//        not percent-encoded UTF-8, and an empty body
+//     -> 404 on a lineage no live session carries
+//     -> 413 on a declared Content-Length past the cap, before the body is read, and on a body
+//        whose bytes pass the cap as they are read
+//     -> 415 on another type
+//     -> 500 where the file could not be written
+//     Each refusal of the route's own but the 500 is a status with no body, sent with the
+//     connection closed after it as the operator's page sends one, so the rest of a body is never
+//     read. Each writes nothing. Any refusal sent before the body is read, the 415, both 400s on
+//     the lineage and the name, the 404 and the declared-length 413 among them, may reach a caller
+//     still sending its body as the connection reset rather than the status. So a caller that must
+//     read the status sends the right type, one lineage and a percent-encoded name, with a body
+//     within the cap, to a lineage it has just read as live.
+//     The log line for a saved upload names the session and the byte count, never the file's name.
+//
+//   GET /door/file?id=<id>
+//     -> 200 the file's bytes, with Content-Type as the files store holds it, Content-Length,
+//        X-Door-File-Name the reduced name percent-encoded, Cache-Control: no-store and
+//        X-Content-Type-Options: nosniff. The id is any the files store serves, such as one a line's
+//        `files` lists or POST /door/upload answered, for a file of any conversation on the host, and
+//        no lineage is asked.
+//     -> 400 on an id that is missing, given twice or not of the store's shape
+//     -> 404 on an id the store does not serve: unknown, forgotten, its file gone from disk, or a
+//        reply's copy not yet landed
+//     An id is held in the broker's memory alone, so it answers 404 after a broker restart or once
+//     1,000 newer ids are held, the store's WEB_FILES_HELD. A reply's file is listed as soon as
+//     the write of its copy starts, and answers 404 until the copy has landed on disk. The write is
+//     given 60 seconds, the store's INTAKE_LIMIT_MS, and a copy whose write fails is forgotten and
+//     answers 404 for good. So a reader that meets 404 for a line it has just read tries again, and
+//     treats a 404 still answered a minute after it read the line as final. A read that fails once
+//     the headers are sent cuts the response short. No log line names an id or a file's name.
+//
+//   On each of them
 //     -> 403 {"error": "loopback only"} where the peer or the Host header is not loopback
 //     -> 401 {"error": "door key required"} where the header is missing or is not the key
 //     -> 405 with an `allow` header on any other method, OPTIONS included
@@ -170,14 +228,16 @@
 // allows or denies a waiting tool call and answers an open ask in whatever name the caller sends,
 // so a session on that host can do each of those, its own tool calls and its own asks included,
 // and the control is the boundary around the host. The inbound router decides the class, in one
-// function, and refuses an answer and a verdict at any other standing. At either standing the door
-// takes no other act: no workers-board act, no broker restart, no voice command, no pick or submit
-// of a question's options and no hand-back of a question to its session. Of the page's item acts it
-// takes one, at operator standing: an answer to an open ask, which is the page's Agree or its
-// Answer. It takes no Dismiss, no Agree to several asks at once, no Steer, no Rollout and no
-// Publish. A line, an answer, a verdict and an answer to an ask each leave a copy in the session's
-// thread and a line in the talk ring under `<name> (portal)`, which shows that the act came through
-// the door and never who took it.
+// function, and refuses an answer and a verdict at any other standing. At operator standing with
+// attachments on, the door also writes an uploaded file to the files store and reads any
+// conversation's stored file by its id. At either standing the door takes no other act: no
+// workers-board act, no broker restart, no voice command, no pick or submit of a question's options
+// and no hand-back of a question to its session. Of the page's item acts it takes one, at operator
+// standing: an answer to an open ask, which is the page's Agree or its Answer. It takes no Dismiss,
+// no Agree to several asks at once, no Steer, no Rollout and no Publish. A line, an answer, a
+// verdict and an answer to an ask each leave a copy in the session's thread and a line in the talk
+// ring under `<name> (portal)`, which shows that the act came through the door and never who took
+// it.
 //
 // No answer carries a CORS header, and no door log line carries the key, the header's value or any
 // part of a body but these: the line for a verdict names `allow` or `deny`, and the line for an
@@ -194,6 +254,7 @@
 // re-checked because these routes are composed in front of the intake's own checks.
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { pipeline } from "node:stream/promises";
 import type { AskEntry } from "./decisions/ledger.ts";
 import { MAX_MODEL_NAME_LENGTH, plainLineField } from "./discord/render.ts";
 import { deriveSurfaceState, toView } from "./discord/state.ts";
@@ -205,6 +266,8 @@ import { liveByLineage } from "./registry.ts";
 import type { SessionRecord } from "./registry.ts";
 import { createRepeatLog } from "./repeat-log.ts";
 import type { RepeatLogSurface } from "./repeat-log.ts";
+import { WEB_FILE_ID, WEB_FILE_URL_PREFIX, readUpload, refuseUpload } from "./routing/attachments.ts";
+import type { WebFiles } from "./routing/attachments.ts";
 import type { DoorAnswerStatus, DoorDeliveryStatus, DoorVerdictStatus } from "./routing/inbound.ts";
 import { fit, isBlankText } from "./sanitize.ts";
 import type { PendingPermission, Verdict } from "./security/permission.ts";
@@ -239,6 +302,9 @@ const MAX_STATUS_GOAL_LENGTH = 300;
 /** A line id: 1 to 64 letters, digits and hyphens. */
 const LINE_ID = /^[A-Za-z0-9-]{1,64}$/;
 
+/** The most file ids one line may name, the count one Discord message may carry. */
+const MAX_LINE_FILES = 10;
+
 /**
  * A permission request's id and its prompt's nonce, the two shapes the page's `POST
  * /web/permission` checks a verdict by: five letters of the alphabet Claude Code builds an id from,
@@ -272,8 +338,11 @@ export type DoorRoutesOptions = {
   records: () => readonly SessionRecord[];
   /** The talk ring the reads answer from. Never written here: a delivered line reaches it by the inbound router's tap. */
   ring: Pick<TalkRing, "since" | "newestSeq" | "startedAt">;
-  /** The inbound router's door delivery, or a stand-in answering `no-session` where no router exists. */
-  deliverDoor: (lineage: string, name: string, text: string) => Promise<DoorOutcome>;
+  /**
+   * The inbound router's door delivery, or a stand-in answering `no-session` where no router exists.
+   * `fileIds` are the ids a line names, empty where it names none.
+   */
+  deliverDoor: (lineage: string, name: string, text: string, fileIds: readonly string[]) => Promise<DoorOutcome>;
   /**
    * What a session waits on: the question desk's held entries and the permission desk's open
    * requests for it. Present only on a host whose door runs at operator standing, and
@@ -319,6 +388,21 @@ export type DoorRoutesOptions = {
    * on a host whose door runs at operator standing, and `/door/status` is served only where it is.
    */
   status?: (record: SessionRecord) => { signals: Required<ViewSignals>; thresholds: StateThresholds };
+  /**
+   * What the door's files need: `sessionFor`, the id of the live session carrying a lineage or
+   * null, as the inbound router finds it; the web files store's `saveUpload` and `open`; and
+   * `maxBytes`, the cap one upload may carry, the one a Discord attachment takes. Present only on
+   * a host whose door runs at operator standing and whose attachments are on. `/door/upload` and
+   * `/door/file` are served only where it is, the lines read lists each line's files only where it
+   * is, and a line that names a file id on a door without it is answered `unknown-file` and
+   * delivers nothing.
+   */
+  files?: {
+    sessionFor: (lineage: string) => string | null;
+    saveUpload: WebFiles["saveUpload"];
+    open: WebFiles["open"];
+    maxBytes: number;
+  };
   log?: (message: string) => void;
   /** The clock the line id memory, the refusal log and the status read's state read, in milliseconds. */
   now?: () => number;
@@ -332,7 +416,9 @@ type DoorRoute =
   | "/door/status"
   | "/door/answer"
   | "/door/permission"
-  | "/door/ask";
+  | "/door/ask"
+  | "/door/upload"
+  | "/door/file";
 
 /** The one method each route takes. */
 const ROUTE_METHOD: Readonly<Record<DoorRoute, "GET" | "POST">> = {
@@ -344,6 +430,8 @@ const ROUTE_METHOD: Readonly<Record<DoorRoute, "GET" | "POST">> = {
   "/door/answer": "POST",
   "/door/permission": "POST",
   "/door/ask": "POST",
+  "/door/upload": "POST",
+  "/door/file": "GET",
 };
 
 function send(response: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -364,10 +452,52 @@ function bounded(value: unknown, max: number): value is string {
 }
 
 /**
- * A line as the door shows it: the ring's line without its files, its receipt and its receipt key.
- * The names a reply mentions pass as the ring holds them, since the door's reader matches them.
+ * The file ids a line body names, or null where `files` is not a list of at most `MAX_LINE_FILES`
+ * distinct ids of the files store's shape, as the page reads a say body's. Absent reads as none.
  */
-function shown(line: HeldLine): Record<string, unknown> {
+function lineFiles(files: unknown): readonly string[] | null {
+  if (files === undefined) return [];
+  if (!Array.isArray(files) || files.length > MAX_LINE_FILES) return null;
+  if (!files.every((id): id is string => typeof id === "string" && WEB_FILE_ID.test(id))) return null;
+  return new Set(files).size === files.length ? files : null;
+}
+
+/**
+ * The file name an upload's X-Door-File-Name carries, decoded once from percent-encoded UTF-8, or
+ * null where the header is absent or empty, is not valid percent encoding, or decodes to nothing,
+ * as the page reads its own name header. The name is the caller's and reaches no path from here:
+ * the files store reduces it first.
+ */
+function fileName(header: string | string[] | undefined): string | null {
+  const raw = Array.isArray(header) ? header[0] : header;
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  try {
+    const name = decodeURIComponent(raw.trim());
+    return name === "" ? null : name;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The id a ring file's link names, the part after the page's file route prefix, or null where the
+ * link does not open with that prefix or its rest is not of the files store's shape.
+ */
+function fileIdOf(url: string): string | null {
+  if (!url.startsWith(WEB_FILE_URL_PREFIX)) return null;
+  const id = url.slice(WEB_FILE_URL_PREFIX.length);
+  return WEB_FILE_ID.test(id) ? id : null;
+}
+
+/**
+ * A line as the door shows it: the ring's line without its receipt and its receipt key, and with
+ * each file it carries as the id GET /door/file serves it by, its name and its size. The list is
+ * empty where `listsFiles` is false, on a door that does not serve GET /door/file, so a door lists
+ * only files it serves. The ring's link is never shown, since it names a route of the page's
+ * listener, and a file whose link names no id of the store's shape is left out. The names a reply
+ * mentions pass as the ring holds them, since the door's reader matches them.
+ */
+function shown(line: HeldLine, listsFiles: boolean): Record<string, unknown> {
   return {
     seq: line.seq,
     at: line.at,
@@ -377,6 +507,12 @@ function shown(line: HeldLine): Record<string, unknown> {
     text: line.text,
     door: line.door === true,
     mentions: line.mentions,
+    files: listsFiles
+      ? line.files.flatMap((file) => {
+          const id = fileIdOf(file.url);
+          return id === null ? [] : [{ id, name: file.name, size: file.size }];
+        })
+      : [],
   };
 }
 
@@ -394,8 +530,9 @@ function plainOrNull(value: string | null, limit: number): string | null {
  * Returns a handler that reports whether it took the request, so the caller can fall through to the
  * hook intake for everything else. It takes a request whose path before any `?` is exactly one of
  * the door paths it serves, compared as the raw string with no decoding, and no other: the three
- * every door serves, and each of `/door/pending`, `/door/status`, `/door/answer`,
- * `/door/permission` and `/door/ask` whose callback the options hold.
+ * every door serves, each of `/door/pending`, `/door/status`, `/door/answer`, `/door/permission`
+ * and `/door/ask` whose callback the options hold, and `/door/upload` and `/door/file` where they
+ * hold `files`.
  */
 export function createDoorRoutes(
   options: DoorRoutesOptions,
@@ -475,7 +612,7 @@ export function createDoorRoutes(
       newestSeq: options.ring.newestSeq(lineage),
       // The sequence numbers between `since` and the oldest line still held are the ones dropped.
       missed: newer.length === 0 ? 0 : Math.max(0, newer[0].seq - since - 1),
-      lines: newer.slice(0, limit).map(shown),
+      lines: newer.slice(0, limit).map((line) => shown(line, options.files !== undefined)),
     });
   }
 
@@ -617,6 +754,11 @@ export function createDoorRoutes(
       refuse(response, "/door/line", 400, "lineId is not 1 to 64 letters, digits and hyphens");
       return;
     }
+    const fileIds = lineFiles(body.fields.files);
+    if (fileIds === null) {
+      refuse(response, "/door/line", 400, `files is not a list of at most ${String(MAX_LINE_FILES)} distinct file ids`);
+      return;
+    }
 
     // The sweep runs before the lookup, so an id repeated once its memory has run out is a new line.
     const at = now();
@@ -629,9 +771,15 @@ export function createDoorRoutes(
       send(response, 200, { ...(await held.outcome), duplicate: true });
       return;
     }
+    // A door that takes no file holds none for any session, so a line naming one is answered as a
+    // line naming an id the store does not hold is, and nothing reaches the router.
+    const delivery =
+      options.files === undefined && fileIds.length > 0
+        ? Promise.resolve<DoorOutcome>({ status: "unknown-file", truncated: false })
+        : options.deliverDoor(lineage, name, text, fileIds);
     const entry: { outcome: Promise<DoorOutcome>; deliveredAt: number | null } = {
       deliveredAt: null,
-      outcome: options.deliverDoor(lineage, name, text).then(
+      outcome: delivery.then(
         (outcome) => {
           // Settled before any waiting request is answered: a delivered id is held from now, and
           // any other outcome frees the id for the caller to send the line again.
@@ -764,8 +912,9 @@ export function createDoorRoutes(
       repo: lineage,
       entry: known ? askDoor.openAsk(lineage, askId) : null,
       drawn: drawnOf(fields),
-      // The cut the router reports is dropped: neither line is long enough to be cut.
-      deliver: async (text: string): Promise<DoorDeliveryStatus> => (await options.deliverDoor(lineage, name, text)).status,
+      // The cut the router reports is dropped: neither line is long enough to be cut. An answer to
+      // an ask carries no file.
+      deliver: async (text: string): Promise<DoorDeliveryStatus> => (await options.deliverDoor(lineage, name, text, [])).status,
       label: (found: AskEntry): string => `door ${action}: ask ${JSON.stringify(found.id)} for ${JSON.stringify(lineage)}`,
     };
     // Held as a constant, so the answer line's composer reads a string and never the null.
@@ -791,10 +940,124 @@ export function createDoorRoutes(
     send(response, 200, { status });
   }
 
-  // The three every door serves, and each of the other five whose callback this door holds. A
-  // path with no handler here is not the door's, and its request is left for the hook intake to
-  // answer as it answers any path it does not know.
-  const { pending: waitingOn, status: statusOf, answerDoor, settleDoor, askDoor } = options;
+  /**
+   * One file for the lineage's live session, taken as the operator's page takes one: the checks run
+   * in the page's order, the content type, the lineage and the name, the live session, the declared
+   * length, then the bytes read, and the body is read with the page's own reader, which keeps raw
+   * bytes and stops at the cap. A refusal made while the body is unread or part read is sent as the
+   * page sends it, with no body and the connection closed after it, and is logged by its cause. The
+   * files store reduces the name before it reaches a path, as for the page's file.
+   */
+  async function upload(
+    request: IncomingMessage,
+    response: ServerResponse,
+    query: URLSearchParams,
+    files: NonNullable<DoorRoutesOptions["files"]>,
+  ): Promise<void> {
+    const refuseFile = (status: number, cause: string): void => {
+      refused(`/door/upload: ${cause}`);
+      refuseUpload(response, status);
+    };
+    const type = request.headers["content-type"];
+    if (typeof type !== "string" || type.split(";")[0].trim().toLowerCase() !== "application/octet-stream") {
+      refuseFile(415, "the body is not application/octet-stream");
+      return;
+    }
+    // One lineage and no more, as the page reads its own query.
+    const lineages = query.getAll("lineage");
+    if (lineages.length !== 1 || lineages[0] === "") {
+      refuseFile(400, "lineage is missing");
+      return;
+    }
+    const lineage = lineages[0];
+    const name = fileName(request.headers["x-door-file-name"]);
+    if (name === null) {
+      refuseFile(400, "the file name is missing or not percent-encoded UTF-8");
+      return;
+    }
+    const sessionId = files.sessionFor(lineage);
+    if (sessionId === null) {
+      refuseFile(404, "no live session carries that lineage");
+      return;
+    }
+    // A length declared past the cap is refused before any of the body is read. A chunked body, or
+    // one whose declared length is within the cap, is bounded by the read below.
+    const declared = request.headers["content-length"];
+    if (declared !== undefined && /^[0-9]+$/.test(declared.trim()) && Number(declared) > files.maxBytes) {
+      refuseFile(413, "declared length too large");
+      return;
+    }
+    const body = await readUpload(request, files.maxBytes);
+    if (body === "size") {
+      refuseFile(413, "body too large");
+      return;
+    }
+    if (body === null || body.length === 0) {
+      refuseFile(400, "the body is empty or was not read whole");
+      return;
+    }
+    // Null only where the path would not form or the write failed, and the write leaves no file.
+    const id = await files.saveUpload(sessionId, name, body);
+    if (id === null) {
+      refuse(response, "/door/upload", 500, "the file could not be written");
+      return;
+    }
+    // The session and the byte count, and never the file's name.
+    log(`door: /door/upload: ${String(body.length)} bytes for session ${sessionId}`);
+    send(response, 200, { id });
+  }
+
+  /**
+   * One file the files store serves, streamed from disk as the operator's page streams one: its
+   * length the open file's own and its content type the one the store recorded. The id is read as
+   * the one `id` value of the query and must be of the store's shape. Any id the store does not
+   * serve answers 404, whatever the cause, since the store answers null alike for each. A read that
+   * fails once the headers are sent cuts the response short, as on the page.
+   */
+  async function file(
+    request: IncomingMessage,
+    response: ServerResponse,
+    query: URLSearchParams,
+    files: NonNullable<DoorRoutesOptions["files"]>,
+  ): Promise<void> {
+    // A body sent with the read is discarded, as the page discards one.
+    request.resume();
+    // One id and no more, as the upload reads its lineage.
+    const ids = query.getAll("id");
+    if (ids.length !== 1 || ids[0] === "") {
+      refuse(response, "/door/file", 400, "id is missing or given twice");
+      return;
+    }
+    const id = ids[0];
+    if (!WEB_FILE_ID.test(id)) {
+      refuse(response, "/door/file", 400, "id is not a file id");
+      return;
+    }
+    const opened = await files.open(id);
+    if (opened === null) {
+      refuse(response, "/door/file", 404, "no file is served under that id");
+      return;
+    }
+    response.writeHead(200, {
+      "content-type": opened.file.contentType,
+      "content-length": opened.size,
+      "x-door-file-name": encodeURIComponent(opened.file.name),
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    });
+    try {
+      await pipeline(opened.stream, response);
+    } catch {
+      // The headers are out, so the only answer left is a response cut short: the pipeline has
+      // destroyed both ends, and the open file closes with its stream.
+      response.destroy();
+    }
+  }
+
+  // The three every door serves, and each of the other seven whose callback or option this door
+  // holds. A path with no handler here is not the door's, and its request is left for the hook
+  // intake to answer as it answers any path it does not know.
+  const { pending: waitingOn, status: statusOf, answerDoor, settleDoor, askDoor, files } = options;
   const handlers: Partial<
     Record<DoorRoute, (request: IncomingMessage, response: ServerResponse, query: URLSearchParams) => void | Promise<void>>
   > = {
@@ -814,6 +1077,12 @@ export function createDoorRoutes(
       ? {}
       : { "/door/permission": (request, response) => permission(request, response, settleDoor) }),
     ...(askDoor === undefined ? {} : { "/door/ask": (request, response) => ask(request, response, askDoor) }),
+    ...(files === undefined
+      ? {}
+      : {
+          "/door/upload": (request, response, query) => upload(request, response, query, files),
+          "/door/file": (request, response, query) => file(request, response, query, files),
+        }),
   };
 
   return (request, response) => {

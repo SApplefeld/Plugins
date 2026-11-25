@@ -55,6 +55,7 @@ import { summaryView } from "./summary.ts";
 import type { SiblingsView } from "./siblings.ts";
 import { RING_CAPACITY, lineageKnown, talkView } from "./talk.ts";
 import type { TalkRing, TalkViewInput } from "./talk.ts";
+import { WEB_FILE_ID, readUpload, refuseUpload } from "../routing/attachments.ts";
 import type { WebFiles } from "../routing/attachments.ts";
 import type { WebAnswerStatus, WebDeliveryStatus } from "../routing/inbound.ts";
 import { CLIENT_PREFIX, planBranchFault, repoNameFault } from "./rollout.ts";
@@ -1042,8 +1043,8 @@ export type SayHandlerOptions = {
 /** The most files one say post may name, the count one Discord message may carry. */
 export const MAX_SAY_FILES = 10;
 
-/** The shape of a file id the web files store hands out: a random UUID, lower-case as Node writes it. */
-export const WEB_FILE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** The file id pattern, kept beside the files store and exported here too for this listener's readers. */
+export { WEB_FILE_ID };
 
 /**
  * The file ids of a say body, or null where `files` is not a list of at most `MAX_SAY_FILES`
@@ -1874,49 +1875,6 @@ export type FileHandlerOptions = {
   maxBytes: number;
   log?: Logger;
 };
-
-/**
- * The body read whole, or `size` at the first byte past `maxBytes`, or null where the request failed
- * or closed before its end. The count is of the bytes received and never a declared length, and the
- * read stops at the cap: the request is paused and nothing more of it is kept, so an oversized
- * upload costs at most the cap in memory.
- */
-function readUpload(request: IncomingMessage, maxBytes: number): Promise<Buffer | "size" | null> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    let settled = false;
-    const settle = (outcome: Buffer | "size" | null): void => {
-      if (settled) return;
-      settled = true;
-      request.off("data", take);
-      resolve(outcome);
-    };
-    const take = (chunk: Buffer): void => {
-      total += chunk.length;
-      if (total > maxBytes) {
-        chunks.length = 0;
-        request.pause();
-        settle("size");
-        return;
-      }
-      chunks.push(chunk);
-    };
-    request.on("data", take);
-    request.on("end", () => settle(Buffer.concat(chunks)));
-    request.on("error", () => settle(null));
-    request.on("close", () => settle(null));
-  });
-}
-
-/**
- * A refusal of an upload whose body is unread or only part read: a status, no body, and the
- * connection closed after it, so the rest of the body is never read or drained.
- */
-function refuseUpload(response: ServerResponse, status: number): void {
-  response.writeHead(status, { "content-length": 0, connection: "close" });
-  response.end();
-}
 
 /**
  * The `Content-Disposition` a download is sent with: always an attachment, so a file is saved and

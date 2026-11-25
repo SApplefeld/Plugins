@@ -279,12 +279,13 @@ export type WebDeliveryStatus =
 
 /**
  * What a line handed in through the local door became: each status with the meaning
- * `WebDeliveryStatus` gives it. A door line names no file, so no file of one can be unknown.
+ * `WebDeliveryStatus` gives it. `unknown-file` is a file id the store does not hold as an upload
+ * for the session the line would reach, whether the door or the page sent it.
  * `board-act` is the door's own refusal: at operator standing the line's words open as a
  * workers-board act does, and the door carries no board act, so nothing reached the session, its
  * thread or the talk ring.
  */
-export type DoorDeliveryStatus = Exclude<WebDeliveryStatus, "unknown-file"> | "board-act";
+export type DoorDeliveryStatus = WebDeliveryStatus | "board-act";
 
 /**
  * What a typed answer from the page did. `answered` resolved the session's held question with the
@@ -685,10 +686,11 @@ export type InboundRouterOptions = {
     }) => Promise<CallOutcome<{ messageId: string | null }>>;
   };
   /**
-   * The web page's files, present only while the web surface takes files. `upload` names the file
-   * the page sent under an id, `bytesOf` reads it back for its copy in the thread, and `linkFor`
-   * names the page's link to a file by the path it was saved at, for the line the talk ring is
-   * shown. Absent, a web line naming any file id is refused as `unknown-file`.
+   * The web files store, present only where attachments are on and the web surface or a door at
+   * operator standing takes files. `upload` names the file the page or the door sent under an id,
+   * `bytesOf` reads it back for its copy in the thread, and `linkFor` names the page's link to a
+   * file by the path it was saved at, for the line the talk ring is shown. Absent, a web or door
+   * line naming any file id is refused as `unknown-file`.
    */
   webFiles?: {
     upload: (id: string) => { sessionId: string; path: string; name: string; contentType: string } | null;
@@ -782,12 +784,20 @@ export type InboundRouter = {
    * operator's event by how its text opens, so at operator standing a line whose bounded words,
    * trimmed, open with `[PAUSE]` or `[RESUME]` is refused as `board-act`, unchanged and with
    * nothing handed over, held, posted or shown to the talk ring, and at participant standing the
-   * same line is delivered, since no reader acts on a participant's. It carries no file. `name` is
+   * same line is delivered, since no reader acts on a participant's. `fileIds` name files the door
+   * took before the line, absent or empty for a line with none, and are judged as `deliverWeb`
+   * judges its own: each must be an upload the web files store saved for the session the line
+   * reaches, else nothing is posted or delivered and the status is `unknown-file`. `name` is
    * a display name the caller chose, bounded as the gateway bounds one. `truncated` is true where
    * the text ran past the inbound ceiling and was cut. It does not read the router's `door` option:
    * the door's routes, and so the calls to this, exist only while the door is on. Never throws.
    */
-  deliverDoor: (lineage: string, name: string, text: string) => Promise<{ status: DoorDeliveryStatus; truncated: boolean }>;
+  deliverDoor: (
+    lineage: string,
+    name: string,
+    text: string,
+    fileIds?: readonly string[],
+  ) => Promise<{ status: DoorDeliveryStatus; truncated: boolean }>;
   /**
    * Answers the question the live session carrying `lineage` is held on with a line the operator
    * typed on the page, through the desk's `answerTyped`, the seam a typed Discord answer takes. The
@@ -1647,16 +1657,25 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
    * file decides its class, and a line held under a standing the host has since withdrawn restores
    * as a participant's. A door line that `doorBoardAct` refuses at today's standing is dropped as
    * well, since a door line that would be a board act at the class it takes is never handed to a
-   * session, whatever shape the restored event has. Its author label is built again from the name
-   * in its sender id, since the loader cuts the label in the file at the author bound and the label
-   * runs past it.
+   * session, whatever shape the restored event has. A door line restored at participant standing
+   * loses its files' paths, since the door at that standing carries no file, and a line with no
+   * text is dropped, since a door line with no text was a line of files alone: the live path holds
+   * no line with no text and no file. That holds where the loader already dropped every path, so
+   * such a line never reaches the session as an empty participant's line. Its author label is built
+   * again from the name in its sender id, since the loader cuts the label in the file at the author
+   * bound and the label runs past it.
    */
   function reclassed(message: BufferedMessage): BufferedMessage | null {
     if (message.senderId.startsWith(DOOR_SENDER_PREFIX)) {
       if (options.door !== true) return null;
       if (doorBoardAct(message.text)) return null;
       const author = doorAuthorLabel(message.senderId.slice(DOOR_SENDER_PREFIX.length));
-      return { ...message, author, senderClass: doorClass() };
+      const senderClass = doorClass();
+      if (senderClass === "operator") return { ...message, author, senderClass };
+      if (message.text === "") return null;
+      if (message.attachments === undefined) return { ...message, author, senderClass };
+      const { attachments, ...words } = message;
+      return { ...words, author, senderClass };
     }
     if (message.senderId.startsWith(WEB_SENDER_PREFIX)) {
       const login = message.senderId.slice(WEB_SENDER_PREFIX.length).toLowerCase();
@@ -1714,19 +1733,23 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         continue;
       }
       // Each dropped line is counted under what stopped admitting it, the roster, the web listener's
-      // list, the local door being off or the door's refusal of a board act, so the log says which
-      // changed. With the door on, that refusal is the only cause a door line is dropped for. No
-      // count names a login, an account, a name or any of the text.
+      // list, the local door being off, the door's refusal of a board act or the door carrying no
+      // file at its standing, so the log says which changed. With the door on, those last two are
+      // the only causes a door line is dropped for. No count names a login, an account, a name or
+      // any of the text.
       const messages: BufferedMessage[] = [];
       let fromRoster = 0;
       let fromPage = 0;
       let fromDoor = 0;
       let doorBoardActs = 0;
+      let doorFilesAlone = 0;
       for (const message of entry.messages) {
         const classed = reclassed(message);
+        const door = message.senderId.startsWith(DOOR_SENDER_PREFIX);
         if (classed !== null) messages.push(classed);
-        else if (message.senderId.startsWith(DOOR_SENDER_PREFIX) && options.door === true) doorBoardActs += 1;
-        else if (message.senderId.startsWith(DOOR_SENDER_PREFIX)) fromDoor += 1;
+        else if (door && options.door === true && doorBoardAct(message.text)) doorBoardActs += 1;
+        else if (door && options.door === true) doorFilesAlone += 1;
+        else if (door) fromDoor += 1;
         else if (message.senderId.startsWith(WEB_SENDER_PREFIX)) fromPage += 1;
         else fromRoster += 1;
       }
@@ -1752,6 +1775,12 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         log(
           `routing: dropped ${String(doorBoardActs)} of ${count} buffered messages held for session ` +
             `${entry.sessionId}, door lines that open as a workers-board act at the door's standing`,
+        );
+      }
+      if (doorFilesAlone > 0) {
+        log(
+          `routing: dropped ${String(doorFilesAlone)} of ${count} buffered messages held for session ` +
+            `${entry.sessionId}, door lines of files alone, which the door does not carry at its standing`,
         );
       }
       if (messages.length > 0) kept.push({ entry: { ...entry, messages }, record });
@@ -1788,8 +1817,8 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         author: buffered.author,
         senderClass: buffered.senderClass,
         text: buffered.text,
-        // A file the page sent carries its link; a file the Discord intake saved has none, since
-        // the page's store never held it.
+        // A file the page or the door sent carries its link; a file the Discord intake saved has
+        // none, since the files store never held it.
         files: (buffered.attachments ?? []).flatMap((file) => {
           const link = options.webFiles?.linkFor(file) ?? null;
           return link === null ? [] : [link];
@@ -2137,27 +2166,27 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
    * alike, from finding the live session to the hand-over: `line` carries everything that tells
    * the two apart. The answer is the line's status and whether its text was cut at the inbound
    * ceiling, which reads false where the line was refused before its text was bounded. A line that
-   * names no file is never answered `unknown-file`, and only a door line is answered `board-act`.
-   * Never throws.
+   * names no file is never answered `unknown-file`, and only a door line is answered `board-act`,
+   * so a page line's answer is typed without it. Never throws.
    */
   function deliverTyped(
     lineage: string,
     text: string,
-    fileIds: readonly [],
-    line: TypedLine,
-  ): Promise<{ status: DoorDeliveryStatus; truncated: boolean }>;
+    fileIds: readonly string[],
+    line: TypedLine & { surface: "web" },
+  ): Promise<{ status: WebDeliveryStatus; truncated: boolean }>;
   function deliverTyped(
     lineage: string,
     text: string,
     fileIds: readonly string[],
     line: TypedLine,
-  ): Promise<{ status: WebDeliveryStatus; truncated: boolean }>;
+  ): Promise<{ status: DoorDeliveryStatus; truncated: boolean }>;
   async function deliverTyped(
     lineage: string,
     text: string,
     fileIds: readonly string[],
     line: TypedLine,
-  ): Promise<{ status: WebDeliveryStatus | DoorDeliveryStatus; truncated: boolean }> {
+  ): Promise<{ status: DoorDeliveryStatus; truncated: boolean }> {
     /** A refusal made before the text was bounded, or of a text with nothing to cut. */
     const short = (status: WebDeliveryStatus): { status: WebDeliveryStatus; truncated: boolean } => ({ status, truncated: false });
     // The session is found by lineage, never by thread: the caller names the persona, and the
@@ -2182,8 +2211,9 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       return { status: "board-act", truncated };
     }
 
-    // Each id must name a file the page sent for this very session: an id the store never handed
-    // out, and one saved for another session, deliver nothing, before anything is posted or spent.
+    // Each id must name a file the page or the door sent for this very session: an id the store
+    // never handed out, and one saved for another session, deliver nothing, before anything is
+    // posted or spent.
     const uploads: WebUpload[] = [];
     for (const id of fileIds) {
       const upload = options.webFiles?.upload(id) ?? null;
@@ -2672,11 +2702,11 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       return status;
     },
 
-    async deliverDoor(lineage, name, text) {
+    async deliverDoor(lineage, name, text, fileIds = []) {
       // The caller's name for the writer, bounded as the gateway bounds a display name and whole
       // past an `@`. One the bound leaves nothing of reads as the door's own label.
       const person = boundedAuthor(name) || "portal";
-      return deliverTyped(lineage, text, [], {
+      return deliverTyped(lineage, text, fileIds, {
         name: person,
         author: doorAuthorLabel(person),
         senderId: `${DOOR_SENDER_PREFIX}${person}`,

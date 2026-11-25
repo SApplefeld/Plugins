@@ -1,8 +1,9 @@
 // The one path a file attached to a Discord message takes to reach a session: fetched from
 // Discord's CDN, bounded, and either handed back as the words of a pasted message or written
-// under the broker's state directory for the session to open with its own tools. The web page's
-// files take the same folder and the same writer through `createWebFiles` at the foot: a file the
-// operator sends from the page, and the copy of a file a reply lands, kept for the page to fetch.
+// under the broker's state directory for the session to open with its own tools. The files the web
+// page and the local door carry take the same folder and the same writer through `createWebFiles`
+// at the foot: a file the operator sends from the page or a portal person sends through the door,
+// and the copy of a file a reply lands, kept for the page or the door to fetch.
 //
 // This is the only code that fetches an attachment or writes one to disk, and nothing it reads out
 // of the attachment is trusted. The name decides a participant's kind, an operator's file is saved
@@ -19,6 +20,7 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { withoutInvisible } from "../sanitize.ts";
@@ -467,13 +469,14 @@ export function savedFilePath(root: string, sessionId: string, fileName: string)
 }
 
 // ---------------------------------------------------------------------------------------------
-// The web page's files
+// The web page's and the local door's files
 // ---------------------------------------------------------------------------------------------
 
 /**
- * One file the web page can name: a file the operator sent from the page (`upload`), saved for the
- * session to open, or the copy of a file a reply landed (`reply`), kept for the page to fetch. `name`
- * is the reduced name, the only form of the name the page and the thread are shown.
+ * One file the web page or the local door can name: a file the operator sent from the page or a
+ * portal person sent through the door with the door's key (`upload`), saved for the session to
+ * open, or the copy of a file a reply landed (`reply`), kept for the page or the door to fetch.
+ * `name` is the reduced name, the only form of the name the page, the door and the thread are shown.
  */
 export type WebFile = {
   kind: "upload" | "reply";
@@ -490,9 +493,57 @@ export type WebFileLink = { name: string; size: number; url: string };
 /** The page's link to a file the store holds under `id`. */
 export const WEB_FILE_URL_PREFIX = "/web/file/";
 
+/** The shape of a file id the web files store hands out: a random UUID, lower-case as Node writes it. */
+export const WEB_FILE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /**
- * The content type an uploaded file is kept and posted under. The page's file is the operator's,
- * saved as sent with no kind list, so nothing about its kind is claimed from its name.
+ * The body read whole, or `size` at the first byte past `maxBytes`, or null where the request failed
+ * or closed before its end. The count is of the bytes received and never a declared length, and the
+ * read stops at the cap: the request is paused and nothing more of it is kept, so an oversized
+ * upload costs at most the cap in memory. The bytes are kept as received and never decoded, so a
+ * file of any kind arrives whole. The operator's page and the local door read an upload through it.
+ */
+export function readUpload(request: IncomingMessage, maxBytes: number): Promise<Buffer | "size" | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
+    const settle = (outcome: Buffer | "size" | null): void => {
+      if (settled) return;
+      settled = true;
+      request.off("data", take);
+      resolve(outcome);
+    };
+    const take = (chunk: Buffer): void => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        chunks.length = 0;
+        request.pause();
+        settle("size");
+        return;
+      }
+      chunks.push(chunk);
+    };
+    request.on("data", take);
+    request.on("end", () => settle(Buffer.concat(chunks)));
+    request.on("error", () => settle(null));
+    request.on("close", () => settle(null));
+  });
+}
+
+/**
+ * A refusal of an upload whose body is unread or only part read: a status, no body, and the
+ * connection closed after it, so the rest of the body is never read or drained.
+ */
+export function refuseUpload(response: ServerResponse, status: number): void {
+  response.writeHead(status, { "content-length": 0, connection: "close" });
+  response.end();
+}
+
+/**
+ * The content type an uploaded file is kept and posted under. The page's file is the operator's
+ * and the door's is the door key's holder's, each saved as sent with no kind list, so nothing about
+ * its kind is claimed from its name.
  */
 const UPLOAD_CONTENT_TYPE = "application/octet-stream";
 
@@ -507,9 +558,9 @@ export type WebFilesOptions = {
 
 export type WebFiles = {
   /**
-   * Writes the bytes the page sent as `<root>/<sessionId>/web-<time>-<n>-<reducedName>`, whole and
-   * owner-only, and answers the id the page names it by in a later say post, or null where the path
-   * would not form or the write failed. A failed write leaves no file.
+   * Writes the bytes the page or the door sent as `<root>/<sessionId>/web-<time>-<n>-<reducedName>`,
+   * whole and owner-only, and answers the id the page's say post or the door's posted line names it
+   * by, or null where the path would not form or the write failed. A failed write leaves no file.
    */
   saveUpload: (sessionId: string, name: string, bytes: Uint8Array) => Promise<string | null>;
   /** The upload held under `id`, or null for an id this store did not hand out for an upload. */
@@ -554,13 +605,14 @@ export type WebFiles = {
 export const WEB_FILES_HELD = 1000;
 
 /**
- * The store of the web page's files. The ids are random and held in memory alone, so after a broker
- * restart a line keeps its file's name and size and its link answers 404. At most `WEB_FILES_HELD`
- * ids are held, the oldest forgotten first, and an id whose file is found gone when it is read is
- * forgotten then. Each file is written through `writeWhole`, the writer a Discord attachment takes,
- * under the session's folder that `savedFilePath` forms, so the retention prune sweeps these files
- * with the rest. `n` counts the files this store has named since the broker started, so two files
- * in one millisecond under one name are two files. Nothing here logs.
+ * The store of the files the web page and the local door carry, one store with one id space for
+ * both. The ids are random and held in memory alone, so after a broker restart a line keeps its
+ * file's name and size and its link answers 404. At most `WEB_FILES_HELD` ids are held, the oldest
+ * forgotten first, and an id whose file is found gone when it is read is forgotten then. Each file
+ * is written through `writeWhole`, the writer a Discord attachment takes, under the session's
+ * folder that `savedFilePath` forms, so the retention prune sweeps these files with the rest. `n`
+ * counts the files this store has named since the broker started, so two files in one millisecond
+ * under one name are two files. Nothing here logs.
  */
 export function createWebFiles(options: WebFilesOptions): WebFiles {
   const root = attachmentsRoot(options.stateDir);

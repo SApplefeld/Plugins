@@ -1810,12 +1810,18 @@ export async function startBroker(
   // The lineage a registered session's conversation lines go under, or null where it has none.
   const sessionLineage = (id: string): string | null =>
     registry.list().find((record) => record.sessionId === id)?.lineage ?? null;
-  // The talk page's files, both ways, under the same folder and the same switch as a Discord
-  // attachment: present only while the web surface is on, whatever the door is, and absent where
-  // attachments are off, so a host that takes no file from Discord takes none from the page and
-  // keeps no reply's file for it.
+  // Whether the local door runs at operator standing, settled once the key is read above. The
+  // files store below, the handled marks and the door's own reading of asks are each built for it.
+  const operatorDoor = doorKey !== null && config.doorStanding === "operator";
+  // The files of the talk page and the local door, both ways, under the same folder and the same
+  // switch as a Discord attachment: present where the web surface is on or the door runs at
+  // operator standing, so a host with the door alone still takes a file and keeps a reply's copy,
+  // and absent where attachments are off, so a host that takes no file from Discord takes none
+  // from the page or the door and keeps no reply's file for either.
   const webFiles =
-    web === null || config.attachments === "off" ? null : createWebFiles({ stateDir: path.dirname(config.stateFile) });
+    (web === null && !operatorDoor) || config.attachments === "off"
+      ? null
+      : createWebFiles({ stateDir: path.dirname(config.stateFile) });
   const outbound = createOutboundRouter({
     registry,
     threadFor: (sessionId) => threadFor(sessionId),
@@ -2123,7 +2129,6 @@ export async function startBroker(
   // operator standing, whose reading of asks hides by the marks. That reading prunes the marks only
   // where the web surface is off, since the web pass prunes from the reading the page draws. A
   // broker with neither opens no store and writes no file.
-  const operatorDoor = doorKey !== null && config.doorStanding === "operator";
   const marks = web === null && !operatorDoor ? null : openWatermarks(watermarksFileFor(config.stateFile), note);
   const askActs = marks === null ? null : createAskActs({ marks, log: logger });
   // The door's own reading of the roster and the ask ledgers, since the door may run on a host with
@@ -2159,10 +2164,10 @@ export async function startBroker(
           // The inbound router is built below, on a host with Discord and on one with no Discord
           // setting at all, so on a host whose Discord is half configured there is no router and no
           // session a line could reach, which `no-session` says.
-          deliverDoor: (lineage, name, text) =>
+          deliverDoor: (lineage, name, text, fileIds) =>
             inbound === null
               ? Promise.resolve({ status: "no-session", truncated: false })
-              : inbound.deliverDoor(lineage, name, text),
+              : inbound.deliverDoor(lineage, name, text, fileIds),
           // The door's five other paths, which read what a session waits on and settle it, answer a
           // persona's open ask and read a session's status, are served only where the host gives
           // the door operator standing: the door serves a path only where it holds that path's
@@ -2201,6 +2206,19 @@ export async function startBroker(
                   inbound === null
                     ? Promise.resolve("no-session" as const)
                     : inbound.settleDoor(lineage, name, verdict, nonce),
+                // The door's files, where attachments are on: the store the inbound router judges a
+                // line's ids by, so an upload is saved for the live session a line would reach,
+                // found the way the router finds it, and the cap a Discord attachment takes.
+                ...(webFiles === null
+                  ? {}
+                  : {
+                      files: {
+                        sessionFor: (lineage: string) => liveByLineage(registry.list(), lineage)?.sessionId ?? null,
+                        saveUpload: webFiles.saveUpload,
+                        open: webFiles.open,
+                        maxBytes: config.attachmentMaxBytes,
+                      },
+                    }),
               }),
           log: note,
           now: Date.now,
@@ -3365,14 +3383,18 @@ export async function startBroker(
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : config.port;
   // Said once, where the listener that serves it is bound. The line names the paths the door
-  // serves, three at participant standing and all eight at operator standing, and the standing the
-  // host gives the door, as the token `participant` or `operator`, and neither the key nor the file
-  // it was read from. It is where a host's operator reads the standing the door is running at.
+  // serves, three at participant standing, and eight or ten at operator standing: ten where the
+  // door is handed the files store, which switches its two file paths together. It names the
+  // standing the host gives the door, as the token `participant` or `operator`, and neither the
+  // key nor the file it was read from. It is where a host's operator reads the standing the door
+  // is running at.
   if (doorRoutes !== null) {
     const doorPaths =
-      config.doorStanding === "operator"
-        ? "/door/lineages, /door/lines, /door/line, /door/pending, /door/status, /door/answer, /door/permission and /door/ask"
-        : "/door/lineages, /door/lines and /door/line";
+      config.doorStanding !== "operator"
+        ? "/door/lineages, /door/lines and /door/line"
+        : webFiles === null
+          ? "/door/lineages, /door/lines, /door/line, /door/pending, /door/status, /door/answer, /door/permission and /door/ask"
+          : "/door/lineages, /door/lines, /door/line, /door/pending, /door/status, /door/answer, /door/permission, /door/ask, /door/upload and /door/file";
     note(`broker: the local door is on, serving ${doorPaths} on the loopback listener, at ${config.doorStanding} standing`);
     // On an operator host alone, where the pending read lists asks: whether it has a roster to
     // list them from, and the setting to write where it has none.
