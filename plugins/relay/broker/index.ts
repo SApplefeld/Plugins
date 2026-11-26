@@ -143,7 +143,8 @@ import {
   namesItsOwnFolder,
   pruneAttachments,
 } from "./routing/attachments.ts";
-import { createInboundRouter, voiceWhenReady } from "./routing/inbound.ts";
+import { createInboundRouter, saveMessageHolds, voiceWhenReady } from "./routing/inbound.ts";
+import { createMessageHold } from "./routing/message-hold.ts";
 import type { InboundRouter } from "./routing/inbound.ts";
 import { createResponseGateJournal } from "./routing/response-gate.ts";
 import { createInteractionRouter } from "./routing/interactions.ts";
@@ -3048,6 +3049,31 @@ export async function startBroker(
     path.dirname(config.stateFile),
     "response-gate-buffers.json",
   );
+  // Beside the buffers: the operator's lines held for a persona whose session cannot take them,
+  // written whole on every change through the snapshot writer. Made only where
+  // CHANNEL_MESSAGE_HOLD_MS is above 0 and the host has Discord, since the held lines are Discord
+  // lines; at 0 or in the local mode there is no hold and the file is neither read nor written,
+  // and one log line says where one is left on disk, since its lines are then not delivered. The
+  // router reads the file when it is built, before the Discord login lets a line in to write it
+  // over, and `armRestored` at the bind starts the restored lines' time limit, dropping with the
+  // expiry notice a lineage already older than the limit plus RELAY_RESTART_GRACE_MS. The bind is
+  // also the first moment a relay can attach, so no session is handed such a lineage first.
+  const messageHoldsFile = path.join(path.dirname(config.stateFile), "message-holds.json");
+  const messageHold =
+    discordLink === null || config.messageHoldMs === 0
+      ? null
+      : createMessageHold({ persist: (holds) => saveMessageHolds(messageHoldsFile, holds), log: note });
+  if (
+    messageHold === null &&
+    (await stat(messageHoldsFile).then(
+      () => true,
+      () => false,
+    ))
+  ) {
+    note(
+      `broker: the message holds at ${messageHoldsFile} are left unread, since the hold is off or the host has no Discord`,
+    );
+  }
   // The inbound router, built once here for a host with Discord and for one in the local mode.
   const router =
     inboundGate === null
@@ -3147,6 +3173,17 @@ export async function startBroker(
           // Discord id, so the restart's log line says who asked; the message text never reaches it.
           restart: ({ threadId, senderId }) =>
             restart(`operator account ${senderId} typed broker restart in thread ${threadId}`),
+          // The message hold, its time limit, and its file restored beside the gate's buffers, only
+          // where the setting is above 0 on a host with Discord.
+          ...(messageHold === null
+            ? {}
+            : {
+                messageHold: {
+                  hold: messageHold,
+                  holdMs: config.messageHoldMs,
+                  restore: { file: messageHoldsFile, graceMs: RELAY_RESTART_GRACE_MS },
+                },
+              }),
         });
   inbound = router;
   if (router !== null) {
@@ -3439,7 +3476,9 @@ export async function startBroker(
       relays.openRestartWindows(RELAY_RESTART_GRACE_MS);
       // The restored buffers' age caps start here too, beside the windows they are floored at:
       // armed when the router was built, they would spend the Discord login awaited between the
-      // two on the window a relay has to come back.
+      // two on the window a relay has to come back. The message hold's restored lines take their
+      // time limit from here on the same reasoning, and a lineage already past the limit plus the
+      // window is dropped here, before this callback returns and any relay connection is accepted.
       inbound?.armRestored();
       resolve();
     });
@@ -3552,10 +3591,11 @@ export async function startBroker(
       });
       // The composer's seam. The inbound router exists on a host with Discord and on one with no
       // Discord setting at all, and on a host whose Discord is half configured there is no router
-      // and no session a line could reach, which `no-session` says.
+      // and no session a line could reach, which `no-session` says. The composer's line is the one
+      // the message hold may keep for the lineage's next session; the act routes below never are.
       registerSayHandler(webServer.register, {
-        deliverWeb: (lineage, login, text, files) =>
-          inbound === null ? Promise.resolve("no-session") : inbound.deliverWeb(lineage, login, text, files),
+        deliverSay: (lineage, login, text, files) =>
+          inbound === null ? Promise.resolve("no-session") : inbound.deliverSay(lineage, login, text, files),
         answerWeb: (lineage, login, text) =>
           inbound === null ? Promise.resolve("no-session") : inbound.answerWeb(lineage, login, text),
         log: logger,

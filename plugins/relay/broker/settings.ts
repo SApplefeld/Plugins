@@ -106,6 +106,9 @@ export const SETTINGS: readonly Setting[] = [
   { key: "CHANNEL_RESPONSE_GATE_QUIET_MS", kind: "broker", meaning: "Quiet time after which a held buffer is put to the judge", scope: "fleet", unset: "default" },
   { key: "CHANNEL_RESPONSE_GATE_THRESHOLD", kind: "broker", meaning: "The judge's probability at or above which a held buffer delivers", scope: "fleet", unset: "default" },
 
+  // The message hold.
+  { key: "CHANNEL_MESSAGE_HOLD_MS", kind: "broker", meaning: "How long an operator's lines to a persona with no reachable session are held for its next session; 0 turns the hold off", scope: "fleet", unset: "default" },
+
   // Attachments.
   { key: "CHANNEL_ATTACHMENTS", kind: "broker", meaning: "Who may attach a file that reaches a session", scope: "fleet", unset: "default" },
   { key: "CHANNEL_ATTACHMENT_MAX_BYTES", kind: "broker", meaning: "The most bytes one attached file may carry", scope: "fleet", unset: "default" },

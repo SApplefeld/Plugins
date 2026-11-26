@@ -25,6 +25,12 @@
 // the counted notice a session's end posts. In `off` and `shadow` the file is neither written nor
 // read.
 //
+// An operator's line to a persona whose session cannot take it is held, where the host turns the
+// message hold on: the record carries a lineage, the thread is a Discord thread, and the record is
+// ended or has no pipe. The thread is told once, and the line goes to the lineage's next session
+// with a pipe and a thread, under a line saying it was held, or is dropped at the time limit with a
+// counted notice. The broker writes the held lines to a file, which the broker reads at its start.
+//
 // A process token identifies a pipe. It is not evidence about who sent a message, and no check
 // here consults it for that.
 import { readFileSync } from "node:fs";
@@ -43,8 +49,19 @@ import type { RestartAnswer } from "../index.ts";
 import { isLocalConversationId } from "../local-surface.ts";
 import { liveByLineage } from "../registry.ts";
 import type { Registry, SessionRecord } from "../registry.ts";
-import { reducedName, rootPrefix } from "./attachments.ts";
+import { MAX_ATTACHMENTS_PER_MESSAGE, acceptedSource, reducedName, rootPrefix } from "./attachments.ts";
 import type { AttachmentIntake, InboundAttachment, RefusalCause } from "./attachments.ts";
+import { writeSnapshot } from "../persistence.ts";
+import {
+  HOLD_FULL_NOTICE,
+  HOLD_POLL_MS,
+  MAX_HELD_LINES,
+  MESSAGE_HOLDS_FORMAT_VERSION,
+  declassedHoldNotice,
+  expiredHoldNotice,
+  heldNotice,
+} from "./message-hold.ts";
+import type { AdmittedLine, ExpiredHold, HeldLine, MessageHold, StoredHold, StoredLine } from "./message-hold.ts";
 import type { TalkFile, TalkTap } from "../web/talk.ts";
 import type { RelayEvent, RelayHub } from "./relays.ts";
 import {
@@ -278,6 +295,15 @@ export type WebDeliveryStatus =
   | "unknown-file";
 
 /**
+ * What a line typed in the page's composer became: each status with the meaning
+ * `WebDeliveryStatus` gives it, and two of the message hold's. `held` is that no session of the
+ * lineage could take the line, so it was kept for the lineage's next session, and the thread is told
+ * if it is dropped. `hold-full` is that no session could take it and the lineage's hold is full, so
+ * nothing was kept or sent. Only the say route answers these; an act and a door line never do.
+ */
+export type WebSayStatus = WebDeliveryStatus | "held" | "hold-full";
+
+/**
  * What a line handed in through the local door became: each status with the meaning
  * `WebDeliveryStatus` gives it. `unknown-file` is a file id the store does not hold as an upload
  * for the session the line would reach, whether the door or the page sent it.
@@ -466,6 +492,19 @@ type TypedLine = {
  * is rendered, and the word a log line names its surface by.
  */
 type TypedAct = Pick<TypedLine, "name" | "author" | "senderId" | "senderClass" | "render" | "surface">;
+
+/** What tells a page line apart, for the admitted `login`: the composer's line and an act's alike. */
+function pageLine(login: string): TypedLine & { surface: "web" } {
+  return {
+    name: webAuthorName(login),
+    author: webAuthorLabel(login),
+    senderId: `${WEB_SENDER_PREFIX}${login}`,
+    senderClass: "operator",
+    render: renderPageLine,
+    boardActs: true,
+    surface: "web",
+  };
+}
 
 /** A message the router built, carrying the paths saved from it, or no field where there are none. */
 function withFiles(message: BufferedMessage, files: readonly string[]): BufferedMessage {
@@ -736,6 +775,20 @@ export type InboundRouterOptions = {
    * `broker restart` is text like any other and reaches the session.
    */
   restart?: (input: { threadId: string; senderId: string }) => RestartAnswer;
+  /**
+   * The message hold and its time limit, the host's `CHANNEL_MESSAGE_HOLD_MS`, present only where
+   * that setting is above 0. An operator's line to a session of a lineage that cannot take it is
+   * held here and handed to the lineage's next session that has a pipe and a thread. Absent, such a
+   * line takes the ended or unreachable notice, as every line did before the hold.
+   *
+   * `restore` names the hold's file and the relay restart window. With it, the lines an earlier
+   * broker process left in the file are restored when the router is built, before any line can be
+   * admitted and write the file over. `armRestored` drops, with the expiry notice, each restored
+   * lineage whose oldest line is then more than `holdMs` plus the window old, and starts every other
+   * one's time limit no earlier than the window from then, as the gate's `buffers` are restored and
+   * armed. Absent, nothing is read.
+   */
+  messageHold?: { hold: MessageHold; holdMs: number; restore?: { file: string; graceMs: number } };
 };
 
 export type InboundRouter = {
@@ -771,6 +824,18 @@ export type InboundRouter = {
    * event carries their saved paths, and the thread's copy carries the files. Never throws.
    */
   deliverWeb: (lineage: string, login: string, text: string, fileIds: readonly string[]) => Promise<WebDeliveryStatus>;
+  /**
+   * `deliverWeb` for the line the page's composer sends, which the message hold may keep. With a
+   * hold, a line that names no file, is no workers-board act and has visible words is held where no
+   * session of the lineage can take it now and a record of the lineage has a Discord thread: the
+   * newest record ended, the live record's pipe gone, the live record's thread not yet bound while an
+   * earlier record has one, or the lineage still holding lines after the hand-over this waits for.
+   * Such a line is offered to that record's rate window, held under that thread, and answered `held`,
+   * or `hold-full` where the lineage holds the most lines a hold takes, with the thread told on the
+   * hold's rule. A held line is posted to the thread when it is handed over, never before. Every
+   * other line takes `deliverWeb`'s path and answer. Never throws.
+   */
+  deliverSay: (lineage: string, login: string, text: string, fileIds: readonly string[]) => Promise<WebSayStatus>;
   /**
    * Hands a line `name` wrote, handed in through the local door, to the live session carrying
    * `lineage`, on the path a page line takes: the same bound on the text, the same rate window, and
@@ -846,14 +911,17 @@ export type InboundRouter = {
   /**
    * Drops every held buffer and its timer, delivering nothing and writing nothing, so the buffers
    * file keeps what was held for the next start to restore. For the broker stopping: a held
-   * buffer is not a reason to wait, and its timer must not fire into pipes being torn down. A
-   * no-op with the gate off. Never throws.
+   * buffer is not a reason to wait, and its timer must not fire into pipes being torn down. The
+   * message hold's timer stops the same way, and its held lines stay in its file with no notice
+   * posted. A no-op with the gate off and no hold. Never throws.
    */
   close: () => void;
   /**
    * A relay attached for `processToken`. Delivers the buffer restored across a broker restart for
    * the session that token holds, if one is still held; a buffer opened since stays held. Called
-   * by the relay hub's attach signal. A no-op with the gate off or in shadow. Never throws.
+   * by the relay hub's attach signal. With a message hold, every attach also starts a hand-over of
+   * each lineage whose next session can now take its lines, with the gate off or on. The buffer's
+   * part is a no-op with the gate off or in shadow. Never throws.
    */
   relayAttached: (processToken: string) => void;
   /**
@@ -861,7 +929,13 @@ export type InboundRouter = {
    * message as of now and floored at the relay restart window. For the moment the listener binds,
    * beside the relay hub's restart windows: the restore itself runs when the router is built,
    * before the Discord login is awaited, and a cap measured then would spend the login on the
-   * window a relay has to come back. A no-op with the gate off or in shadow. Never throws.
+   * window a relay has to come back. The message hold's restored lines are treated the same way:
+   * restored when the router is built, their time limit starts here, no earlier than the restart
+   * window from now, and the hold's poll is armed where the hold holds lines. A restored lineage
+   * whose oldest line is already more than the time limit plus the restart window old is removed
+   * from the hold before this returns, so no relay attaching after it is handed those lines, and its
+   * threads are told with the expiry notice, posted after and not awaited. The buffer's part is a
+   * no-op with the gate off or in shadow. Never throws.
    */
   armRestored: () => void;
   /**
@@ -1103,6 +1177,232 @@ export function loadHeldBuffers(
   return buffers;
 }
 
+/** The most code points a held file's id, name or content type may hold. */
+const MAX_HELD_FILE_FIELD = 255;
+
+/** The most code points a held file's link may hold. */
+const MAX_HELD_FILE_URL = 2_048;
+
+/** How many code points a text holds, so a bound is never met early by a surrogate pair. */
+function codePoints(text: string): number {
+  return [...text].length;
+}
+
+/**
+ * One attachment description of a held Discord line, read back from the hold file, or null where it
+ * is not one this broker writes. The link must pass `acceptedSource`, the check the intake applies
+ * before it fetches one, since the hand-over fetches what this names: a planted link to another
+ * host is refused here as the intake would refuse it there, and refuses the whole file with it.
+ */
+function heldFileOf(value: unknown): InboundAttachment | null {
+  if (!isRecord(value)) return null;
+  const { id, name, size, contentType, url } = value;
+  if (typeof id !== "string" || typeof name !== "string" || typeof url !== "string") return null;
+  if (codePoints(id) > MAX_HELD_FILE_FIELD || codePoints(name) > MAX_HELD_FILE_FIELD) return null;
+  // Finite, not merely a number: JSON.parse turns 1e999 into Infinity.
+  if (typeof size !== "number" || !Number.isFinite(size)) return null;
+  if (contentType !== null && (typeof contentType !== "string" || codePoints(contentType) > MAX_HELD_FILE_FIELD)) {
+    return null;
+  }
+  if (codePoints(url) > MAX_HELD_FILE_URL || !acceptedSource(url)) return null;
+  return { id, name, size, contentType, url };
+}
+
+/**
+ * One held line of the hold file, parsed and never trusted, on `heldBufferOf`'s discipline: every
+ * string is bounded again by the guard the wire applies, and the ids take the shapes the buffers
+ * file's reader accepts. A held line's thread is a Discord id, since the hold takes no line from a
+ * local conversation, and its time is clamped to the clock, so a clock stepped back across the
+ * outage keeps the time limit finite. Its text, once the invisible class is stripped, is within `MAX_INBOUND_TEXT_LENGTH`.
+ *
+ * A Discord line is an operator's message with a Discord id, a sender id, a name that bounds to
+ * something and no saved file, and at most `MAX_ATTACHMENTS_PER_MESSAGE` files, each as
+ * `heldFileOf` accepts it, with a text or a file. A quote it carries is one `heldQuoteOf` accepts.
+ * A page line has a text, a sender id under `WEB_SENDER_PREFIX` naming a login, and a `copyId` and
+ * `copyThreadId` that are both null, or a Discord message id and the Discord thread id its copy was
+ * posted to; its name and author label are built again from that login, so the file's own labels
+ * decide nothing.
+ *
+ * Anything else is null. The line is built again from the fields named here alone, so a field
+ * this broker would not have written is left behind and decides nothing.
+ */
+function heldLineOf(value: unknown, now: number): StoredLine | null {
+  if (!isRecord(value) || typeof value.threadId !== "string") return null;
+  const threadId = clean(value.threadId);
+  if (!SNOWFLAKE.test(threadId)) return null;
+  const heldAt = value.heldAt;
+  if (typeof heldAt !== "number" || !Number.isFinite(heldAt) || heldAt < 0) return null;
+  const at = Math.min(heldAt, now);
+
+  if (value.surface === "discord") {
+    const { message, files } = value;
+    if (!isRecord(message) || !Array.isArray(files) || files.length > MAX_ATTACHMENTS_PER_MESSAGE) return null;
+    if (
+      typeof message.id !== "string" ||
+      typeof message.senderId !== "string" ||
+      typeof message.author !== "string" ||
+      typeof message.text !== "string" ||
+      typeof message.truncated !== "boolean"
+    ) {
+      return null;
+    }
+    // The hold takes an operator's line alone, and takes it before any file is saved.
+    if (message.senderClass !== "operator" || message.attachments !== undefined) return null;
+    const id = clean(message.id);
+    const senderId = clean(message.senderId);
+    const author = boundedAuthor(message.author);
+    const text = visibleText(message.text);
+    // A Discord sender is a Discord id, so a page or door prefix cannot pass as one and be classed
+    // again on that surface's rule at the hand-over.
+    if (!SNOWFLAKE.test(id) || !SNOWFLAKE.test(senderId) || author === "") return null;
+    if (codePoints(text) > MAX_INBOUND_TEXT_LENGTH) return null;
+    const held: InboundAttachment[] = [];
+    for (const file of files as unknown[]) {
+      const read = heldFileOf(file);
+      if (read === null) return null;
+      held.push(read);
+    }
+    if (text === "" && held.length === 0) return null;
+    const quote = message.quote === undefined ? undefined : heldQuoteOf(message.quote);
+    if (quote === null) return null;
+    return {
+      surface: "discord",
+      threadId,
+      heldAt: at,
+      message: {
+        id,
+        senderId,
+        author,
+        senderClass: "operator",
+        text,
+        truncated: message.truncated,
+        ...(quote === undefined ? {} : { quote }),
+      },
+      files: held,
+    };
+  }
+
+  if (value.surface === "web") {
+    const { senderId: sender, name, author, text: words, truncated, copyId, copyThreadId: copyThread } = value;
+    if (
+      typeof sender !== "string" ||
+      typeof name !== "string" ||
+      typeof author !== "string" ||
+      typeof words !== "string" ||
+      typeof truncated !== "boolean"
+    ) {
+      return null;
+    }
+    // The copy and its thread are taken together or not at all, and the thread takes the line's own
+    // thread's shape check, so the receipts never name a message without the thread that holds it.
+    let copy: string | null = null;
+    let copyThreadId: string | null = null;
+    if (copyId !== null || copyThread !== null) {
+      if (typeof copyId !== "string" || !SNOWFLAKE.test(copyId) || typeof copyThread !== "string") return null;
+      copy = copyId;
+      copyThreadId = clean(copyThread);
+      if (!SNOWFLAKE.test(copyThreadId)) return null;
+    }
+    const senderId = clean(sender);
+    const login = senderId.startsWith(WEB_SENDER_PREFIX) ? senderId.slice(WEB_SENDER_PREFIX.length) : "";
+    const text = visibleText(words);
+    if (login === "" || text === "" || codePoints(text) > MAX_INBOUND_TEXT_LENGTH) return null;
+    return {
+      surface: "web",
+      threadId,
+      heldAt: at,
+      name: webAuthorName(login),
+      author: webAuthorLabel(login),
+      senderId,
+      text,
+      truncated,
+      copyId: copy,
+      copyThreadId,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * The held lines an earlier broker process left in the message hold's file, read on
+ * `loadHeldBuffers`'s discipline: a missing file is an empty hold, and a file that cannot be read,
+ * is not JSON, is not a snapshot, is another format or holds an entry the file cannot vouch for
+ * restores nothing and logs one line naming the file and never its content. One entry outside the
+ * bounds refuses the whole file: a lineage named twice, a lineage that cleans to nothing, a list of
+ * no lines or more than `MAX_HELD_LINES`, or a line `heldLineOf` refuses. The bounds are what keep a
+ * planted file from filling a session's context or naming a link the broker would fetch.
+ */
+export function loadMessageHolds(
+  file: string,
+  options: { now: () => number; log: (message: string) => void },
+): StoredHold[] {
+  let raw: string;
+  try {
+    raw = readFileSync(file, "utf8");
+  } catch (error) {
+    if (isRecord(error) && error.code === "ENOENT") {
+      options.log(`routing: no message holds at ${file}, restoring none`);
+      return [];
+    }
+    options.log(`routing: cannot read the message holds at ${file}, restoring none: ${String(error)}`);
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    options.log(`routing: the message holds at ${file} are not valid JSON, restoring none`);
+    return [];
+  }
+
+  if (!isRecord(parsed) || !Array.isArray(parsed.holds)) {
+    options.log(`routing: the message holds at ${file} are not a snapshot, restoring none`);
+    return [];
+  }
+  if (parsed.version !== MESSAGE_HOLDS_FORMAT_VERSION) {
+    options.log(
+      `routing: the message holds at ${file} are not format ` +
+        `${String(MESSAGE_HOLDS_FORMAT_VERSION)}, restoring none`,
+    );
+    return [];
+  }
+
+  const holds: StoredHold[] = [];
+  const lineages = new Set<string>();
+  const now = options.now();
+  const malformed = (): StoredHold[] => {
+    options.log(`routing: the message holds at ${file} hold a malformed entry, restoring none`);
+    return [];
+  };
+  for (const entry of parsed.holds as unknown[]) {
+    if (!isRecord(entry) || typeof entry.lineage !== "string" || !Array.isArray(entry.lines)) return malformed();
+    const lineage = clean(entry.lineage);
+    const listed = entry.lines as unknown[];
+    if (lineage === "" || lineages.has(lineage)) return malformed();
+    if (listed.length === 0 || listed.length > MAX_HELD_LINES) return malformed();
+    const lines: StoredLine[] = [];
+    for (const value of listed) {
+      const line = heldLineOf(value, now);
+      if (line === null) return malformed();
+      lines.push(line);
+    }
+    lineages.add(lineage);
+    holds.push({ lineage, lines });
+  }
+  return holds;
+}
+
+/**
+ * The message hold's lines on disk, written whole through the registry snapshot's own atomic write,
+ * as `saveHeldBuffers` writes the gate's, for the owning user only, since the file holds message
+ * text. `loadMessageHolds` reads what this writes. Throws on failure; the hold logs that and holds on.
+ */
+export function saveMessageHolds(file: string, holds: readonly StoredHold[]): void {
+  writeSnapshot(file, JSON.stringify({ version: MESSAGE_HOLDS_FORMAT_VERSION, holds }, null, 2));
+}
+
 /**
  * A session whose thread was never reached is not addressed by this message, and a session with no
  * thread at all cannot be. The registry is small (a handful of sessions per host, plus a day of
@@ -1176,6 +1476,12 @@ export function unreachableNotice(count: number): string {
     "is still running; it was started without the relay, or the relay is reconnecting."
   );
 }
+
+/**
+ * How long a hold's drop or lost-standing notice is posted again on each tick while the thread's
+ * floor refuses it or it fails. Past it the notice is given up with one log line.
+ */
+const OWED_NOTICE_MS = 600_000;
 
 /**
  * Posted after a cut message was delivered, so the loss of the tail is never silent. Only the
@@ -1390,13 +1696,16 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
    * after a blank line where the message carrying both passes the event budget with its saved
    * paths on it, measured as the gate measures a held buffer; a paste that does not pass is saved
    * as a file instead, so no paste is ever cut. The log line carries counts, the declared bytes
-   * and the causes, never a name, a URL or any of the text.
+   * and the causes, never a name, a URL or any of the text. `heldAt` is the held line's time on the
+   * message hold's hand-over, whose event opens with the wider `holdLine`, so the paste is measured
+   * with that line in front.
    */
   async function takeIn(
     intake: AttachmentIntake,
     message: InboundMessage,
     held: BufferedMessage,
     sessionId: string,
+    heldAt?: number,
   ): Promise<{ held: BufferedMessage; refusals: NoticeRefusal[] }> {
     const files = message.attachments;
     const result = await intake.take(files, held.senderClass, sessionId, message.messageId);
@@ -1409,7 +1718,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       const pasted = result.paste.text.trim();
       const joined = text === "" ? pasted : `${text}\n\n${pasted}`;
       const candidate = withFiles({ ...held, text: joined }, saved);
-      if (pasted !== "" && !overBudget(message.threadId, [candidate])) {
+      if (pasted !== "" && !overBudget(message.threadId, [candidate], heldAt)) {
         text = joined;
         paste = `inline (${String([...pasted].length)} code points)`;
       } else {
@@ -2162,14 +2471,670 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     await after;
   }
 
+  // The message hold, present where the host's `CHANNEL_MESSAGE_HOLD_MS` is above 0. An operator's
+  // Discord line to a session of a lineage that cannot take it is held here, by lineage, and handed
+  // to the lineage's next session that is live, has a pipe and has a thread. Three callers start a
+  // hand-over: a relay attaching, the poll while anything is held, and a live line to a lineage that
+  // holds lines, which waits for it before entering its thread's turn.
+  const messageHold = options.messageHold?.hold ?? null;
+  const holdMs = options.messageHold?.holdMs ?? 0;
+  // The hand-over running for each lineage, so a caller that finds one waits for it and starts none.
+  const handing = new Map<string, Promise<void>>();
+  // The notices hand-overs left posting after their writes, each gone once settled, so the poll's
+  // tick can wait for them where a live line does not.
+  const handNotices = new Set<Promise<void>>();
+  // The poll's timer, null while none is armed. A tick that is running arms the next one itself, and
+  // nothing arms one once the router is closed.
+  let holdTimer: NodeJS.Timeout | null = null;
+  let ticking = false;
+  let holdClosed = false;
+  // The hold's notices the thread's floor refused or that failed, kept in memory alone and posted
+  // again on each tick: at most one held notice for a lineage, and each drop or lost-standing notice
+  // with its thread, its count and when it was first owed. A batch of drop or lost-standing notices
+  // is listed whole before its first post, each marked `posting` until its own first post settles,
+  // so a held notice for any of their threads waits behind them and the poll does not post one twice.
+  const owedHeld = new Map<string, { threadId: string; text: string }>();
+  type OwedNotice = {
+    threadId: string;
+    text: string;
+    count: number;
+    since: number;
+    what: string;
+    posting: boolean;
+  };
+  const owed: OwedNotice[] = [];
+  // The lineages whose thread has been told of the hold, by a held notice posted or owed, since the
+  // lineage last held nothing. `forgetTold` takes a lineage out wherever lines leave the hold and
+  // where a line is about to be admitted, so the set keeps a lineage only while it holds lines.
+  const told = new Set<string>();
+  // What an earlier broker process held, read once here, when the router is built, so no line is
+  // admitted before it and no admit writes the file over before it is read. Each restored lineage's
+  // time limit waits, unset, for `armRestored` at the bind, as the gate's restored buffers' age caps
+  // do; there a lineage already older than the limit plus the restart window is dropped with the
+  // expiry notice, and every other one takes its limit. A missing or unusable file is one log line
+  // from the loader and no write. A restored lineage counts as told, so a restart never tells its
+  // thread a held notice a second time.
+  if (messageHold !== null && options.messageHold?.restore !== undefined) {
+    messageHold.restore(
+      loadMessageHolds(options.messageHold.restore.file, { now, log }),
+      Number.POSITIVE_INFINITY,
+    );
+    for (const { lineage } of messageHold.lineages()) told.add(lineage);
+  }
+
+  /** Whether the hold holds any line for `lineage`. */
+  function holdsLines(lineage: string): boolean {
+    return messageHold !== null && messageHold.lines(lineage).length > 0;
+  }
+
+  /**
+   * The session a lineage's held lines go to now, with its thread, or null where none can take
+   * them: the lineage's newest record that is not ended, with a pipe attached and a thread bound.
+   */
+  function deliverable(lineage: string): { record: SessionRecord; threadId: string } | null {
+    const record = liveByLineage(options.registry.list(), lineage);
+    if (record === null || !options.relays.attached(record.processToken)) return null;
+    const threadId = options.threadFor(record.sessionId);
+    return threadId === null ? null : { record, threadId };
+  }
+
+  /**
+   * The line `line` is held as, read through `heldLineOf`, the hold file's own reader, or null where
+   * that reader would refuse it: one such line would make the next start refuse the whole file. On
+   * either surface the thread is a Discord id and the text is within the bound. A Discord line's
+   * message and sender are Discord ids, its name bounds to something, its quote is one the reader
+   * takes, and its files are at most `MAX_ATTACHMENTS_PER_MESSAGE`, each with the field bounds and a
+   * link that passes `acceptedSource`. A page line's sender is a `web:` login that cleans to
+   * something, its text has visible words, and its copy id and copy thread are null; its name and
+   * author are built again from the login, as the reader builds them. The lineage is one the reader
+   * keeps as it is.
+   */
+  function holdable(lineage: string, line: AdmittedLine): AdmittedLine | null {
+    if (lineage === "" || clean(lineage) !== lineage) return null;
+    const at = now();
+    const read = heldLineOf({ ...line, heldAt: at }, at);
+    if (read === null || read.surface !== line.surface || read.threadId !== line.threadId) return null;
+    const { heldAt, ...kept } = read;
+    return kept;
+  }
+
+  /**
+   * Forgets that `lineage`'s thread was told of the hold, and drops any held notice still owed to
+   * it, where the lineage holds nothing, so the next line it holds is told afresh. Called before a
+   * line is admitted and after every removal from the hold.
+   */
+  function forgetTold(lineage: string): void {
+    if (holdsLines(lineage)) return;
+    told.delete(lineage);
+    owedHeld.delete(lineage);
+  }
+
+  /**
+   * Tells `lineage`'s thread `threadId` that its lines are held, and counts the lineage as told
+   * before the post, so no other caller tells it meanwhile. A notice the floor refuses or that fails
+   * is owed to the poll, but only while the lineage is still told: a lineage emptied during the post
+   * owes nothing. Where a drop or lost-standing notice for the thread is being posted or is owed, the
+   * held notice is owed at once and waits behind it, so the thread never reads that nothing is held
+   * after it was told this line is.
+   */
+  async function tellHeld(lineage: string, threadId: string): Promise<void> {
+    told.add(lineage);
+    const text = heldNotice(holdMs);
+    if (dropOwedTo(threadId)) {
+      owedHeld.set(lineage, { threadId, text });
+      armHoldTimer();
+      return;
+    }
+    if ((await notice(threadId, text)) === "posted" || !told.has(lineage)) return;
+    owedHeld.set(lineage, { threadId, text });
+    armHoldTimer();
+  }
+
+  /**
+   * Holds one operator's line, offered to the record's rate window first, and tells the thread on
+   * the hold's rule. The held notice goes where no held notice has been posted or owed for the
+   * lineage since it last held nothing, and no other session of the lineage can take the line now,
+   * live with a pipe and a thread. A line another session can take is held for the poll to hand to
+   * it, with no notice, since the notice would say no session can be reached; where that session
+   * goes first, the poll's tick tells the thread. A restored lineage counts as told. A line where the
+   * lineage holds `MAX_HELD_LINES` takes the full notice. A held notice the floor refuses or that
+   * fails is owed. The full notice is not, and its log line is its record. The one path a Discord
+   * line and a page line are held by, answering what became of the line: `rate` where the window
+   * refused it, which nothing is posted for, `full`, or `held`.
+   */
+  async function holdMessage(
+    hold: MessageHold,
+    record: SessionRecord,
+    lineage: string,
+    threadId: string,
+    line: AdmittedLine,
+  ): Promise<"held" | "full" | "rate"> {
+    if (!withinRate(record.sessionId)) {
+      log(`routing: session ${record.sessionId} is over its inbound rate ceiling, dropping`);
+      return "rate";
+    }
+    forgetTold(lineage);
+    if (hold.admit(lineage, line, now()) === "full") {
+      log(`routing: the hold for lineage ${lineage} is full, so a line in thread ${threadId} was not kept`);
+      if ((await notice(threadId, HOLD_FULL_NOTICE)) === "floored") {
+        log(`routing: the hold-full notice for thread ${threadId} was floored, the log line is its record`);
+      }
+      return "full";
+    }
+    log(`routing: held a line for lineage ${lineage}, whose session ${record.sessionId} cannot take it`);
+    armHoldTimer();
+    if (told.has(lineage) || deliverable(lineage) !== null) return "held";
+    await tellHeld(lineage, threadId);
+    return "held";
+  }
+
+  /** Whether a drop or lost-standing notice for `threadId` is being posted or is owed. */
+  function dropOwedTo(threadId: string): boolean {
+    return owed.some((entry) => entry.threadId === threadId);
+  }
+
+  /**
+   * Posts a batch of drop or lost-standing notices in order. Every one is listed as owed before the
+   * first post, so a held notice for a thread later in the batch waits behind its notice, and each
+   * stays owed where the floor refuses it or it fails. Each one's 10 minutes count from its own first
+   * post. A router closed during the batch posts the rest of it no more.
+   */
+  async function tell(notices: ReadonlyArray<Pick<OwedNotice, "threadId" | "text" | "count" | "what">>): Promise<void> {
+    const entries: OwedNotice[] = notices.map((item) => ({ ...item, since: now(), posting: true }));
+    owed.push(...entries);
+    for (const entry of entries) {
+      if (holdClosed) return;
+      entry.since = now();
+      const result = await notice(entry.threadId, entry.text);
+      entry.posting = false;
+      const at = owed.indexOf(entry);
+      if (at === -1) continue;
+      if (result === "posted") owed.splice(at, 1);
+      else armHoldTimer();
+    }
+  }
+
+  /**
+   * Reports lineages the time limit took out of the hold, by the poll's `expire` or by the bind's
+   * `release`: each logged with its lineage and count alone, forgotten as told where it now holds
+   * nothing, and told once to
+   * each thread its lines were held under, with that thread's count.
+   */
+  async function tellDropped(dropped: readonly ExpiredHold[]): Promise<void> {
+    const notices: Array<Pick<OwedNotice, "threadId" | "text" | "count" | "what">> = [];
+    for (const { lineage, lines } of dropped) {
+      log(`routing: dropped ${String(lines.length)} held lines of lineage ${lineage} at the time limit`);
+      const counts = new Map<string, number>();
+      for (const line of lines) counts.set(line.threadId, (counts.get(line.threadId) ?? 0) + 1);
+      forgetTold(lineage);
+      for (const [threadId, count] of counts) {
+        notices.push({ threadId, text: expiredHoldNotice(count, holdMs), count, what: "drop" });
+      }
+    }
+    if (notices.length > 0) await tell(notices);
+  }
+
+  /**
+   * Posts a typed line's copy into `threadId` as the bot, the one copy a page or door line leaves in
+   * the thread whether it is delivered live or handed over from the hold. Answers whether the first
+   * post landed, as `posted`, and its message id, null where nothing was posted or the post answered
+   * no id; with no page seam nothing is posted and `posted` is false. The copy is
+   * rendered by the machinery a voice line is rendered by, so a typed line cannot draw an
+   * angle-bracket chip, such as a mention pill, a timestamp chip, a channel link or a custom emoji,
+   * or open a quoted block in the thread, and split where it is longer than one post. Only the first
+   * post is awaited: its id is the line's, the message the receipts are painted on. The posts after
+   * it follow outside the caller's wait, in order and stopped at the first refusal as a refused first
+   * post stops them all, so a slow file post neither holds the thread's turn nor runs the page's
+   * request past its timeout into a second Send of the same line. Each failure is logged with the
+   * session and never the words.
+   */
+  async function postCopy(
+    threadId: string,
+    sessionId: string,
+    line: Pick<TypedLine, "name" | "render" | "surface">,
+    words: string,
+    uploads: readonly WebUpload[],
+  ): Promise<{ posted: boolean; id: string | null }> {
+    const page = options.page;
+    if (page === undefined) return { posted: false, id: null };
+    const posts = pagePosts(line.render, line.name, words, uploads);
+    const post = async (part: { text: string; upload: WebUpload | null }): Promise<{ ok: boolean; messageId: string | null }> => {
+      let file: { name: string; data: Uint8Array; contentType: string } | undefined;
+      if (part.upload !== null) {
+        const data = (await options.webFiles?.bytesOf(part.upload.id)) ?? null;
+        // The session still gets the path; the thread's copy goes without the file.
+        if (data === null) log(`routing: a file of the ${line.surface} line for session ${sessionId} could not be read for its thread copy`);
+        else file = { name: part.upload.name, data, contentType: part.upload.contentType };
+      }
+      try {
+        const outcome = await page.post({ threadId, text: part.text, ...(file === undefined ? {} : { file }) });
+        if (outcome.status !== "ok") {
+          log(`routing: the thread refused the ${line.surface} line's post for session ${sessionId}: ${outcome.status}`);
+          return { ok: false, messageId: null };
+        }
+        return { ok: true, messageId: outcome.value.messageId };
+      } catch {
+        log(`routing: posting the ${line.surface} line for session ${sessionId} failed`);
+        return { ok: false, messageId: null };
+      }
+    };
+    const first = posts.length === 0 ? null : await post(posts[0]);
+    if (first?.ok === true && posts.length > 1) {
+      void (async () => {
+        for (const part of posts.slice(1)) {
+          if (!(await post(part)).ok) break;
+        }
+      })();
+    }
+    return { posted: first?.ok === true, id: first?.messageId ?? null };
+  }
+
+  /**
+   * A held line as the event carries it to a session in thread `threadId`. A Discord line is its
+   * message. A page line takes its posted copy's id where that copy was posted to `threadId`, and an
+   * unposted id otherwise, as a live page line whose post failed does, until a copy is posted there.
+   */
+  function heldMessage(line: HeldLine, threadId: string): BufferedMessage {
+    if (line.surface === "discord") return line.message;
+    unposted += 1;
+    return {
+      id:
+        line.copyId !== null && line.copyThreadId === threadId
+          ? line.copyId
+          : `${UNPOSTED_WEB_ID_PREFIX}${String(now())}-${String(unposted)}`,
+      senderId: line.senderId,
+      author: line.author,
+      senderClass: "operator",
+      text: line.text,
+      truncated: line.truncated,
+    };
+  }
+
+  /**
+   * The lines ready to hand over, split into as few events as the budget allows, in order: each is
+   * measured as `overBudget` measures a hold event, with `holdLine` reserved in front.
+   */
+  function holdEvents(
+    threadId: string,
+    ready: ReadonlyArray<{ line: HeldLine; message: BufferedMessage }>,
+  ): Array<Array<{ line: HeldLine; message: BufferedMessage }>> {
+    const events: Array<Array<{ line: HeldLine; message: BufferedMessage }>> = [];
+    let event: Array<{ line: HeldLine; message: BufferedMessage }> = [];
+    for (const item of ready) {
+      const candidate = [...event, item];
+      const oldest = Math.min(...candidate.map(({ line }) => line.heldAt));
+      if (event.length > 0 && overBudget(threadId, candidate.map(({ message }) => message), oldest)) {
+        events.push(event);
+        event = [item];
+      } else {
+        event = candidate;
+      }
+    }
+    if (event.length > 0) events.push(event);
+    return events;
+  }
+
+  /**
+   * Hands one lineage's held lines to its next session, where that session is live, has a pipe and
+   * has a thread, inside that thread's turn. Each line's class is computed again as a restored line's
+   * is, and a line whose sender is no longer an operator is removed and counted to the thread it was
+   * held under. A Discord line's files are taken in for the receiving session, and a line left with
+   * no text and no file is removed. A page line with no copy in the receiving thread has its copy
+   * posted there, as a live page line's is, and one whose copy an earlier hand-over posted to that
+   * thread rides under that copy's id with no second post. The copies go in held order, and the
+   * first one the thread refuses or fails to post ends what this hand-over carries: that line and
+   * every line after it stay held for the next check, save that a refused first line itself goes
+   * under an unposted id, so each check carries one line at the least. With no page seam, or to a
+   * local conversation, no copy is posted and a page line rides under an unposted id. A caller waits
+   * for at most the posts the thread's post budget admits, plus one. The lines carried go as events
+   * opening with `holdLine`, written back to back. A line stays held until the event carrying it is
+   * taken, so a refused write leaves it and every line after it held, in order, with no notice. No
+   * rate window is spent and the response gate is passed by, since every line is an operator's and
+   * was counted when it was held. Answers once the writes are done, with the notices still to post
+   * as `after`, as `inTurn`'s step does.
+   */
+  async function handOverHold(hold: MessageHold, lineage: string): Promise<{ after: Promise<void> }> {
+    const nothing = { after: Promise.resolve() };
+    const receiver = deliverable(lineage);
+    if (receiver === null) return nothing;
+    const { record, threadId } = receiver;
+    return inTurn(threadId, async () => {
+      // A router closed while this hand-over waited for the turn writes nothing and posts nothing.
+      if (holdClosed) return nothing;
+      // The thread that holds a line's message, where its receipts are painted and its cut is
+      // announced: a Discord line's own thread, and the receiving thread for a page line, since the
+      // one copy a page line rides under is always in the receiving thread: one posted there before,
+      // or one this hand-over posts there. A page line with no copy there rides under an unposted id.
+      const copyThread = (line: HeldLine): string => (line.surface === "web" ? threadId : line.threadId);
+      const declassed = new Map<string, number>();
+      const lost: string[] = [];
+      const classed: Array<{ line: HeldLine; message: BufferedMessage }> = [];
+      for (const line of hold.lines(lineage)) {
+        const message = reclassed(heldMessage(line, threadId));
+        if (message?.senderClass === "operator") {
+          classed.push({ line, message });
+          continue;
+        }
+        lost.push(line.key);
+        declassed.set(line.threadId, (declassed.get(line.threadId) ?? 0) + 1);
+      }
+      if (lost.length > 0) {
+        hold.remove(lineage, lost);
+        forgetTold(lineage);
+        log(`routing: dropped ${String(lost.length)} held lines of lineage ${lineage}, whose sender is no longer an operator`);
+      }
+
+      const refused: Array<{ threadId: string; refusals: NoticeRefusal[] }> = [];
+      const empty: string[] = [];
+      const ready: Array<{ line: HeldLine; message: BufferedMessage }> = [];
+      // A page line's copy is posted only through the page seam and only to a Discord thread; a
+      // local conversation keeps no copy, and its line rides under its unposted id.
+      const copies = options.page !== undefined && !isLocalConversationId(threadId);
+      // The lines this hand-over leaves held for the next check, from the first refused copy on.
+      let waiting = 0;
+      for (const [index, { line, message }] of classed.entries()) {
+        let buffered = message;
+        if (line.surface === "web" && copies && (line.copyId === null || line.copyThreadId !== threadId)) {
+          // A page line with no copy in the receiving thread has one posted there, inside the turn and
+          // before the event is built, through the post a live page line takes, and its id is the
+          // line's. The id and the thread are recorded on the held line at once, where the id is a
+          // Discord id, the one shape the hold's file takes, so a write the pipe refuses below leaves
+          // the copy recorded and the next hand-over to that thread rides under it with no second
+          // post, while one to another thread posts a copy there. A copy posted with no Discord id
+          // rides under the unposted id.
+          //
+          // The copies go in held order, and the first one the thread refuses or fails to post stops
+          // the walk: that line and every line after it, of either surface, stay held in order for
+          // the next check, and no later Discord line's files are taken in. Where the refused line is
+          // the first this hand-over carries, it goes under its unposted id, as a live page line whose
+          // post failed does, and the walk stops after it, so a thread that refuses every post still
+          // lets one line through each check. A caller waiting on the hand-over therefore waits for at
+          // most the posts the thread's post budget admits, plus one.
+          if (holdClosed) return nothing;
+          const copy = await postCopy(threadId, record.sessionId, { name: line.name, render: renderPageLine, surface: "web" }, line.text, []);
+          if (!copy.posted) {
+            if (ready.length > 0) {
+              waiting = classed.length - index;
+              break;
+            }
+            ready.push({ line, message: buffered });
+            waiting = classed.length - index - 1;
+            break;
+          }
+          if (copy.id !== null && SNOWFLAKE.test(copy.id)) {
+            hold.setCopyId(lineage, line.key, copy.id, threadId);
+            buffered = { ...buffered, id: copy.id };
+          }
+        }
+        if (line.surface === "discord" && line.files.length > 0 && options.attachments !== undefined) {
+          // The message as the gateway gave it, for the intake: its own id names the saved files,
+          // and the receiving thread is the chat the paste's budget is measured against.
+          const taken = await takeIn(
+            options.attachments,
+            {
+              threadId,
+              messageId: line.message.id,
+              senderId: line.message.senderId,
+              author: line.message.author,
+              fromBot: false,
+              fromSelf: false,
+              mentionsBot: false,
+              repliesToBot: false,
+              text: line.message.text,
+              attachments: line.files,
+            },
+            message,
+            record.sessionId,
+            line.heldAt,
+          );
+          buffered = taken.held;
+          if (taken.refusals.length > 0) refused.push({ threadId: line.threadId, refusals: taken.refusals });
+        }
+        if (buffered.text === "" && (buffered.attachments?.length ?? 0) === 0) {
+          empty.push(line.key);
+          continue;
+        }
+        ready.push({ line, message: buffered });
+      }
+      if (empty.length > 0) {
+        hold.remove(lineage, empty);
+        forgetTold(lineage);
+      }
+      if (waiting > 0) {
+        log(`routing: the thread refused a held page line's copy, so ${String(waiting)} held lines of lineage ${lineage} wait for the next check`);
+      }
+      // Closed during the file intake or a copy's post: the lines stay held for the next start, and
+      // nothing more is written or posted.
+      if (holdClosed) return nothing;
+
+      // Read once before the writes, on `handOverBuffers`'s reasoning.
+      const deliveredAt = now();
+      const carried: Array<{ line: HeldLine; message: BufferedMessage }> = [];
+      let left = 0;
+      const events = holdEvents(threadId, ready);
+      for (const [index, event] of events.entries()) {
+        const oldest = Math.min(...event.map(({ line }) => line.heldAt));
+        const written = options.relays.deliver(
+          record.processToken,
+          bufferedEvent(threadId, event.map(({ message }) => message), undefined, oldest),
+        );
+        if (!written) {
+          left = events.slice(index).reduce((total, rest) => total + rest.length, 0);
+          break;
+        }
+        hold.remove(lineage, event.map(({ line }) => line.key));
+        forgetTold(lineage);
+        for (const { line, message } of event) {
+          markDelivered(copyThread(line), message.id, deliveredAt);
+          tapTalk(record, threadId, message);
+        }
+        carried.push(...event);
+      }
+      if (carried.length > 0) {
+        log(`routing: handed ${String(carried.length)} held lines of lineage ${lineage} to session ${record.sessionId}`);
+      }
+      if (left > 0) {
+        log(`routing: session ${record.sessionId} refused ${String(left)} held lines of lineage ${lineage}, which stay held`);
+      }
+      return {
+        after: (async () => {
+          if (declassed.size > 0) {
+            await tell(
+              [...declassed].map(([held, count]) => ({
+                threadId: held,
+                text: declassedHoldNotice(count),
+                count,
+                what: "lost-standing",
+              })),
+            );
+          }
+          for (const { threadId: held, refusals } of refused) await announceRefusals(held, refusals);
+          for (const { line, message } of carried) if (message.truncated) await announceCut(copyThread(line));
+        })(),
+      };
+    });
+  }
+
+  /**
+   * Starts a hand-over for each lineage the hold lists, or for `only`, and waits for each one's
+   * writes. A lineage whose hand-over is already running is waited for and not started again. The
+   * notices a hand-over posts after its writes are not waited for here, so a live line that waits
+   * on a hand-over never waits on a Discord round trip; they are kept in `handNotices` for the
+   * poll's tick to wait on, and a failure among them is logged. Nothing starts once the router is
+   * closed.
+   */
+  async function flushHolds(only?: string): Promise<void> {
+    const hold = messageHold;
+    if (hold === null || holdClosed) return;
+    const lineages = hold
+      .lineages()
+      .map(({ lineage }) => lineage)
+      .filter((lineage) => only === undefined || lineage === only);
+    await Promise.all(
+      lineages.map((lineage) => {
+        const running = handing.get(lineage);
+        if (running !== undefined) return running;
+        const run: Promise<void> = handOverHold(hold, lineage)
+          .then(({ after }) => {
+            const posting: Promise<void> = after
+              .catch((error: unknown) => {
+                log(`routing: posting the notices of a hand-over for lineage ${lineage} failed: ${String(error)}`);
+              })
+              .finally(() => handNotices.delete(posting));
+            handNotices.add(posting);
+          })
+          .catch((error: unknown) => {
+            log(`routing: handing over the lines held for lineage ${lineage} failed: ${String(error)}`);
+          })
+          .finally(() => {
+            if (handing.get(lineage) === run) handing.delete(lineage);
+          });
+        handing.set(lineage, run);
+        return run;
+      }),
+    );
+    // A hold emptied by its hand-overs, with no notice owed, has nothing left for the poll to check.
+    if (holdTimer !== null && hold.lineages().length === 0 && owedHeld.size === 0 && owed.length === 0) {
+      clearHoldTimer(holdTimer);
+      holdTimer = null;
+    }
+  }
+
+  /** Arms the poll where the hold lists a lineage or a notice is owed, and none is armed or running. */
+  function armHoldTimer(): void {
+    if (messageHold === null || holdClosed || ticking || holdTimer !== null) return;
+    if (messageHold.lineages().length === 0 && owedHeld.size === 0 && owed.length === 0) return;
+    holdTimer = setHoldTimer(() => {
+      holdTimer = null;
+      void holdTick().catch((error: unknown) => {
+        log(`routing: the message hold's check failed: ${String(error)}`);
+      });
+    }, HOLD_POLL_MS);
+  }
+
+  /**
+   * One tick of the poll: every lineage's hand-over first, waited for, then the time limit, then the
+   * owed drop notices, then the owed held notices, then the held notice for each lineage that still
+   * holds lines, has not been told, and has no session that can take them, posted to the thread of
+   * its oldest held line. The time limit runs only once no hand-over is running and no hand-over's
+   * notices are posting, a hand-over an attach, a live line or a page line started during the flush
+   * or during those posts included, and it runs in the same turn as that check, so nothing starts
+   * between the two and no line is both delivered and reported dropped. Each
+   * drop is told once to each thread its lines were held under, with that thread's count, and logged
+   * with the lineage and the count alone. A lineage held for a session that went before taking its
+   * lines is told here, with no later line needed. The tick posts no held notice for a restored
+   * lineage, which counts as told. A held notice waits while a drop notice for its thread is owed,
+   * so a thread reads that its lines were dropped before it reads that a later line is held.
+   */
+  async function holdTick(): Promise<void> {
+    const hold = messageHold;
+    if (hold === null || holdClosed) return;
+    ticking = true;
+    try {
+      await flushHolds();
+      // A hand-over can start while another's notices post, so the two are waited for until both
+      // are empty at one look. From that look to `expire` below nothing awaits.
+      while (handing.size > 0 || handNotices.size > 0) {
+        await Promise.all(handing.values());
+        await Promise.all(handNotices);
+      }
+      if (holdClosed) return;
+      // What was owed before this tick's drops, so a drop notice floored just now is not asked again
+      // in the same tick.
+      const due = owed.filter((entry) => !entry.posting);
+      await tellDropped(hold.expire(now(), holdMs));
+      for (const entry of due) {
+        if (holdClosed) return;
+        if (now() - entry.since >= OWED_NOTICE_MS) {
+          owed.splice(owed.indexOf(entry), 1);
+          log(
+            `routing: gave up the ${entry.what} notice owed to thread ${entry.threadId} for ` +
+              `${String(entry.count)} held lines, refused for ten minutes`,
+          );
+          continue;
+        }
+        entry.posting = true;
+        const result = await notice(entry.threadId, entry.text);
+        entry.posting = false;
+        if (result === "posted" && owed.includes(entry)) owed.splice(owed.indexOf(entry), 1);
+      }
+      for (const [lineage, entry] of [...owedHeld]) {
+        if (!holdsLines(lineage)) {
+          owedHeld.delete(lineage);
+          continue;
+        }
+        if (dropOwedTo(entry.threadId)) continue;
+        if ((await notice(entry.threadId, entry.text)) === "posted") owedHeld.delete(lineage);
+      }
+      for (const { lineage } of hold.lineages()) {
+        // A router closed during an earlier post in this tick posts nothing for held lines.
+        if (holdClosed) break;
+        const oldest = hold.lines(lineage)[0];
+        if (oldest === undefined || told.has(lineage) || deliverable(lineage) !== null) continue;
+        await tellHeld(lineage, oldest.threadId);
+      }
+    } finally {
+      ticking = false;
+      armHoldTimer();
+    }
+  }
+
+  /**
+   * The record and Discord thread a page line is held against, or null where the line is not held.
+   * `live` is the lineage's live record, or null where none is. With none, it is the lineage's newest
+   * record, where its thread is a Discord thread. With a live record whose thread is not yet bound, it
+   * is the newest other record of the lineage whose thread is a Discord thread, passing over a newer
+   * one with no thread, which covers the window between a new session's announcement and its thread.
+   * With a live record on a Discord thread, it is that record, where its pipe is gone or the lineage
+   * still holds lines. A local conversation's thread holds nothing.
+   */
+  function holdTarget(
+    records: readonly SessionRecord[],
+    live: SessionRecord | null,
+    lineage: string,
+  ): { record: SessionRecord; threadId: string } | null {
+    /**
+     * The newest record of the lineage other than `live`, with its thread, where that thread is a
+     * Discord thread; or, with `threaded`, the newest such record whose thread is a Discord thread.
+     */
+    const earlier = (threaded: boolean): { record: SessionRecord; threadId: string } | null => {
+      let newest: SessionRecord | null = null;
+      let found: { record: SessionRecord; threadId: string } | null = null;
+      for (const held of records) {
+        if (held.lineage !== lineage || held === live) continue;
+        if (newest !== null && held.startedAt <= newest.startedAt) continue;
+        const threadId = options.threadFor(held.sessionId);
+        const discord = threadId !== null && !isLocalConversationId(threadId);
+        if (threaded && !discord) continue;
+        newest = held;
+        found = discord ? { record: held, threadId } : null;
+      }
+      return found;
+    };
+    if (live === null) return earlier(false);
+    const threadId = options.threadFor(live.sessionId);
+    if (threadId === null) return earlier(true);
+    if (isLocalConversationId(threadId)) return null;
+    return !options.relays.attached(live.processToken) || holdsLines(lineage) ? { record: live, threadId } : null;
+  }
+
   /**
    * The one path a line typed outside Discord takes to a session, a page line and a door line
    * alike, from finding the live session to the hand-over: `line` carries everything that tells
    * the two apart. The answer is the line's status and whether its text was cut at the inbound
    * ceiling, which reads false where the line was refused before its text was bounded. A line that
    * names no file is never answered `unknown-file`, and only a door line is answered `board-act`,
-   * so a page line's answer is typed without it. Never throws.
+   * so a page line's answer is typed without it. Only a page line whose caller passes `holds` is
+   * answered `held` or `hold-full`, so the page's act routes and the door are typed without them.
+   * Never throws.
    */
+  function deliverTyped(
+    lineage: string,
+    text: string,
+    fileIds: readonly string[],
+    line: TypedLine & { surface: "web" },
+    holds: true,
+  ): Promise<{ status: WebSayStatus; truncated: boolean }>;
   function deliverTyped(
     lineage: string,
     text: string,
@@ -2187,14 +3152,53 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     text: string,
     fileIds: readonly string[],
     line: TypedLine,
-  ): Promise<{ status: DoorDeliveryStatus; truncated: boolean }> {
+    holds = false,
+  ): Promise<{ status: DoorDeliveryStatus | WebSayStatus; truncated: boolean }> {
     /** A refusal made before the text was bounded, or of a text with nothing to cut. */
     const short = (status: WebDeliveryStatus): { status: WebDeliveryStatus; truncated: boolean } => ({ status, truncated: false });
+    // A lineage that holds lines is handed them first, and the hand-over's writes are waited for,
+    // never its notices, before anything below reads the session or enters the thread's turn, which
+    // the hand-over takes. A line the hold does not take is delivered below as before, ahead of the
+    // held lines where the hand-over was refused.
+    if (holdsLines(lineage)) await flushHolds(lineage);
     // The session is found by lineage, never by thread: the caller names the persona, and the
     // thread is read off the session that carries it. An ended newest record is told apart from a
     // lineage no record carries, since the two read differently to whoever sent the line.
     const records = options.registry.list();
     const record = liveByLineage(records, lineage);
+
+    // The message hold, for the page's composer alone: a page line that names no file, since the
+    // page's files are saved for one session, and is no workers-board act, which is handed over at
+    // once and alone and joins no buffer. Where no session of the lineage can take it and a record of
+    // the lineage has a Discord thread, it is held under that thread and against that record, and the
+    // answer is the hold's. A line that would be held and has nothing visible is `empty` and holds
+    // nothing. A line the hold's file could not carry, or with no such thread, takes the path below
+    // and its answer, so an empty line to a lineage with no hold target is answered there, after the
+    // session lookup.
+    if (holds && messageHold !== null && line.surface === "web" && fileIds.length === 0) {
+      const { text: words, truncated } = bounded(text);
+      const target = line.boardActs && isBoardAct(words, fileIds) ? null : holdTarget(records, record, lineage);
+      if (target !== null) {
+        if (words === "") return short("empty");
+        const admitted = holdable(lineage, {
+          surface: "web",
+          threadId: target.threadId,
+          name: line.name,
+          author: line.author,
+          senderId: line.senderId,
+          text: words,
+          truncated,
+          copyId: null,
+          copyThreadId: null,
+        });
+        if (admitted !== null) {
+          const outcome = await holdMessage(messageHold, target.record, lineage, target.threadId, admitted);
+          return { status: outcome === "full" ? "hold-full" : outcome, truncated };
+        }
+        log(`routing: a page line for lineage ${lineage} is not one the hold's file could carry, so it is not held`);
+      }
+    }
+
     if (record === null) return short(records.some((held) => held.lineage === lineage) ? "ended" : "no-session");
     const threadId = options.threadFor(record.sessionId);
     if (threadId === null) return short("no-thread");
@@ -2234,7 +3238,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       return { status: "rate", truncated };
     }
 
-    const { name, author, senderId } = line;
+    const { author, senderId } = line;
 
     // In the thread's turn, as a Discord message is, so the session reads the line in the order
     // it landed against the thread's own. The thread post comes first, inside the turn,
@@ -2252,50 +3256,14 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         channel = false;
         return { after: Promise.resolve() };
       }
-      // The thread's copy, rendered by the machinery a voice line is rendered by, so a typed line
-      // cannot draw an angle-bracket chip, such as a mention pill, a timestamp chip, a channel link
-      // or a custom emoji, or open a quoted block in the thread, and split where it is longer than
-      // one post. Only the first post is awaited before the hand-over: its id is the line's, the
-      // message the receipts are painted on. The posts after it follow the hand-over, outside the
-      // turn and outside the caller's wait, so a slow file post neither holds the thread's turn nor
-      // runs the page's request past its timeout into a second Send of the same line.
-      const page = options.page;
-      const posts = page === undefined ? [] : pagePosts(line.render, name, words, uploads);
-      const post = async (part: { text: string; upload: WebUpload | null }): Promise<{ ok: boolean; messageId: string | null }> => {
-        if (page === undefined) return { ok: false, messageId: null };
-        let file: { name: string; data: Uint8Array; contentType: string } | undefined;
-        if (part.upload !== null) {
-          const data = (await options.webFiles?.bytesOf(part.upload.id)) ?? null;
-          // The session still gets the path; the thread's copy goes without the file.
-          if (data === null) log(`routing: a file of the ${line.surface} line for session ${record.sessionId} could not be read for its thread copy`);
-          else file = { name: part.upload.name, data, contentType: part.upload.contentType };
-        }
-        try {
-          const outcome = await page.post({ threadId, text: part.text, ...(file === undefined ? {} : { file }) });
-          if (outcome.status !== "ok") {
-            log(`routing: the thread refused the ${line.surface} line's post for session ${record.sessionId}: ${outcome.status}`);
-            return { ok: false, messageId: null };
-          }
-          return { ok: true, messageId: outcome.value.messageId };
-        } catch {
-          log(`routing: posting the ${line.surface} line for session ${record.sessionId} failed`);
-          return { ok: false, messageId: null };
-        }
-      };
-      const first = posts.length === 0 ? null : await post(posts[0]);
+      // The thread's copy, through the post a held page line's copy takes at its hand-over, so the
+      // copy a held line leaves in the thread is the copy a live line leaves. Its first post's id is
+      // the line's.
+      const copy = (await postCopy(threadId, record.sessionId, line, words, uploads)).id;
       // An unposted id carries the time and this process's count, since one millisecond can
       // hold two failed posts.
       unposted += 1;
-      const id = first?.messageId ?? `${UNPOSTED_WEB_ID_PREFIX}${String(now())}-${String(unposted)}`;
-      // The rest of the copy, in order and stopped at the first refusal as a refused first post
-      // stops them all. Nothing awaits it: each failure is logged inside `post`.
-      if (first?.ok === true && posts.length > 1) {
-        void (async () => {
-          for (const part of posts.slice(1)) {
-            if (!(await post(part)).ok) break;
-          }
-        })();
-      }
+      const id = copy ?? `${UNPOSTED_WEB_ID_PREFIX}${String(now())}-${String(unposted)}`;
       const buffered = withFiles(
         { id, senderId, author, senderClass: line.senderClass, text: words, truncated },
         uploads.map((upload) => upload.path),
@@ -2638,6 +3606,30 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       // the operator is talking in some other thread of their own.
       if (record === null) return;
 
+      // The message hold, directly ahead of the ended branch, so every reading above keeps its
+      // place. A live line to a lineage that holds lines waits for that lineage's hand-over to write
+      // first, outside the thread's turn, which the hand-over takes, and never for its notices. An operator's line is then held where
+      // the record carries a lineage, the thread is a Discord thread, and the record is ended, has no
+      // pipe, or its lineage still holds a line, so an operator's new line never reaches the session
+      // ahead of an older held one. Any other line, and one the hold file could not carry, takes
+      // the path below, its notices included.
+      const lineage = record.lineage;
+      if (messageHold !== null && lineage !== null) {
+        if (holdsLines(lineage)) await flushHolds(lineage);
+        if (
+          operator &&
+          !isLocalConversationId(message.threadId) &&
+          (record.state === "ended" || !options.relays.attached(record.processToken) || holdsLines(lineage))
+        ) {
+          const line = holdable(lineage, { surface: "discord", threadId: message.threadId, message: typed, files });
+          if (line !== null) {
+            await holdMessage(messageHold, record, lineage, message.threadId, line);
+            return;
+          }
+          log(`routing: a line for lineage ${lineage} is not one the hold's file could carry, so it is not held`);
+        }
+      }
+
       if (record.state === "ended") {
         log(
           `routing: a message reached the ended session ${record.sessionId}, rejecting it in-thread`,
@@ -2691,15 +3683,12 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     },
 
     async deliverWeb(lineage, login, text, fileIds) {
-      const { status } = await deliverTyped(lineage, text, fileIds, {
-        name: webAuthorName(login),
-        author: webAuthorLabel(login),
-        senderId: `${WEB_SENDER_PREFIX}${login}`,
-        senderClass: "operator",
-        render: renderPageLine,
-        boardActs: true,
-        surface: "web",
-      });
+      const { status } = await deliverTyped(lineage, text, fileIds, pageLine(login));
+      return status;
+    },
+
+    async deliverSay(lineage, login, text, fileIds) {
+      const { status } = await deliverTyped(lineage, text, fileIds, pageLine(login), true);
       return status;
     },
 
@@ -2823,15 +3812,54 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         for (const open of holds.values()) if (open.timer !== null) clearHoldTimer(open.timer);
         holds.clear();
       }
+      // The message hold's lines stay in its file for the next start, and nothing is posted for
+      // them. Its owed notices live in memory alone and go with the process, counted in one log
+      // line, since that line is then the only record that a thread was never told.
+      holdClosed = true;
+      if (holdTimer !== null) clearHoldTimer(holdTimer);
+      holdTimer = null;
+      const lostNotices = owedHeld.size + owed.length;
+      if (lostNotices > 0) {
+        const lostLines = owed.reduce((total, entry) => total + entry.count, 0);
+        log(
+          `routing: ${String(lostNotices)} owed hold notice(s) lost at shutdown, ` +
+            `${String(owedHeld.size)} held and ${String(owed.length)} for ${String(lostLines)} dropped line(s)`,
+        );
+      }
+      owedHeld.clear();
+      owed.length = 0;
     },
 
     relayAttached(processToken) {
-      if (gate === null || simulated) return;
-      const record = options.registry.current(processToken);
-      if (record !== null) gate.deliverRestored(record.sessionId);
+      if (gate !== null && !simulated) {
+        const record = options.registry.current(processToken);
+        if (record !== null) gate.deliverRestored(record.sessionId);
+      }
+      // Every attach, with the gate off, in shadow or live: the pipe may be the one a lineage's
+      // held lines were waiting for. Not awaited, since the attach signal is synchronous. Each
+      // lineage's hand-over logs its own failure, and anything else the call throws is logged here.
+      if (messageHold !== null) {
+        void flushHolds().catch((error: unknown) => {
+          log(`routing: handing over held lines on an attach failed: ${String(error)}`);
+        });
+      }
     },
 
     armRestored() {
+      // The lines restored into the hold when the router was built. A lineage whose oldest line is
+      // more than the limit plus the restart window old is removed here, synchronously, so no relay
+      // that attaches after the bind can be handed it, and its threads are told by the expiry's
+      // notice, posted after and not awaited. Every other one's limit applies no earlier than the
+      // restart window from now, and the poll checks them from here on.
+      if (messageHold !== null && options.messageHold?.restore !== undefined) {
+        const dropped = messageHold.release(now(), options.messageHold.restore.graceMs, holdMs);
+        if (dropped.length > 0) {
+          void tellDropped(dropped).catch((error: unknown) => {
+            log(`routing: telling the threads of held lines dropped at the bind failed: ${String(error)}`);
+          });
+        }
+      }
+      armHoldTimer();
       if (gate === null || buffersFile === null || settings?.buffers === undefined) return;
       gate.armRestored(settings.buffers.graceMs);
     },

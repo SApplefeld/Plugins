@@ -33,7 +33,8 @@
 // A buffer is held for the session it was admitted to, not for the thread alone. A thread moves to
 // a session's replacement of the same lineage, and what was said to the old session is not said
 // to the new one: a buffer whose session has gone is dropped, never handed to whoever holds the
-// thread next.
+// thread next. An operator's line to a session of a lineage that cannot take it is not buffered
+// here at all: the message hold in `message-hold.ts` keeps it for the lineage's next session.
 //
 // A held buffer outlives the broker process. Every change to what is held, an admit, a delivery or
 // a drop, is handed to the persist seam, which the router points at a file beside the journal; the
@@ -50,6 +51,7 @@ import type { JevFetch } from "../jev/client.ts";
 import { rotate } from "../log.ts";
 import { writeSnapshot } from "../persistence.ts";
 import type { RepeatLogSurface } from "../repeat-log.ts";
+import { holdLine } from "./message-hold.ts";
 import { fit, oneLine, sliceCodePoints } from "../sanitize.ts";
 import type { SenderClass } from "../security/senders.ts";
 import type { RelayEvent } from "./relays.ts";
@@ -439,16 +441,21 @@ export function closingLine(count: number): string {
  * A message that replied to an earlier one carries it the same two ways: the ungated shape closes
  * with `quoteLine`, on the line after the files line where both come, and the attributed shape ends
  * the line with `quoteTag`, after the attachments tag where both come.
+ *
+ * `heldAt` is present on the message hold's hand-over alone: the time the oldest of the lines was
+ * held. With it the event takes the attributed shape whatever its count, under `holdLine` first in
+ * place of the restart line, since the session must be told the lines waited for it.
  */
 export function bufferedEvent(
   chatId: string,
   messages: readonly BufferedMessage[],
   restoredAt?: number,
+  heldAt?: number,
 ): MessageEvent {
   const newest = messages[messages.length - 1];
   const paths = messages.flatMap((message) => message.attachments ?? []);
   const files = paths.length === 0 ? {} : { attachments: paths };
-  if (messages.length === 1 && restoredAt === undefined) {
+  if (messages.length === 1 && restoredAt === undefined && heldAt === undefined) {
     const closings: string[] = [];
     if (paths.length > 0) closings.push(closingLine(paths.length));
     if (newest.quote !== undefined) closings.push(quoteLine(newest.quote));
@@ -480,7 +487,8 @@ export function bufferedEvent(
     // A line of files alone already ends in the space after its prefix.
     return message.text === "" ? `${line}${tags.join(" ")}` : `${line} ${tags.join(" ")}`;
   });
-  if (restoredAt !== undefined) lines.unshift(restartLine(restoredAt));
+  if (heldAt !== undefined) lines.unshift(holdLine(heldAt));
+  else if (restoredAt !== undefined) lines.unshift(restartLine(restoredAt));
   return {
     type: "message",
     chatId,
@@ -510,9 +518,15 @@ export function bufferedEvent(
  * quote tag's own length, or one character longer in its gone form, so a quote widens that
  * difference by its line breaks and that one character at most. So a lone message that passes here
  * fits the pipe in either shape.
+ *
+ * With `heldAt`, the measure is the message hold's event, which opens with `holdLine` in place of
+ * the restart line. The hold line is a fixed width too, and longer than the restart line, so a
+ * measure taken without `heldAt` understates a hand-over's event. The router passes it wherever it
+ * measures a line it will hand over: a held line's paste at its intake, and each line after the
+ * first that joins a hand-over's event.
  */
-export function overBudget(chatId: string, messages: readonly BufferedMessage[]): boolean {
-  const event = bufferedEvent(chatId, messages, 0);
+export function overBudget(chatId: string, messages: readonly BufferedMessage[], heldAt?: number): boolean {
+  const event = heldAt === undefined ? bufferedEvent(chatId, messages, 0) : bufferedEvent(chatId, messages, undefined, heldAt);
   if ((event.attachments?.length ?? 0) > MAX_EVENT_ATTACHMENTS) return true;
   return JSON.stringify(event).length + 1 > MAX_EVENT_UNITS;
 }

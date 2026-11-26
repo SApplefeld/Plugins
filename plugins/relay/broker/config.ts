@@ -207,6 +207,11 @@ export type BrokerConfig = {
    */
   responseGateThreshold: number;
   /**
+   * How long an operator's lines to a persona whose session cannot be reached are held for the
+   * next session of that persona, from the first one held. 0 turns the hold off.
+   */
+  messageHoldMs: number;
+  /**
    * Who may attach a file to a message in a session's thread. `off` refuses every attachment,
    * `operator` admits the operator's alone, and `all` admits every allowed account's. The default
    * is the operator alone, and `all` is how the bar is lowered later with no code change.
@@ -532,6 +537,13 @@ const MAX_RESPONSE_GATE_MAX_WAIT_MS = 2_147_483_647;
 // `docs/archive/plans/channels_gate-question-retune_spec_v1.md`.
 const DEFAULT_RESPONSE_GATE_QUIET_MS = 5 * 1000;
 const DEFAULT_RESPONSE_GATE_THRESHOLD = 0.65;
+// The message hold: thirty minutes covers a session start and a keeper backing off after a crash,
+// and a persona down longer is a fault the operator should hear of. The floor keeps a typo from
+// dropping a line before a restart can finish. The ceiling keeps a held file's Discord link inside
+// the time Discord serves it, since the file is fetched at the hand-over. 0 is the off switch.
+const DEFAULT_MESSAGE_HOLD_MS = 30 * 60 * 1000;
+const MIN_MESSAGE_HOLD_MS = 60 * 1000;
+const MAX_MESSAGE_HOLD_MS = 6 * 60 * 60 * 1000;
 // One list, one entry per project root. A semicolon rather than a colon or a comma because a Windows
 // path carries a drive letter and a colon with it, and a comma is a legal character in a directory
 // name.
@@ -984,6 +996,24 @@ function attachmentDir(env: NodeJS.ProcessEnv): string | null {
   return configured;
 }
 
+/**
+ * The message hold's time: 0, which turns the hold off, or a whole number of milliseconds within its
+ * bounds. Refuses rather than clamps, as `bounded` does, and names the key, since 0 is legal here
+ * and nowhere in between.
+ */
+function messageHoldMs(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return DEFAULT_MESSAGE_HOLD_MS;
+  const value = Number(raw);
+  if (value === 0) return 0;
+  if (!Number.isInteger(value) || value < MIN_MESSAGE_HOLD_MS || value > MAX_MESSAGE_HOLD_MS) {
+    throw new Error(
+      `CHANNEL_MESSAGE_HOLD_MS expects 0, which turns the hold off, or an integer between ` +
+        `${MIN_MESSAGE_HOLD_MS} and ${MAX_MESSAGE_HOLD_MS}, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return value;
+}
+
 /** The Cartesia voice: a voice id in Cartesia's shape, lowercase hex in groups of 8-4-4-4-12. */
 function speechVoice(raw: string | undefined): string {
   const value = raw?.trim();
@@ -1169,6 +1199,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
       MAX_RESPONSE_GATE_THRESHOLD,
       DEFAULT_RESPONSE_GATE_THRESHOLD,
     ),
+    messageHoldMs: messageHoldMs(env.CHANNEL_MESSAGE_HOLD_MS),
     // The operator alone by default, which is the bar the operator asked to start at and expects to
     // lower. The two numbers are read whatever the mode, so a host turning attachments on later
     // learns of a bad value at the restart that sets it rather than at the one that flips the mode.

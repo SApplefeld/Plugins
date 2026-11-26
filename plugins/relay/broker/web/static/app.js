@@ -2153,6 +2153,8 @@
     rate: "Too many lines in the last minute; wait a moment and try again.",
     "unknown-file": "Those files are no longer held, so nothing was sent. They will be sent again on the next Send.",
     "no-question": "No question is waiting for a typed answer; nothing was sent.",
+    held: "No session was up. The line was held for the next session, and the thread says if it is dropped.",
+    "hold-full": "No session is up and the hold is full; nothing was sent.",
   };
 
   /** What the status line says while a sent line's request has timed out and the ring has not carried it. */
@@ -2636,9 +2638,13 @@
       // Save where the answer refuses the send while an earlier send of the same words still waits:
       // the refusal says this send delivered nothing, so the landing was that earlier send's and
       // moves to it, and the refusal stands.
-      if (echo !== null && echo.landed && (status === "delivered" || status === "answered" || !moveLanding(echo))) return;
-      if (status !== "delivered" && status !== "answered") dropEcho(echo);
-      if (status === "delivered" || status === "answered") {
+      // A held line is the broker's to deliver, as a delivered one is: its echo stays on the screen,
+      // marked with the held words in place of the sending mark, until the ring carries the line
+      // back at its hand-over or the screen is next loaded.
+      const kept = status === "delivered" || status === "answered" || status === "held";
+      if (echo !== null && echo.landed && (kept || !moveLanding(echo))) return;
+      if (!kept) dropEcho(echo);
+      if (kept) {
         // Only the sent text is cleared. Words typed after it while the send was out are the next
         // draft, without the space that joined them; a draft that no longer starts with the sent
         // text was rewritten mid-send and is left as typed.
@@ -2646,7 +2652,10 @@
         if (draft.startsWith(text)) talk.draft = draft.slice(text.length).trimStart();
         // The same for the files: those picked after the send began stay for the next line.
         talk.picked = talk.picked.filter((pick) => picked.indexOf(pick) < 0);
-        if (echo !== null) echo.settled = true;
+        if (echo !== null) {
+          echo.settled = true;
+          if (status === "held") echo.mark = SEND_WORDS.held;
+        }
       } else if (status === "unknown-file") {
         // The ids name files saved for a session no longer live; the picks stay for the next send.
         for (const pick of talk.picked) pick.id = null;

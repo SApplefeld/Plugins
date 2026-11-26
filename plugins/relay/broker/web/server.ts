@@ -57,7 +57,7 @@ import { RING_CAPACITY, lineageKnown, talkView } from "./talk.ts";
 import type { TalkRing, TalkViewInput } from "./talk.ts";
 import { WEB_FILE_ID, readUpload, refuseUpload } from "../routing/attachments.ts";
 import type { WebFiles } from "../routing/attachments.ts";
-import type { WebAnswerStatus, WebDeliveryStatus } from "../routing/inbound.ts";
+import type { WebAnswerStatus, WebDeliveryStatus, WebSayStatus } from "../routing/inbound.ts";
 import { CLIENT_PREFIX, planBranchFault, repoNameFault } from "./rollout.ts";
 import type { BranchRead, RolloutMark, RolloutReader } from "./rollout.ts";
 import { planStem } from "../board/plans.ts";
@@ -1024,10 +1024,11 @@ const MAX_SAY_BODY_BYTES = 64 * 1024;
 
 export type SayHandlerOptions = {
   /**
-   * The inbound router's web seam: hands the line and the files its ids name to the live session
-   * carrying the lineage as the admitted login's word, and answers what became of it.
+   * The inbound router's composer seam: hands the line and the files its ids name to the live
+   * session carrying the lineage as the admitted login's word, or to the message hold for the
+   * lineage's next session where none can take it, and answers what became of it.
    */
-  deliverWeb: (lineage: string, login: string, text: string, files: readonly string[]) => Promise<WebDeliveryStatus>;
+  deliverSay: (lineage: string, login: string, text: string, files: readonly string[]) => Promise<WebSayStatus>;
   /**
    * The inbound router's typed-answer seam: answers the question the live session carrying the
    * lineage is held on with the line, as the admitted login's word, and answers what became of it.
@@ -1066,9 +1067,11 @@ function sayFiles(files: unknown): string[] | null {
  * that is not a non-empty string, a `text` that is not a string or is empty with no file, a `files`
  * that is not a list of at most ten distinct ids, and a text with no visible words and no file each
  * answer 400 with an empty body and deliver nothing. Otherwise the answer is `{status}` with the
- * router's word: `delivered`, `no-session`, `ended`, `no-thread`, `no-channel`, `rate`, or
+ * router's word: `delivered`, `no-session`, `ended`, `no-thread`, `no-channel`, `rate`,
  * `unknown-file` where an id names no file the store holds for the lineage's live session, as after
- * the session was replaced or the broker restarted, so the page sends its files again.
+ * the session was replaced or the broker restarted, so the page sends its files again, `held` where
+ * no session could take the line and the message hold kept it for the lineage's next session, or
+ * `hold-full` where no session could take it and the hold is full, so nothing was kept or sent.
  *
  * With `answers: true` the line is the answer to the question the session is held on, and goes to
  * the router's typed-answer seam instead: no file may ride it, and an empty or over-long line answers
@@ -1101,7 +1104,7 @@ export function registerSayHandler(register: WebHandler["register"], options: Sa
       return;
     }
     if (text === "" && files.length === 0) return empty(response, 400);
-    const status = await options.deliverWeb(lineage, peer.login, text, files);
+    const status = await options.deliverSay(lineage, peer.login, text, files);
     if (status === "empty") return empty(response, 400);
     sendJson(response, { status });
     },
@@ -1380,8 +1383,11 @@ function blockedActedKey(repo: string, entryId: string, reason: string, since: n
 export type AgreeHandlerOptions = {
   /** The pass's latest readings: the ledger an ask is found in and the queues a blocked entry is. */
   source: () => Readings;
-  /** The inbound router's web seam, the one the say route calls. */
-  deliverWeb: SayHandlerOptions["deliverWeb"];
+  /**
+   * The inbound router's web seam for an act's line, which the message hold never keeps, so no act
+   * is answered `held`: an act answers an open item whose state can change before the next session.
+   */
+  deliverWeb: (lineage: string, login: string, text: string, files: readonly string[]) => Promise<WebDeliveryStatus>;
   /**
    * The broker process's one copy of the ask checks and the acted set, from `createAskActs` over the
    * same store as `marks`. Every act that sends a line runs through it.

@@ -235,7 +235,7 @@ function acceptedKind(name: string, contentType: string | null): boolean {
  * Whether the URL is one this module will fetch: https alone, one of Discord's two hosts exactly,
  * and no port named. A URL that does not parse is not a source either.
  */
-function acceptedSource(url: string): boolean {
+export function acceptedSource(url: string): boolean {
   let parsed: URL;
   try {
     parsed = new URL(url);
