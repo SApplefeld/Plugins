@@ -38,7 +38,7 @@ import { createLedgerReader } from "../decisions/ledger.ts";
 import type { LedgerReading } from "../decisions/ledger.ts";
 import type { StateThresholds, ViewSignals } from "../discord/state.ts";
 import type { SessionRecord } from "../registry.ts";
-import { readUsage } from "../usage/cache.ts";
+import { accountsWithLogins, readUsage } from "../usage/cache.ts";
 import type { UsageAccount, UsageReading } from "../usage/cache.ts";
 import type { BrokerConfig } from "../config.ts";
 import { readBriefFile } from "./brief.ts";
@@ -67,6 +67,12 @@ export type PassSources = {
   /** The timeline fold over the same events file, on an offset of its own. */
   timeline: (previous: TimelineReaderState) => ReadTimelineEventsResult;
   usage: () => UsageReading;
+  /**
+   * The login watch's map, joined by the pass onto the usage accounts after the read, the held ones
+   * included, so the views always carry the watch's current expiries. Absent where no watch runs, and
+   * then every account's expiry stays null.
+   */
+  logins?: () => ReadonlyMap<number, number>;
   /** The relay plugin's release from the harness's install record, or `UNREADABLE` where it gave none. */
   plugins: () => InstalledRelease | typeof UNREADABLE;
   /**
@@ -222,8 +228,15 @@ function heldBriefs(folder: readonly string[]): (plans: readonly PlanReading[]) 
   };
 }
 
-/** The production reads, over the same readers and files the Discord board card reads. */
-export function webPassSources(config: WebPassConfig, log: (message: string) => void): PassSources {
+/**
+ * The production reads, over the same readers and files the Discord board card reads. `logins` is the
+ * login watch's map, handed on as the sources' `logins` for the pass to join.
+ */
+export function webPassSources(
+  config: WebPassConfig,
+  log: (message: string) => void,
+  logins?: () => ReadonlyMap<number, number>,
+): PassSources {
   // Unset roster path reads nothing, as the board card's default does.
   const roster =
     config.boardRosterPath === "" ? null : createRosterReader(config.boardRosterPath, { log });
@@ -249,6 +262,7 @@ export function webPassSources(config: WebPassConfig, log: (message: string) => 
     events: (previous, roots) => readEvents(previous, roots, { path: config.boardEventsPath }),
     timeline: (previous) => readTimelineEvents(previous, { path: config.boardEventsPath }),
     usage: () => readUsage(config.usageCacheRoot === null ? {} : { root: config.usageCacheRoot }),
+    logins,
     plugins: () => readInstalledPlugins(installedPluginsPath()),
     direction: () => readDirection(config.directionLedgerPath, config.boardProjects) ?? UNREADABLE,
     heartbeatAt: (workdir) => statPlanFile(path.join(workdir, HEARTBEAT_FILE_NAME), true)?.mtimeMs ?? null,
@@ -477,6 +491,11 @@ export function createWebPass(options: WebPassOptions): WebPass {
       const reading = sources.usage();
       return reading.available ? reading.accounts : UNREADABLE;
     });
+    // The expiries are joined after the hold, as the usage card joins them, so a held reading carries
+    // the watch's current map and not the one of its last good read.
+    if (sources.logins !== undefined && usage.value !== null) {
+      usage.value = accountsWithLogins(usage.value, sources.logins());
+    }
     attempt("plugins", plugins, at, () => sources.plugins());
     attempt("direction", direction, at, () => sources.direction());
     // Also the one run of the status rule over the queues: the views read its result for this reading.

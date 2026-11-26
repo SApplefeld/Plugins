@@ -32,6 +32,7 @@ import { liveByLineage } from "../registry.ts";
 import type { SessionRecord } from "../registry.ts";
 import { clean, fit, oneLine } from "../sanitize.ts";
 import type { UsageAccount } from "../usage/cache.ts";
+import { loginNote } from "../usage/logins.ts";
 import { PACE_PERIOD_MS, aheadOfPace, measuredAt, projectExhaustion, rolledWeekly } from "../usage/pace.ts";
 import { foldRootName } from "./config.ts";
 import { MAX_BRIEF_FILE_BYTES, parseBrief } from "./brief.ts";
@@ -509,6 +510,8 @@ export type AccountLine = {
   projectedExhaustionAt: string | null;
   /** Whether that instant falls at or after the binding window's reset; null with no projection. */
   lastsToReset: boolean | null;
+  /** The card's login warning, `re-login in <countdown>` or `re-login needed`, read at the view's clock; null outside the window. */
+  loginNote: string | null;
 };
 
 /**
@@ -1428,6 +1431,7 @@ function accountLine(account: UsageAccount, now: number): AccountLine {
       account.sevenDay !== null && aheadOfPace(rolledWeekly(account.sevenDay, fetchedAt, now), fetchedAt),
     projectedExhaustionAt: projection === null ? null : iso(projection.exhaustionAt),
     lastsToReset: projection === null ? null : projection.lastsToReset,
+    loginNote: loginNote(account.loginExpiresAt, now),
   };
 }
 

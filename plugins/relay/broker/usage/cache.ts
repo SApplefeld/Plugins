@@ -101,6 +101,12 @@ export type UsageAccount = {
    * `UsageEntry.in_backoff`), so a reader holding a boolean warns forever after one slow poll.
    */
   backoffUntil: number | null;
+  /**
+   * When this account's login lapses, in epoch milliseconds, from claude-swap's list command through
+   * `withLogins`, and null where none is known. Never read from the two files: `readUsage` sets it
+   * null.
+   */
+  loginExpiresAt: number | null;
 };
 
 /**
@@ -343,7 +349,26 @@ function reading(options: ReadUsageOptions): UsageReading {
       // all is the whole of what the card needs and the error text itself stays in the file.
       failing: entry["lastError"] !== null && entry["lastError"] !== undefined,
       backoffUntil: epochMs(entry["backoffUntil"]),
+      loginExpiresAt: null,
     });
   }
   return { available: true, accounts };
+}
+
+/**
+ * The reading with each account's `loginExpiresAt` taken from `logins` by account number, and null
+ * for an account the map does not hold. Only accounts the reading already holds gain the field, so
+ * `sequence.json` stays the membership authority. An unavailable reading passes through unchanged.
+ */
+export function withLogins(reading: UsageReading, logins: ReadonlyMap<number, number>): UsageReading {
+  if (!reading.available) return reading;
+  return { available: true, accounts: accountsWithLogins(reading.accounts, logins) };
+}
+
+/** The join `withLogins` makes, over a bare accounts array, for a reader that holds one. */
+export function accountsWithLogins(
+  accounts: readonly UsageAccount[],
+  logins: ReadonlyMap<number, number>,
+): UsageAccount[] {
+  return accounts.map((account) => ({ ...account, loginExpiresAt: logins.get(account.number) ?? null }));
 }

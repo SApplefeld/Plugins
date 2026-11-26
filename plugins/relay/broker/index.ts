@@ -56,6 +56,8 @@ import { loadBindings, saveBindings } from "./discord/bindings.ts";
 import { createUsageCard } from "./usage/thread.ts";
 import type { UsageCard, UsageCardChannel, UsageCardOptions } from "./usage/thread.ts";
 import { loadUsageBinding, saveUsageBinding } from "./usage/binding.ts";
+import { createLoginWatch } from "./usage/logins.ts";
+import type { LoginRunner, LoginWatch } from "./usage/logins.ts";
 import { createBoardCard } from "./board/thread.ts";
 import type { BoardCard, BoardCardOptions } from "./board/thread.ts";
 import { loadBoardBinding, saveBoardBinding } from "./board/binding.ts";
@@ -1263,6 +1265,8 @@ export function usageCardWiring(options: {
   blocked: (record: Pick<SessionRecord, "sessionId" | "lastEngagementAt">) => boolean;
   /** Whether the transcript tailer is running, which is what the card's footer note reports. */
   interimMirror: boolean;
+  /** The login watch's map, read on every pass; absent where no watch runs. */
+  logins?: () => ReadonlyMap<number, number>;
   log: (message: string) => void;
   onError: (message: string) => void;
 }): UsageCardOptions {
@@ -1294,6 +1298,7 @@ export function usageCardWiring(options: {
     refreshMs: options.config.usageCardRefreshMs,
     now: Date.now,
     log: options.log,
+    logins: options.logins,
   };
 }
 
@@ -1534,6 +1539,11 @@ export async function startBroker(
      * when not given.
      */
     blockedDeskTimer?: (callback: () => Promise<void>, ms: number) => NodeJS.Timeout;
+    /**
+     * The login watch's run of claude-swap's list command, so a test starting the usage card or the
+     * web surface spawns nothing. The real `runCswap` when not given.
+     */
+    loginRunner?: LoginRunner;
   } = {},
 ): Promise<Broker> {
   const exit = options.exit ?? ((code: number): void => process.exit(code));
@@ -2564,6 +2574,9 @@ export async function startBroker(
   let usageCard: UsageCard | null = null;
   let boardCard: BoardCard | null = null;
   let decisionsCard: DecisionsCard | null = null;
+  // The login watch, created after the cards where the usage card or the web surface exists to read
+  // it. Declared here for the reason the cards are.
+  let loginWatch: LoginWatch | null = null;
   // The timer that runs the readers the web views draw on; absent with the listener.
   let webPass: WebPass | null = null;
   // The timer that polls the sibling sandboxes' summaries for the rail; absent with the listener.
@@ -3519,6 +3532,17 @@ export async function startBroker(
   // at boot before Tailscale is up: the surface retries its bind while the rest of the broker runs.
   // Sections 2, 4 and 5 register their `/web/<name>` handlers on it inside this block.
   let webPort: number | null = null;
+  // What the usage readers join each account's login expiry from: the login watch's map, read
+  // through this closure because the watch is created after the cards, once it is known whether the
+  // usage card or the web surface exists to read it. Empty until then. Absent where
+  // CHANNEL_USAGE_CACHE_ROOT points the usage reader at another folder, where no watch is created:
+  // claude-swap's list command reads its default store, whose account numbers could name other
+  // accounts.
+  const noLogins: ReadonlyMap<number, number> = new Map();
+  const logins =
+    config.usageCacheRoot === null
+      ? (): ReadonlyMap<number, number> => (loginWatch === null ? noLogins : loginWatch.current())
+      : undefined;
   // The store of handled marks is open and the ask acts are built wherever the web surface is on,
   // so the tests of those two only narrow their types.
   if (web !== null && marks !== null && askActs !== null) {
@@ -3530,7 +3554,7 @@ export async function startBroker(
     // The views read from this pass and never from a file of their own. It is built beside the
     // listener and not inside the Discord block, so it runs with Discord absent. The sources are
     // built once, so the rollout route below shares the pass's reader and its per-repository locks.
-    const sources = webPassSources(config, note);
+    const sources = webPassSources(config, note, logins);
     const pass = createWebPass({
       config,
       sources,
@@ -3674,9 +3698,10 @@ export async function startBroker(
     // a CLI answer that is missing or outside the tailnet range is no address yet, so the surface
     // waits again. The range rule's throw is that last failure only for an injected resolver whose
     // answer lies outside it. A failure that ends the surface stops the pass and the sibling poller,
-    // which have no page left to keep warm. An attempt that settles after the stop has begun does
-    // nothing more: the teardown waits for it and closes the listener, so a stop landing during a
-    // retry's CLI call waits for that call, up to the CLI's 5-second timeout.
+    // which have no page left to keep warm, and the login watch where no usage card reads it. An
+    // attempt that settles after the stop has begun does nothing more: the teardown waits for it and
+    // closes the listener, so a stop landing during a retry's CLI call waits for that call, up to the
+    // CLI's 5-second timeout.
     async function retryBind(): Promise<void> {
       let bind: string | null = null;
       let bound: number;
@@ -3697,6 +3722,7 @@ export async function startBroker(
         }
         pass.stop();
         siblings.stop();
+        if (usageCard === null) loginWatch?.stop();
         failedToStart(bind ?? surface.configuredBind, error);
         return;
       }
@@ -3748,8 +3774,9 @@ export async function startBroker(
 
   // The fleet card, under both of its conditions: the knob and a configured channel. Off either
   // way means the machinery is absent rather than idle, so nothing opens a thread, nothing runs on
-  // a timer, and this card reads none of claude-swap's files; the web pass reads them on its own
-  // timer while CHANNEL_WEB_BIND is set.
+  // a timer, and this card neither reads claude-swap's files nor keeps the login watch running; the
+  // web pass reads those files and the watch's expiries on its own timer while CHANNEL_WEB_BIND is
+  // set.
   usageCard = createUsageCard(
     usageCardWiring({
       config,
@@ -3761,6 +3788,7 @@ export async function startBroker(
       // threads carry no narration and no question alerts, and the card cannot be read correctly
       // without saying so.
       interimMirror: tail !== null,
+      logins,
       log: note,
       onError: (message) => {
         console.error(message);
@@ -3768,6 +3796,13 @@ export async function startBroker(
       },
     }),
   );
+  // The login watch, which runs claude-swap's list command for each account's login expiry. Created
+  // only where the usage card or the web surface exists to read it, so a host with neither runs
+  // nothing, and started after the listener is bound for the reason the card is.
+  if (logins !== undefined && (usageCard !== null || webPass !== null)) {
+    loginWatch = createLoginWatch({ run: options.loginRunner, log: note });
+    loginWatch.start();
+  }
   if (usageCard !== null) {
     const started = usageCard;
     // The one card the channel keeps pinned permanently. Read through the card rather than from the
@@ -3909,6 +3944,8 @@ export async function startBroker(
     // for a broker that has already dropped its gateway. What it returns is the drain, awaited
     // beside the others.
     const cardDrain = usageCard === null ? null : usageCard.stop();
+    // The login watch's timer goes with the card's. A run already started finishes on its own.
+    loginWatch?.stop();
     // The board and decisions cards' timers go down in the same synchronous block, and for the same
     // reason.
     const boardDrain = boardCard === null ? null : boardCard.stop();

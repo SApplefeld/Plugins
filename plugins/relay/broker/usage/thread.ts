@@ -27,7 +27,7 @@ import type { SessionView, StateThresholds } from "../discord/state.ts";
 import type { CallOutcome, DiscordTransport } from "../discord/transport.ts";
 import { createRepeatLog } from "../repeat-log.ts";
 import type { RepeatLogSurface } from "../repeat-log.ts";
-import { readUsage } from "./cache.ts";
+import { readUsage, withLogins } from "./cache.ts";
 import type { UsageReading, UsageUnavailableReason } from "./cache.ts";
 import { renderUsageCard } from "./card.ts";
 import type { UsageCardBinding } from "./binding.ts";
@@ -116,6 +116,11 @@ export type UsageCardOptions = {
   log?: (message: string) => void;
   /** The cache read, injected so a test drives readings without a claude-swap install. */
   read?: () => UsageReading;
+  /**
+   * Each account's login expiry by account number, read on every pass, from the login watch in
+   * `./logins.ts`. Absent where no watch runs, and then every account's expiry stays null.
+   */
+  logins?: () => ReadonlyMap<number, number>;
   /** Injected so a test drives the refresh without waiting on a real interval. */
   setTimer?: (callback: () => void, ms: number) => NodeJS.Timeout;
   clearTimer?: (timer: NodeJS.Timeout) => void;
@@ -348,6 +353,9 @@ export function createUsageCard(options: UsageCardOptions): UsageCard | null {
       }
       repeats("the usage cache could not be read", fresh.reason);
     }
+    // The expiries are joined onto the reading drawn, the held one included, so a login's warning
+    // stays current through a cache outage.
+    if (options.logins !== undefined) reading = withLogins(reading, options.logins());
 
     const card = renderUsageCard({
       reading,

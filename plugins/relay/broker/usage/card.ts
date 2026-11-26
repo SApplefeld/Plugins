@@ -50,6 +50,7 @@ import type { BlockRow } from "../discord/render.ts";
 import { deriveSurfaceState } from "../discord/state.ts";
 import type { SessionView, StateThresholds, SurfaceState } from "../discord/state.ts";
 import type { UsageAccount, UsageReading, UsageUnavailableReason, UsageWindow } from "./cache.ts";
+import { loginNote } from "./logins.ts";
 import {
   MAX_CLOCK_SKEW_MS,
   PACE_AHEAD_THRESHOLD_PCT,
@@ -337,27 +338,30 @@ function amount(value: number): string {
  * whether any of those rows earned a marker, which is half of what decides the legend at the foot.
  * The other half is whether a drawn line still ends in one, which only the composed block knows.
  *
- * A section with no header is one the card has no name for, which is the pair of readings that
- * carry a notice instead of an account: a header over a one-line apology says nothing the line does
- * not already say.
+ * A section with no header is one the card has no name for: the pair of readings that carry a
+ * notice instead of an account, and the login notice above the accounts. A header over a one-line
+ * notice says nothing the line does not already say.
  */
 type CardSection = { header: string | null; rows: BlockRow[]; marked: boolean };
 
 /**
- * One account's section: a bold line carrying the active marker, the label, and the age, over a
- * block holding a row per window.
+ * One account's section: a bold line carrying the active marker, the label, the age, and the login
+ * note while the account's login is inside its last 7 days, over a block holding a row per window.
  *
  * The label is outside the fence, which is what gives each account a visible boundary rather than
  * leaving three accounts to run together as twelve near-identical lines. It also takes the width
  * pressure off the label: Discord wraps a paragraph line rather than scrolling it, so a long
  * address there cannot push a column, force a horizontal scroll, or disturb the alignment inside
- * the block.
+ * the block. The login note is this broker's own text, so it is appended whole after the label's
+ * cap rather than counted inside it.
  */
 function accountSection(account: UsageAccount, now: number): CardSection {
   const fetchedAt = measuredAt(account, now);
   const age = fetchedAt === null ? UNKNOWN_AGE : heartbeat(Math.max(now - fetchedAt, 0));
   const active = account.active ? "▶" : SEPARATOR;
-  const header = sectionLabel(`${active} ${accountLabel(account)} ${SEPARATOR} ${age}`);
+  const login = loginNote(account.loginExpiresAt, now);
+  const note = login === null ? "" : ` ${SEPARATOR} ${login}`;
+  const header = sectionLabel(`${active} ${accountLabel(account)} ${SEPARATOR} ${age}${note}`);
   const rows: BlockRow[] = [];
   let marked = false;
   const windowRow = (label: string, window: UsageWindow, ahead: boolean): void => {
@@ -495,8 +499,9 @@ function overflowTail(accounts: number, sessions: number): string {
 }
 
 /**
- * The whole card, bounded to one message: a title heading, a label-and-fence pair per account, one
- * more pair for the live sessions, then the marker legend and the footer as plain lines.
+ * The whole card, bounded to one message: a title heading, the login notice's fence while any login
+ * is inside its last 7 days, a label-and-fence pair per account, one more pair for the live
+ * sessions, then the marker legend and the footer as plain lines.
  *
  * The labels sit outside their fences and the rows inside them, which is the split the two halves
  * need. Bold is the heaviest text Discord draws that brings no margin with it, and that weight is
@@ -506,10 +511,10 @@ function overflowTail(accounts: number, sessions: number): string {
  *
  * Composed section by section rather than cut at the end, because the tail is where the sessions
  * live: a card assembled whole and then truncated would drop the live sessions off a busy host
- * silently, which is exactly the host whose sessions are worth reading. Accounts come first and
- * sessions second, and the overflow tail names what was dropped from either, so a full fleet reads
- * as a card that ran out of room rather than as one that ends mid-thought. The tail's room is
- * reserved against every section, the last included.
+ * silently, which is exactly the host whose sessions are worth reading. The login notice comes
+ * first, the accounts second and the sessions third, and the overflow tail names the accounts and
+ * sessions dropped, so a full fleet reads as a card that ran out of room rather than as one that
+ * ends mid-thought. The tail's room is reserved against every section, the last included.
  *
  * The title, the legend and the footer are taken out of the budget before the first section is
  * measured, so all three survive a card that ran out of room: the footer carries the age of
@@ -570,11 +575,15 @@ export function renderUsageCard(input: {
   // A reading that parsed but holds no accounts gets a reason of its own. It is a real state, not a
   // hypothetical one: a cache whose entries are all the wrong shape reads exactly this way, and a
   // card that drew nothing at all tells the operator neither what is wrong nor that anything is.
+  //
+  // The login notice leads the accounts it names, so a login about to lapse is read before any
+  // number on the card, and it is spent from the same budget as every section after it.
+  const leading = input.reading.available ? loginNotice(input.reading.accounts, input.now) : [];
   const sections: CardSection[] = !input.reading.available
     ? [notice(`⚠ usage unavailable ${SEPARATOR} ${UNAVAILABLE[input.reading.reason]}`)]
     : input.reading.accounts.length === 0
       ? [notice(NO_ACCOUNTS)]
-      : input.reading.accounts.map((account) => accountSection(account, input.now));
+      : [...leading, ...input.reading.accounts.map((account) => accountSection(account, input.now))];
 
   // One column for the whole card, measured over every account's rows before any of them is drawn.
   // A width measured per account would step in and out as one account carries a per-model window
@@ -587,7 +596,9 @@ export function renderUsageCard(input: {
       (section.header === null ? 0 : 1 + section.header.length) +
       FENCE_COST +
       drawn.reduce((sum, line) => sum + 1 + line.length, 0);
-    const tail = overflowTail(sections.length - index, live.length);
+    // The tail counts accounts, so the login notice ahead of them is never one of the sections it
+    // names as left out.
+    const tail = overflowTail(sections.length - Math.max(index, leading.length), live.length);
     if (used + cost + 1 + tail.length > MAX_CARD_LENGTH) {
       lines.push(...wrapped(tail));
       return finish();
@@ -630,10 +641,48 @@ export function renderUsageCard(input: {
 }
 
 /**
- * A section carrying one line the card has no label for: the two readings that report why there
- * are no numbers rather than drawing any. Fenced like every other block so it is held to the same
- * width, and headerless because a header over a one-line notice says nothing the line does not.
+ * A section carrying lines the card has no label for: the two readings that report why there are
+ * no numbers rather than drawing any, and the login notice. Fenced like every other block so it is
+ * held to the same width, and headerless because a header over a notice says nothing the notice
+ * does not.
  */
-function notice(line: string): CardSection {
-  return { header: null, rows: [{ label: null, value: line }], marked: false };
+function notice(...lines: string[]): CardSection {
+  return { header: null, rows: lines.map((line) => ({ label: null, value: line })), marked: false };
+}
+
+/** The words `loginNote` puts before its countdown or its `needed`, which the notice line drops. */
+const LOGIN_NOTE_LEAD = "re-login ";
+
+/**
+ * The notice naming every account whose login is inside its last 7 days, as a list of zero or one
+ * sections: `⚠ re-login due · account 1 in 3d 19h, account 2 needed`.
+ *
+ * Each account's words are its header's `loginNote` text with the lead dropped, so the notice and
+ * the header cannot disagree about a countdown. Accounts are named by number, the way claude-swap's
+ * console counts them, and in the reading's own order, which is account number order. A fleet with
+ * no account inside the window gets no notice and a card drawn exactly as it would be without one.
+ *
+ * The entries are packed into rows of at most the block's width, measured in code points as the
+ * block's own wrapping measures them, and a row breaks only between two entries, with the comma
+ * closing the row it ends. Left to the block's word wrap, a row could break inside an entry and put
+ * `account` on one row and its number or half its countdown on the next.
+ */
+function loginNotice(accounts: readonly UsageAccount[], now: number): CardSection[] {
+  const due = accounts.flatMap((account) => {
+    const note = loginNote(account.loginExpiresAt, now);
+    return note === null ? [] : [`account ${account.number} ${note.slice(LOGIN_NOTE_LEAD.length)}`];
+  });
+  if (due.length === 0) return [];
+  const rows: string[] = [];
+  let row = `⚠ re-login due ${SEPARATOR}`;
+  for (const [index, entry] of due.entries()) {
+    const item = index < due.length - 1 ? `${entry},` : entry;
+    if ([...row].length + 1 + [...item].length <= MAX_BLOCK_WIDTH) row = `${row} ${item}`;
+    else {
+      rows.push(row);
+      row = item;
+    }
+  }
+  rows.push(row);
+  return [notice(...rows)];
 }

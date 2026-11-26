@@ -1654,6 +1654,10 @@
     box.append(head);
     const who = h("div", "who", account.email ? account.email : "Account #" + account.number);
     if (account.active) who.append(h("span", "muted", " · active"));
+    // The broker's own words, the card's, so the page counts down nothing itself. The countdown
+    // moves with the clock while the expiry stands still, so it is clock text.
+    const loginNote = txt(account.loginNote);
+    if (loginNote) who.append(" · ", clockText("span", "bound", loginNote));
     box.append(who);
     if (account.failing) {
       box.append(h("div", "bound", "sign-in failing · " + account.consecutiveFailures + (account.consecutiveFailures === 1 ? " try" : " tries")));
