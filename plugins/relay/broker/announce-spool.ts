@@ -4,8 +4,9 @@
 // hooks/session-start.ps1 posts a session's identity to /hook at startup and, by design, retries
 // nothing but a timeout. While the broker is down every attempt is refused, and nothing re-sends
 // the hook's announcement later. The session's relay announces the session on its own clock
-// (POST /relay/announce), but it knows only the session id and the launch folder Claude Code's
-// session file names, and only a SessionStart carries the trigger and the transcript path. So the
+// (POST /relay/announce), but it knows only the session id and the launch folder, which its
+// starter's CHANNEL_SESSION_ID and CHANNEL_SESSION_CWD give where the id is set and Claude Code's
+// session file names otherwise, and only a SessionStart carries the trigger and the transcript path. So the
 // hook, the one process holding every field of the announcement, writes it to
 // `announce\<hash>.announce` under the state root, where <hash> is the SHA-256 hex of the process
 // token's UTF-8 bytes. The broker reads that file at the moment the

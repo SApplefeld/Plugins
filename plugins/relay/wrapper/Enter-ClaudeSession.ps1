@@ -11,6 +11,9 @@
 # and would otherwise write them into the operator's own shell: a later bare `claude` in that shell
 # would inherit a live token, and the broker would read that second session as a subprocess of the
 # first and never register it, leaving it with no thread, no card, and no mirroring.
+# CHANNEL_SESSION_ID and CHANNEL_SESSION_CWD are cleared for the launch and restored the same way:
+# a starter that names its session in them gives them to its own relay, and a pair this shell
+# inherited from such a starter would make this session's relay announce the starter's session.
 #
 # -ClaudeArgs passes extra arguments straight through to `claude` after the channel flag and the
 # relay's server name: a -p prompt, or anything else. Bare trailing arguments land there too;
@@ -240,10 +243,16 @@ function Enter-ClaudeSession {
         CHANNEL_SESSION        = $env:CHANNEL_SESSION
         CHANNEL_PROCESS_TOKEN  = $env:CHANNEL_PROCESS_TOKEN
         CHANNEL_SESSION_MIRROR = $env:CHANNEL_SESSION_MIRROR
+        CHANNEL_SESSION_ID     = $env:CHANNEL_SESSION_ID
+        CHANNEL_SESSION_CWD    = $env:CHANNEL_SESSION_CWD
     }
     try {
         $env:CHANNEL_SESSION = $Name
         $env:CHANNEL_PROCESS_TOKEN = [guid]::NewGuid().ToString()
+        # A relay that holds CHANNEL_SESSION_ID announces that id as its own session's. This session's
+        # relay learns its session from claude, so a pair inherited from a starter's session is cleared.
+        $env:CHANNEL_SESSION_ID = $null
+        $env:CHANNEL_SESSION_CWD = $null
         # CHANNEL_SESSION_MIRROR rides into an HTTP header via the fragment's allowedEnvVars with no
         # validation beyond what Claude Code's own interpolation performs, unlike CHANNEL_SESSION
         # (pattern-validated above) and CHANNEL_PROCESS_TOKEN (a GUID this wrapper mints itself). Set
@@ -276,10 +285,14 @@ function Enter-ClaudeSession {
         # newcomer never registers, so it gets no thread, no card, and no mirroring, and it goes on
         # posting hook events that nothing can route. CHANNEL_SESSION_MIRROR is restored for the
         # same reason: a bare `claude` run later from this shell must not silently inherit
-        # -NoMirror's off value from a session that has since exited.
+        # -NoMirror's off value from a session that has since exited. CHANNEL_SESSION_ID and
+        # CHANNEL_SESSION_CWD were cleared for the launch, since an inherited starter's id would reach
+        # this session's relay, and are put back here for the shell that set them.
         $env:CHANNEL_SESSION = $previous.CHANNEL_SESSION
         $env:CHANNEL_PROCESS_TOKEN = $previous.CHANNEL_PROCESS_TOKEN
         $env:CHANNEL_SESSION_MIRROR = $previous.CHANNEL_SESSION_MIRROR
+        $env:CHANNEL_SESSION_ID = $previous.CHANNEL_SESSION_ID
+        $env:CHANNEL_SESSION_CWD = $previous.CHANNEL_SESSION_CWD
     }
 }
 

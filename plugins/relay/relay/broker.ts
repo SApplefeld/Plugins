@@ -142,9 +142,9 @@ export type BrokerClientOptions = {
   /** The ceiling below, overridable so a test does not have to wait out the real one. */
   replyCeilingMs?: number;
   /**
-   * Reads the session this relay serves, as Claude Code's session file names it, or the reason it
-   * could not be read. Called afresh at each announcement. Left unset by a client that announces
-   * nothing.
+   * Reads the session this relay serves, as its starter's variables or else Claude Code's session
+   * file names it, or the reason it could not be read. Called afresh at each announcement. Left
+   * unset by a client that announces nothing.
    */
   announcement?: () => SessionFileRead;
   /**
@@ -364,8 +364,9 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
   /**
    * The announcing's state. The timer is its own and never the reconnect's. `connection` counts
    * the streams this client has held and lost, so an answer that arrives after its stream dropped
-   * decides nothing for the next one. `unreadableLogged` holds the unreadable session file to one
-   * log line a connection, and `refusedLogged` does the same for the broker's refusal.
+   * decides nothing for the next one. `unreadableLogged` holds an unreadable session, from the
+   * variable or the file, to one log line a connection, and `refusedLogged` does the same for the
+   * broker's refusal.
    */
   let announceTimer: NodeJS.Timeout | null = null;
   let connection = 0;
@@ -390,14 +391,14 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
   }
 
   /**
-   * Tells the broker which session this relay serves, from the session file as it reads now. The
-   * broker registers a session whose hooks never reached it from this, and gives one registered
-   * from a hook post its launch directory.
+   * Tells the broker which session this relay serves, from its starter's variables or Claude Code's
+   * session file as they read now. The broker registers a session whose hooks never reached it
+   * from this, and gives one registered from a hook post its launch directory.
    *
    * Three statuses and two HTTP codes are final for the stream held: the broker took the
    * announcement or will never take it, so asking again would only repeat the answer. Anything
    * else is tried again after the delay, since it may be the one request that reaches a session
-   * with no thread: no usable file yet, a refused key, no answer, an answer this client cannot
+   * with no thread: no usable session yet, a refused key, no answer, an answer this client cannot
    * read, or a `refused` answer, since the record that holds the session id under another token
    * may end. No line written here holds the session id, the folder or a path.
    */
@@ -406,7 +407,7 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
     try {
       read = options.announcement?.();
     } catch {
-      // A reader that throws is an attempt with no usable file, tried again after the delay.
+      // A reader that throws is an attempt with no usable session, tried again after the delay.
       // Uncaught, the throw would end the relay from a timer and take the session's channel with it.
       scheduleAnnouncement();
       return;

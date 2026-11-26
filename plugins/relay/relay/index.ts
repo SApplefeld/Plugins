@@ -5,9 +5,9 @@
 // channel is a child of the *process*, so a `/clear` mints a new session underneath it without its
 // knowing. That is the whole reason identity travels over hooks instead, and the reason this
 // process joins the broker by the CHANNEL_PROCESS_TOKEN it inherited from the launch wrapper. The
-// relay also reads the session file Claude Code keeps for its process and tells the broker which
-// session it serves, for a session whose hooks never reached the broker; identity still reaches the
-// broker over hooks first.
+// relay also tells the broker which session it serves, for a session whose hooks never reached the
+// broker, from the variables a starter that is not Claude Code sets or else from the session file
+// Claude Code keeps for its process; identity still reaches the broker over hooks first.
 //
 // Nothing is written to stdout: stdout is the protocol pipe. Diagnostics go to stderr.
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -37,7 +37,7 @@ import {
   channelNotification,
   isMentionList,
 } from "./protocol.ts";
-import { claudeProcessId, readSessionFile } from "./session-file.ts";
+import { claudeProcessId, readAnnouncement } from "./session-file.ts";
 
 /** The longest file path a reply may name, the same bound the broker reads a path under. */
 const MAX_FILE_PATH_LENGTH = 1024;
@@ -369,7 +369,8 @@ export async function startRelay(env: NodeJS.ProcessEnv = process.env): Promise<
 
   // The claude process this relay serves, whose session file Claude Code keeps under `.claude` in
   // the home folder. The plugin's launcher passes the process id, since it stands between that
-  // process and this one; a relay registered directly is the claude process's own child.
+  // process and this one; a relay registered directly is the claude process's own child. A starter
+  // that sets `CHANNEL_SESSION_ID` names its session itself, and this process id is then unused.
   const claudePid = claudeProcessId(env.CHANNEL_CLAUDE_PID, process.ppid);
 
   const broker = createBrokerClient({
@@ -395,18 +396,12 @@ export async function startRelay(env: NodeJS.ProcessEnv = process.env): Promise<
     onConnected: () => keeper.connected(),
     onTurnEnded: (at) => keeper.turnEnded(at),
     log: (message) => process.stderr.write(`${message}\n`),
-    // Read afresh at each announcement, so the client tells the broker what the file says then. The
-    // home folder is resolved here too, so an account with none fails an attempt and never the
-    // relay's start, and reads as no file, so the client still writes its once-per-connection line.
-    announcement: () => {
-      let home: string;
-      try {
-        home = os.homedir();
-      } catch {
-        return { reason: "no file" };
-      }
-      return readSessionFile(claudePid, path.join(home, ".claude", "sessions"));
-    },
+    // Read afresh at each announcement, from the starter's variables where `CHANNEL_SESSION_ID` is
+    // set and from Claude Code's session file otherwise, so the client tells the broker what the
+    // source says then. The home folder is resolved only for the file, at each attempt, so an
+    // account with none fails an attempt and never the relay's start, and reads as no file, so the
+    // client still writes its once-per-connection line.
+    announcement: () => readAnnouncement(env, claudePid, () => path.join(os.homedir(), ".claude", "sessions")),
   });
 
   // Holds each permission prompt until it is answered or the session's turn ends, and offers it to
@@ -460,15 +455,32 @@ export async function startRelay(env: NodeJS.ProcessEnv = process.env): Promise<
   server.oninitialized = (): void => {
     if (processToken) broker.start();
   };
+  // A relay whose starter named its session in `CHANNEL_SESSION_ID` ends with its client: such a
+  // starter owns this process. It ends where its input ends, which the stdio transport never
+  // reports, and where the transport closes, which pauses the input so its end never comes. Either
+  // way it stops its stream first, so the broker reads the session as gone, and exits 0 once,
+  // whatever closed the transport, an error that closes it included: the starter that owns it reads
+  // the exit, not its code, and owns the relay's lifetime. A relay without the variable keeps its
+  // existing behavior and stays up: its starter's lifetime is not tied to its input.
+  const endsWithClient = "CHANNEL_SESSION_ID" in env;
+  let ending = false;
+  const endWithClient = (): void => {
+    if (ending) return;
+    ending = true;
+    broker.stop();
+    process.exit(0);
+  };
   server.onclose = (): void => {
     broker.stop();
+    if (endsWithClient) endWithClient();
   };
+  if (endsWithClient) process.stdin.once("end", endWithClient);
 
   await server.connect(new StdioServerTransport());
 }
 
-// Claude Code starts this as a child process. The guard is what lets a test import the module
-// without it seizing stdio, which is the MCP pipe.
+// Claude Code, or another program that starts a session, runs this as a child process. The guard
+// is what lets a test import the module without it seizing stdio, which is the MCP pipe.
 if (runDirectly(import.meta.url)) {
   await startRelay();
 }

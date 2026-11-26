@@ -150,9 +150,13 @@ if (root !== undefined) {
 // which is the claude process: the relay reads that process's session file to learn its session, and
 // its own parent is this shim. An inherited value is dropped first under every casing Windows reads
 // as the same name, so the relay never holds one this process did not set.
-const env = Object.fromEntries(
-  Object.entries(process.env).filter(([key]) => fold(key) !== fold("CHANNEL_CLAUDE_PID")),
-);
+//
+// CHANNEL_SESSION_ID and CHANNEL_SESSION_CWD are dropped the same way and never set: a relay that
+// holds CHANNEL_SESSION_ID announces that id as its own, so a pair inherited from a starter's session
+// would make this Claude Code session's relay speak for that other session. A starter that sets them
+// on purpose starts the relay itself, not through this shim.
+const dropped = new Set(["CHANNEL_CLAUDE_PID", "CHANNEL_SESSION_ID", "CHANNEL_SESSION_CWD"].map(fold));
+const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !dropped.has(fold(key))));
 env.CHANNEL_CLAUDE_PID = String(process.ppid);
 const child = spawn(entry.command, entry.args, { stdio: "inherit", shell: false, env });
 

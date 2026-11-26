@@ -745,10 +745,11 @@ export type AnnounceResult = AnnounceAnswer | "no-session-id";
 
 /**
  * Decides the relay's announcement, `POST /relay/announce`: the session id and the launch folder
- * a relay read from Claude Code's session file, sent under the reply key, so the caller has
- * already established that the request came from the process holding the stream. It is the second
- * source of the late registration docs/security-model.md states, beside a hook post, and the one
- * that registers a session which posts nothing.
+ * a relay read from its starter's variables, `CHANNEL_SESSION_ID` and `CHANNEL_SESSION_CWD`, or,
+ * where its starter set no `CHANNEL_SESSION_ID`, from Claude Code's session file, sent under the
+ * reply key, so the caller has already established that the request came from the process holding
+ * the stream. It is the second source of the late registration docs/security-model.md states,
+ * beside a hook post, and the one that registers a session which posts nothing.
  *
  * The two fields are read here, through the readers the hook route reads a `session_id` and a
  * SessionStart's `cwd` with, so an announced id is cleaned and bounded as a posted one is, and an
@@ -767,13 +768,13 @@ export type AnnounceResult = AnnounceAnswer | "no-session-id";
  *      announcement's take-in runs, as it does ahead of a hook post's late registration, since a
  *      spool is the hook's real announcement. Where a record now holds the token: `held`.
  *   4. The registry registers the session late, under the name and lineage the stream gave when it
- *      attached, never under anything the session file says. Its impostor refusal, a session id a
+ *      attached, never under anything the announcement carries. Its impostor refusal, a session id a
  *      record that is not ended holds under another token, is `refused`, with a line of its own
  *      and nothing created. Its other refusal cannot follow the cases above, and is `held`.
  *
- * No transcript path is learned: the session file holds none, and the session's next hook post
- * teaches it. Each line written carries the session id, and the refusal's the stream's name. None
- * carries the token, the lineage or the folder.
+ * No transcript path is learned: neither source holds one, and a session that has one teaches it
+ * on its next hook post. Each line written carries the session id, and the refusal's the stream's
+ * name. None carries the token, the lineage or the folder.
  */
 export function announceSession(
   registry: Registry,

@@ -363,8 +363,9 @@ export type HookIntake = {
 /**
  * What a late registration is asked of. From a hook post, it is the fields of a tool, stop or
  * prompt post that name its session. From the relay's announcement, it is the session the relay
- * read from Claude Code's session file. Either way the lineage and the fallback name are the ones
- * the session's relay gave when it attached.
+ * read from its starter's CHANNEL_SESSION_ID where that is set, and from Claude Code's session
+ * file otherwise. Either way the lineage and the fallback name are the ones the session's relay
+ * gave when it attached.
  */
 export type LatePost = {
   processToken: string;
@@ -378,8 +379,9 @@ export type LatePost = {
   lineage: string | null;
   /**
    * The launch directory, after the absolute-local-path reader. The relay's announcement carries
-   * the one its session file names, or null where that one was missing or refused. A hook post
-   * passes null: its `cwd` is wherever a tool call moved the shell, which vouches for no launch.
+   * the starter's CHANNEL_SESSION_CWD or the one its session file names, or null where that one was
+   * missing or refused. A hook post passes null: its `cwd` is wherever a tool call moved the
+   * shell, which vouches for no launch.
    */
   workdir: string | null;
 };
@@ -964,7 +966,8 @@ export function createRegistry(options: RegistryOptions): Registry {
       harnessNotice: null,
       title: null,
       // The caller's reading of the launch: null from a hook post, whose directory vouches for no
-      // launch, as a compaction's does not, and the session file's from the relay's announcement.
+      // launch, as a compaction's does not, and the announced one (the starter's or the session
+      // file's) from the relay's announcement.
       workdir: post.workdir,
     };
     sessions.set(post.sessionId, record);
