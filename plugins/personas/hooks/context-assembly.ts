@@ -45,7 +45,8 @@ export function followUpMarker(source: string): string {
 // What opened the prompt the blocks are for. A typed prompt carries whether
 // the record step opened a turn record for it, which selects the [NO GOAL]
 // text, and whether it is the supervisor's priming turn of a session that
-// takes the [RESTART RECAP] block. A delivery opens no record and is never
+// takes the [RESTART RECAP] block, and, apart from the recap's own option,
+// of a session that reads the [HAND-OVER] note. A delivery opens no record and is never
 // the priming turn. It carries `stillQuiet`, read once every source that
 // reads has answered and before any write: a store read can take a while,
 // and a delivery that finds a turn opened meanwhile is not sent, so it
@@ -56,7 +57,7 @@ export function followUpMarker(source: string): string {
 // operator-class. A record delivery leaves it unset, since a reader's answer
 // record has already closed its ask.
 export type ContextTrigger =
-  | { kind: "typed"; recordOpened: boolean; restartRecap: boolean; operatorsWord: boolean }
+  | { kind: "typed"; recordOpened: boolean; restartRecap: boolean; handover: boolean; operatorsWord: boolean }
   | { kind: "delivery"; stillQuiet(): boolean; operatorsWord?: boolean };
 
 // What the blocks read and reach beyond this file. `state` is the persona's
@@ -65,7 +66,10 @@ export type ContextTrigger =
 // records. It is read again after each await, since the session can replace
 // its state object while a read is in flight. `log` is $.ui.log. The four helpers are hooks/index.ts's own.
 // `restartRecapBlock` is the [RESTART RECAP] block or null, read on the
-// typed trigger alone. `recall` is the recall chain over the situation
+// typed trigger alone. `handoverBlock` is the [HAND-OVER] block or null, read
+// on the typed trigger alone; the note behind a block it answers is written
+// back as delivered, and a write-back that fails is logged and still answers
+// the block. `recall` is the recall chain over the situation
 // given, read on the typed trigger alone: the rendering of the records Jev
 // judged live to bear on it, with their names, or null where nothing is
 // shown, whether because no record was judged worth showing, every one shown
@@ -89,6 +93,7 @@ export interface ContextSources {
   taskListBlock(tasks: TaskItem[], goalId: string): string | null;
   standingLevelSentence(level: AutonomyLevel): string;
   restartRecapBlock(): Promise<string | null>;
+  handoverBlock(): Promise<string | null>;
   recall(situation: string): Promise<{ rendering: string; names: readonly string[] } | null>;
   followUps(): Promise<readonly { id: string; source: string; text: string; subject: string }[]>;
   followUpsShown(entries: readonly { id: string; subject: string }[]): void;
@@ -437,7 +442,22 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
   // bounds the only wait here. The block lands after [STANDING] and before
   // [ENV], so the orders the session works under come first and the
   // environment's current state stays the last word.
-  if (trigger.kind === "typed" && trigger.restartRecap) {
+  //
+  // A [HAND-OVER] block takes the recap's place: where the session before
+  // this one left a note for it, the note is read first, and a note handed
+  // over skips the recap on that turn, since the note is that session's own
+  // account and the digest would repeat it less well.
+  let handedOver = false;
+  if (trigger.kind === "typed" && trigger.handover) {
+    const handoverBlock = await sources.handoverBlock();
+    if (handoverBlock !== null) {
+      contextBlocks.push(handoverBlock);
+      handedOver = true;
+      try { log(`Agentic: [HAND-OVER] injected`); } catch { /* non-fatal */ }
+    }
+    state = sources.state;
+  }
+  if (trigger.kind === "typed" && trigger.restartRecap && !handedOver) {
     const recapBlock = await sources.restartRecapBlock();
     if (recapBlock !== null) {
       contextBlocks.push(recapBlock);

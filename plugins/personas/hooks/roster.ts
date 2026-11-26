@@ -52,6 +52,7 @@ export const ROSTER_FIELDS = [
   "fleetRoster",
   "jevMode",
   "jevLive",
+  "checkpointRestart",
   "args",
   "repo",
   "goal",
@@ -88,6 +89,7 @@ export type WrittenRosterEntry = {
   fleetRoster?: string;
   jevMode?: string;
   jevLive?: string[];
+  checkpointRestart?: string;
   args?: string[];
   repo?: string;
   goal?: { objective: string; done: string[]; turns?: number };
@@ -116,6 +118,10 @@ const EFFORTS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
 
 // jevMode: bin/agentic-common.sh emit_settings_json's JEV_MODE case.
 const JEV_MODES: readonly string[] = ["off", "shadow"];
+
+// checkpointRestart: bin/agentic-common.sh emit_settings_json's
+// CHECKPOINT_RESTART case.
+const CHECKPOINT_RESTARTS: readonly string[] = ["off", "shadow", "live"];
 
 // jevLive ids: bin/agentic-common.sh JEV_PROMOTABLE_SET_IDS, which
 // jev_live_to_csv refuses any JEV_LIVE id outside.
@@ -282,6 +288,10 @@ function stringProblem(field: string, value: unknown, rosterPath: string): strin
     case "jevMode":
       // agentic-common.sh's JEV_MODE case.
       if (!JEV_MODES.includes(value)) return `must be one of ${JEV_MODES.join(", ")}`;
+      return null;
+    case "checkpointRestart":
+      // agentic-common.sh's CHECKPOINT_RESTART case.
+      if (!CHECKPOINT_RESTARTS.includes(value)) return `must be one of ${CHECKPOINT_RESTARTS.join(", ")}`;
       return null;
     case "coordinatorPersona":
     case "architectPersona":

@@ -340,12 +340,12 @@ because bash is the consumer of these two and a Windows spelling of the rundir r
 relative path. The args field is passed as written, since the keeper does not know what a flag it
 has no row for means. model, effort, controllerTickMs, nudgeFloorMs, nudgeIdleMs,
 memoryGateDiscardPercent, channelLogRetentionDays, journalRetentionDays, coordinatorPersona,
-architectPersona, liaisonPersona, roadmapPersona, fleetRoster and jevMode become the MODEL, EFFORT,
-controllerTickMs, nudgeFloorMs, nudgeIdleMs, memoryGateDiscardPercent, channelLogRetentionDays,
-journalRetentionDays, COORDINATOR_PERSONA, ARCHITECT_PERSONA, LIAISON_PERSONA, ROADMAP_PERSONA,
-FLEET_ROSTER and JEV_MODE environment variables, each present only where the entry carries the
-field. SETTINGS_FROM_ROSTER is set to 1 on every invocation, so the supervisor rewrites its
-settings file from the roster at each start.
+architectPersona, liaisonPersona, roadmapPersona, fleetRoster, jevMode and checkpointRestart become
+the MODEL, EFFORT, controllerTickMs, nudgeFloorMs, nudgeIdleMs, memoryGateDiscardPercent,
+channelLogRetentionDays, journalRetentionDays, COORDINATOR_PERSONA, ARCHITECT_PERSONA,
+LIAISON_PERSONA, ROADMAP_PERSONA, FLEET_ROSTER, JEV_MODE and CHECKPOINT_RESTART environment
+variables, each present only where the entry carries the field. SETTINGS_FROM_ROSTER is set to
+1 on every invocation, so the supervisor rewrites its settings file from the roster at each start.
 jevLive is an array of question-set ids rather than a scalar, so it does not ride that same field
 map: a non-empty array becomes JEV_LIVE as its members joined with a comma, since the shell halves
 that read JEV_LIVE split on commas, and PowerShell's own [string] cast on an array joins with $OFS
@@ -415,6 +415,7 @@ function Build-SupervisorInvocation {
         roadmapPersona = 'ROADMAP_PERSONA'
         fleetRoster = 'FLEET_ROSTER'
         jevMode = 'JEV_MODE'
+        checkpointRestart = 'CHECKPOINT_RESTART'
     }
     foreach ($field in $map.Keys) {
         $value = $Entry.$field

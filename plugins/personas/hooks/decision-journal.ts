@@ -906,10 +906,22 @@ export async function writeRendering(host: JournalHost, record: RenderingRecord)
 // arrived, its stop reason and output tokens, whether the call threw, and the
 // milliseconds since the compaction.
 //
+// Three more come from the checkpoint restart rule in
+// hooks/checkpoint-restart.ts, and only where its switch reads shadow or
+// live. A `checkpoint_restart` is one call of the rule at a turn end: the
+// switch, the verdict, the failing conditions as one comma-joined string,
+// the fill and the floor, the engine's background task and scheduled wake
+// counts, and the milliseconds the operator has been quiet. A
+// `session_first_turn` is the token counts and model of a session's first
+// main-loop turn, with the fill at its end, which prices a fresh start. A
+// `compaction_first_turn` is the same six fields for the first main-loop
+// turn that ends after a compaction of the main conversation ran, which
+// prices the cache that compaction rebuilt. Thirteen names in all.
+//
 // The union and the array carry the same members in the same order: a member
 // in the union alone compiles and is refused by writeEvent at runtime.
-export type EventName = "compaction_gate" | "compaction_pass" | "compaction_pass_disabled" | "guard_verdict" | "guard_shadow" | "guard_error" | "recognition_nudge" | "recognition_withheld" | "stretch_distillation" | "compaction_after";
-export const EVENT_NAMES: readonly EventName[] = ["compaction_gate", "compaction_pass", "compaction_pass_disabled", "guard_verdict", "guard_shadow", "guard_error", "recognition_nudge", "recognition_withheld", "stretch_distillation", "compaction_after"];
+export type EventName = "compaction_gate" | "compaction_pass" | "compaction_pass_disabled" | "guard_verdict" | "guard_shadow" | "guard_error" | "recognition_nudge" | "recognition_withheld" | "stretch_distillation" | "compaction_after" | "checkpoint_restart" | "session_first_turn" | "compaction_first_turn";
+export const EVENT_NAMES: readonly EventName[] = ["compaction_gate", "compaction_pass", "compaction_pass_disabled", "guard_verdict", "guard_shadow", "guard_error", "recognition_nudge", "recognition_withheld", "stretch_distillation", "compaction_after", "checkpoint_restart", "session_first_turn", "compaction_first_turn"];
 
 // A value an event's detail may carry: a string, a number, a boolean or null.
 export type EventDetailValue = string | number | boolean | null;

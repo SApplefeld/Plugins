@@ -57,6 +57,13 @@ declare module 'claude-code' {
       /** Optional. Why the operator asked for a restart. */
       reason?: string
     }
+    /** Leave a note for the next session of this persona, for a restart at a checkpoint. The note replaces any earlier one, and the next session reads it once, on its priming turn. Refused unless this persona's checkpointRestart switch reads live, and refused for a session that does not hold its persona. Owner only. */
+    "mcp__personas__handover_write": {
+      /** Your own account, in plain text, of what you were doing, what is on disk and where, and what comes next. At most 4,000 characters, and never empty. */
+      note: string
+      /** Each process this session started that is still executing, or the one word none. Never empty. */
+      running: string
+    }
     /** Steer the goal tree in response to an operator request: drop a pending plan or task (marks it abandoned, it is never activated), pause an active or pending node with a reason (use goal_resume to continue it later), or reprioritize a pending node so it activates before its siblings. Owner only. */
     "mcp__personas__goal_edit": {
       /** The id of the node to change (see goal_status). */

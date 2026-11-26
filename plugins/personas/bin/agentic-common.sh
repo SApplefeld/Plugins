@@ -6,6 +6,7 @@
 # Provides: wait_persona_free, refuse_if_persona_live, emit_settings_json,
 #           ensure_settings_plugin_ids, ensure_settings_arming,
 #           ensure_settings_jev_mode, ensure_settings_jev_live,
+#           ensure_settings_checkpoint_restart,
 #           ensure_settings_memory_gate_discard_percent,
 #           ensure_settings_cadences, ensure_settings_goal,
 #           read_settings_controller_tick,
@@ -178,7 +179,7 @@ jev_live_to_csv() {
 EMIT_SETTINGS_OWNED_KEYS=(controllerTickMs nudgeIdleMs nudgeFloorMs gitProbeMs heartbeatMs staleAfterMs
   memoryGateDiscardPercent selfReviewEveryTurns costSummaryEveryNTicks costMaxNudgesPerHour
   costMaxPluginCallsPerHour costBackoffAfterTicks costBackoffMaxMs jevMode jevLive guards restartRecap
-  persona arming coordinatorPersona architectPersona liaisonPersona roadmapPersona fleetRoster
+  checkpointRestart persona arming coordinatorPersona architectPersona liaisonPersona roadmapPersona fleetRoster
   supervisorMailbox heartbeatPath supervisorHeartbeatPath goalFile lifetime)
 
 # --- emit_settings_json ---
@@ -197,7 +198,9 @@ EMIT_SETTINGS_OWNED_KEYS=(controllerTickMs nudgeIdleMs nudgeFloorMs gitProbeMs h
 #          and supervisorHeartbeatPath (from SUPERVISOR_MAILBOX, HEARTBEAT_PATH
 #          and SUPERVISOR_HEARTBEAT_PATH, each omitted the same way), and
 #          restartRecap (from RESTART_RECAP, auto or skill, omitted the same
-#          way and refused outside that pair), and goalFile and lifetime
+#          way and refused outside that pair), and checkpointRestart (from
+#          CHECKPOINT_RESTART, off, shadow or live, omitted the same way and
+#          refused outside those three), and goalFile and lifetime
 #          (from GOAL_FILE, a path, and LIFETIME, standing or goal and refused
 #          outside that pair, each omitted the same way); and,
 #          outside the plugin options, the harness's own autoContinue, always
@@ -291,6 +294,23 @@ emit_settings_json() {
         ;;
     esac
     recap_opts=",\"restartRecap\":\"$RESTART_RECAP\""
+  fi
+  # checkpointRestart switches the checkpoint restart rule: off runs none of
+  # it, shadow records what the rule would have done, and live records its
+  # verdicts with every condition counted. An unset or empty
+  # CHECKPOINT_RESTART omits the key, and the plugin reads a missing key as
+  # off. A set value outside the three is refused the way RESTART_RECAP's
+  # is, rather than reaching the child where it would read as off.
+  local checkpoint_opts=""
+  if [ -n "${CHECKPOINT_RESTART:-}" ]; then
+    case "$CHECKPOINT_RESTART" in
+      off|shadow|live) ;;
+      *)
+        echo "ERROR: emit_settings_json: CHECKPOINT_RESTART '$CHECKPOINT_RESTART' must be 'off', 'shadow' or 'live'" >&2
+        return 1
+        ;;
+    esac
+    checkpoint_opts=",\"checkpointRestart\":\"$CHECKPOINT_RESTART\""
   fi
   # jevLive names, by id, which questions PROMOTABLE_SET_IDS ships
   # may read Jev's live answer. An unset or empty JEV_LIVE, or one holding
@@ -517,7 +537,7 @@ emit_settings_json() {
   # absent from the engine's type file, and options under the other id are
   # ignored without an error, so the same options are written under both.
   # test-personas/settings-plugin-key-test.sh pins both ids against the two manifests.
-  local options="{\"controllerTickMs\":$TICK_MS,\"nudgeIdleMs\":$NUDGE_IDLE_MS,\"nudgeFloorMs\":${NUDGE_FLOOR_MS:-300000},\"gitProbeMs\":$GIT_PROBE_MS,\"heartbeatMs\":${HEARTBEAT_MS:-30000},\"staleAfterMs\":${STALE_AFTER_MS:-90000},\"memoryGateDiscardPercent\":${MEMORY_GATE_DISCARD_PERCENT:-90}$self_review_opts$cost_opts$jev_opts$guards_opts$recap_opts$persona_opt,\"arming\":\"owner\",\"coordinatorPersona\":\"$coordinator_persona\"$architect_opt$liaison_opt$roadmap_opt$roster_opt$supervisor_opts$goal_opts}"
+  local options="{\"controllerTickMs\":$TICK_MS,\"nudgeIdleMs\":$NUDGE_IDLE_MS,\"nudgeFloorMs\":${NUDGE_FLOOR_MS:-300000},\"gitProbeMs\":$GIT_PROBE_MS,\"heartbeatMs\":${HEARTBEAT_MS:-30000},\"staleAfterMs\":${STALE_AFTER_MS:-90000},\"memoryGateDiscardPercent\":${MEMORY_GATE_DISCARD_PERCENT:-90}$self_review_opts$cost_opts$jev_opts$guards_opts$recap_opts$checkpoint_opts$persona_opt,\"arming\":\"owner\",\"coordinatorPersona\":\"$coordinator_persona\"$architect_opt$liaison_opt$roadmap_opt$roster_opt$supervisor_opts$goal_opts}"
   # autoContinue is the harness's own setting, at the top level rather than
   # under a plugin id. Off, a child that trips a usage limit ends its turn and
   # sits idle rather than parking until the limit resets, and the supervisor's
@@ -773,6 +793,68 @@ try {
   fail("could not be rewritten: " + e.message);
 }
 ' "$1" "$AGENTIC_PLUGIN_DEV_ID" "$AGENTIC_PLUGIN_INSTALLED_ID" "$JEV_MODE"
+}
+
+# --- ensure_settings_checkpoint_restart ---
+# Usage: ensure_settings_checkpoint_restart <settings-file>
+# For a settings file the caller already provided: writes CHECKPOINT_RESTART
+# as options.checkpointRestart under each of the two plugin ids, creating
+# pluginConfigs, the id entry and its options object where any of them is
+# absent, and leaving every other option the caller wrote exactly as written.
+#
+# It overwrites as ensure_settings_jev_mode does, for the same reason: the
+# value is the operator's current intent, carried from the roster through the
+# keeper. It differs in one way. Where CHECKPOINT_RESTART is unset or empty it
+# writes off rather than leaving the file alone, so removing the field from a
+# roster turns the persona off at its next start, and no value an earlier
+# launch wrote can keep a persona on.
+#
+# An invalid value is refused here on the same rule emit_settings_json uses,
+# rather than written or folded, so the two branches cannot disagree about
+# what a bad value means. The file is replaced by rename, so an interrupted
+# write never leaves it truncated.
+ensure_settings_checkpoint_restart() {
+  local mode="${CHECKPOINT_RESTART:-}"
+  if [ -z "$mode" ]; then
+    mode=off
+  fi
+  case "$mode" in
+    off|shadow|live) ;;
+    *)
+      echo "ERROR: ensure_settings_checkpoint_restart: CHECKPOINT_RESTART $mode must be off, shadow or live" >&2
+      return 1
+      ;;
+  esac
+  node -e '
+const fs = require("fs");
+const [file, devId, installedId, mode] = process.argv.slice(1);
+const fail = (msg) => { console.error("ERROR: ensure_settings_checkpoint_restart: " + file + " " + msg); process.exit(1); };
+const plain = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+let s;
+try { s = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "")); } catch (e) { fail("is not valid JSON: " + e.message); }
+if (!plain(s)) fail("is not a JSON object");
+let changed = false;
+if (s.pluginConfigs === undefined) { s.pluginConfigs = {}; changed = true; }
+const pc = s.pluginConfigs;
+if (!plain(pc)) fail("has a pluginConfigs value that is not an object");
+for (const id of [devId, installedId]) {
+  if (pc[id] === undefined) { pc[id] = {}; changed = true; }
+  if (!plain(pc[id])) fail("has a " + id + " entry that is not an object");
+  if (pc[id].options === undefined) { pc[id].options = {}; changed = true; }
+  const opts = pc[id].options;
+  if (!plain(opts)) fail("has " + id + " options that are not an object");
+  if (opts.checkpointRestart !== mode) { opts.checkpointRestart = mode; changed = true; }
+}
+if (!changed) process.exit(0);
+const tmp = file + ".tmp-" + process.pid;
+try {
+  fs.writeFileSync(tmp, JSON.stringify(s));
+  fs.renameSync(tmp, file);
+} catch (e) {
+  try { fs.unlinkSync(tmp); } catch (_) {}
+  fail("could not be rewritten: " + e.message);
+}
+' "$1" "$AGENTIC_PLUGIN_DEV_ID" "$AGENTIC_PLUGIN_INSTALLED_ID" "$mode"
 }
 
 # --- ensure_settings_goal ---

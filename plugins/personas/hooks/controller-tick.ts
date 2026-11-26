@@ -31,6 +31,7 @@ import { ASKS_OPEN_MAX, ASK_TITLE_COST_CAP, ASK_TITLE_ERROR_STREAK, ASK_TITLE_NU
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, shadowAsk as shadowAskFromModule, shadowOutcome as shadowOutcomeFromModule, tickOpenAsk as tickOpenAskFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { stampBeat, stampSupervisorFile, type BeatHost, type HeartbeatEntry } from "./beat";
 import { cacheTick, type CacheClockState } from "./cache-clock";
+import { checkpointRestartUntaken, withdrawCheckpointRequest, type CheckpointMemory } from "./checkpoint-restart";
 import type { ExpectedTurn, SubmitOutcome } from "./channel-text";
 import { INBOX_DRAIN_IDLE_TICKS, claimResource, commonsWinner, readAllClaims, readAllEntries, type CommonsStore } from "./commons";
 import { compactionPassStep, type CompactionPassDeps, type CompactionPassOption } from "./compaction-pass";
@@ -40,6 +41,7 @@ import type { drainBoxNotices as drainBoxNoticesFromModule, drainOrphanSweep as 
 import { fleetReadingOf, readFleetRows, type FleetLine, type fleetPromptText } from "./fleet";
 import type { PluginHost } from "./host";
 import { shownDoneStatement } from "./goal-persona";
+import { handoverRestartClearOf, type HandoverNote } from "./handover";
 import type { HookBudget, LiveAskResult } from "./jev-live";
 import { COORDINATOR_GROUND, SweepDeleteError, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundIn, deliveryPrefix, deliveryRecordProblem, enforceChannelWindow, isQuietRecord, listInboxRecords, mayReachPersona, readAskRecord, readInboxRecord, sendPluginRecord, sweepExpiredRecords, type InboxRecord } from "./operator";
 import { PLAN_ARCHIVE_DIRS } from "./plan-record";
@@ -186,6 +188,19 @@ export interface TickContext extends SharedHandlerState {
   PROPOSAL_EVERY_MS: number;
   PLAN_RECORD_MAX_RESENDS: number;
   turnIsOpen: () => boolean;
+  // Whether the plugin holds the prompts whose source waits in the store, as
+  // checkpointPromptsHeld in hooks/checkpoint-restart.ts reads the session's
+  // checkpoint memory at the call's time: under live, while a turn end saves
+  // a restart request and for CHECKPOINT_HOLD_MS after the save.
+  promptsHeld: () => boolean;
+  // The session's checkpoint memory, which the tick reads for the one
+  // restart_untaken decision past the hold's bound.
+  checkpoint: CheckpointMemory;
+  // The hand-over file beside the store, read and parsed, or null where it
+  // is absent or will not read; and its writer. The tick clears the note's
+  // restart mark through them at restart_untaken.
+  readHandoverNote: () => Promise<HandoverNote | { problem: string } | null>;
+  writeHandoverNote: (note: HandoverNote) => Promise<void>;
   // The open-turn reading's mark, tick counts and outlived set, as
   // hooks/index.ts keeps them beside openTurns, and the stamp derivation
   // the drop runs after it removes an entry.
@@ -656,6 +671,32 @@ export async function drainInbox(ctx: TickContext): Promise<boolean> {
   return startInboxDrain(ctx, (owns) => drainInboxOnce(ctx, owns));
 }
 
+// Whether the completion drain, started now, would submit a prompt: a drain
+// already holding the slot, whose submit opens a turn, or a pending record
+// drainInboxOnce would deliver, read as it reads one: an answer to an open
+// ask, or a record that is not quiet, whose writer's claims reach this
+// persona and which passes the record rule. A quiet record is held with no
+// prompt, and a record the drain marks skipped opens no turn, so neither
+// counts. It marks no record and submits nothing; its one write is the
+// claims read's collection of stale commons entries, as the drain's own
+// claims read makes. The checkpoint restart rule's turn-pending condition
+// reads it at a turn's end (hooks/turn-complete.ts).
+export async function inboxDeliverable(ctx: TickContext): Promise<boolean> {
+  if (ctx.drainInFlight() !== null) return true;
+  const { sess, coordinatorPersona, architectPersona } = ctx;
+  const store = ctx.commonsStore();
+  const pending = (await listInboxRecords(store, sess.persona)).filter((rec) => rec.status === "pending");
+  if (pending.length === 0) return false;
+  const openEntries = openAskEntries(sess.state);
+  const claims = await readAllClaims(store, sess.staleAfterMs);
+  return pending.some((rec) => {
+    const answersOpenAsk = typeof rec.answers === "string" && openEntries.some((entry) => entry.id === rec.answers);
+    if (!answersOpenAsk && isQuietRecord(rec)) return false;
+    const ground = deliveryGroundIn(claims, sess.persona, rec.from, coordinatorPersona, deliveryArchitectLine(architectPersona, rec));
+    return !("refused" in ground) && deliveryRecordProblem(rec) === null;
+  });
+}
+
 // What the last overrun left: "none" where no overrun stands, "cleared" from
 // an overrun's clear until the engine is read as answering again, and "held"
 // where an overrun found "cleared" still standing. While held, the idle tick
@@ -799,6 +840,11 @@ const SKIP_NOTE_UNANSWERED = "Skipped at delivery: the session's submit never an
 // returns false and writes nothing more: no companion record, no delivered
 // mark, no submit, no failed-outcome line, since a newer drain may have
 // taken its record and the overrun may have marked it skipped.
+//
+// Where the plugin holds its prompts (TickContext.promptsHeld), a drain
+// started before the hold began and still running stops before it marks the
+// answer or the record delivered, so the record stays pending for the next
+// session.
 export async function drainInboxOnce(ctx: TickContext, owns: () => boolean): Promise<boolean> {
   const { withdrawFollowUpsOffered, recordFailedDelivery, sess, turnIsOpen, coordinatorPersona, architectPersona } = ctx;
   // D3: drain operator inbox (one record per call, owner only).
@@ -819,6 +865,9 @@ export async function drainInboxOnce(ctx: TickContext, owns: () => boolean): Pro
   // is queued rather than answered, so the record would carry a delivered
   // stamp with no turn that ever read it. Skipping leaves it pending and
   // the next quiet tick takes it, which costs one tick and loses nothing.
+  // Where the plugin holds its prompts the drain reads nothing and every
+  // record stays pending, for the next session or the hold's end.
+  if (ctx.promptsHeld()) return false;
   if (sess.isOwner && !turnIsOpen()) {
     const persona = sess.persona;
     const store = ctx.commonsStore();
@@ -888,7 +937,7 @@ export async function drainInboxOnce(ctx: TickContext, owns: () => boolean): Pro
           // all three from there.
           ctx.setDrainRecord({ id: answer.id, key: answer.key, followUps: answerFollowUps, submitted: false });
           const answerBlocks = await ctx.answerBlocksOf(answer, answerFollowUps);
-          if (answerBlocks === null || !owns()) return false;
+          if (answerBlocks === null || !owns() || ctx.promptsHeld()) return false;
           // Close the ask on the ledger and, where its record is still
           // open, on the record in the same step. The ledger is the
           // owner's truth, so a record that is missing or already
@@ -1099,7 +1148,7 @@ export async function drainInboxOnce(ctx: TickContext, owns: () => boolean): Pro
       // drain as wedged reads all three from there.
       ctx.setDrainRecord({ id: oldest.id, key: oldest.key, followUps: deliveryFollowUps, submitted: false });
       const deliveryBlocks = await ctx.deliveryBlocksOf(oldest, deliveryFollowUps);
-      if (deliveryBlocks === null || !owns()) return false;
+      if (deliveryBlocks === null || !owns() || ctx.promptsHeld()) return false;
       oldest.status = "delivered";
       oldest.deliveredAt = Date.now();
       // The ground the decision line and the bracket name, stored so the
@@ -1154,7 +1203,9 @@ export async function drainInboxOnce(ctx: TickContext, owns: () => boolean): Pro
 // open, after which the tick ends the same way; while a turn is open the
 // records stay for the first idle tick's pass. Then the box notices file,
 // where the boxNotices option names one and neither pass above delivered,
-// drained the same way under its own label. The cost
+// drained the same way under its own label. Where the plugin holds its
+// prompts (TickContext.promptsHeld), the mailbox pass reads a turn as open
+// and neither file is read. The cost
 // bookkeeping stays in the idle part, below
 // the fleet block: its persist is the bare store write whose throw the
 // fleet's tick-failure reading reports, and its sweep collects stale
@@ -1165,12 +1216,18 @@ export async function alwaysTick(ctx: TickContext): Promise<boolean> {
   // 1. Owner check.
   if (!sess.isOwner) return false;
   if (supervisorMailbox !== "") {
-    const mailbox = await ctx.drainSupervisorMailbox(supervisorMailbox, expectedTurns, supervisorMailboxSkipped, turnIsOpen);
+    // Where the plugin holds its prompts, the mailbox pass reads a turn as
+    // open, so probes are still acknowledged and the session still reads
+    // alive, while a shutdown stays in the mailbox unsubmitted.
+    const mailbox = await ctx.drainSupervisorMailbox(supervisorMailbox, expectedTurns, supervisorMailboxSkipped, () => turnIsOpen() || ctx.promptsHeld());
     if (mailbox.logged) {
       try { await ctx.persist(); } catch { /* the store refused; the lines above wait in memory */ }
     }
     if (mailbox.delivered) return false;
   }
+  // Where the plugin holds its prompts, the findings and the notices stay in
+  // their files, unread and unacknowledged, for the next session.
+  if (ctx.promptsHeld()) return true;
   if (orphanSweepFindings !== "") {
     const sweep = await ctx.drainOrphanSweep(orphanSweepFindings, expectedTurns, orphanSweepSkipped, turnIsOpen);
     if (sweep.logged) {
@@ -1233,10 +1290,13 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // open turn and runs in full, so a tick landing in that window would read
   // the same line and queue a second [STORE LOST] turn beside the first. A
   // refused submit puts the line back and records why, so the next idle
-  // tick says it again rather than the session going quiet.
+  // tick says it again rather than the session going quiet. Where the
+  // plugin holds its prompts the line stands uncleared. No await stands
+  // between the tick's own check and this one, so it holds the same
+  // reading; it is kept here so the line is never cleared under a hold.
   if (!(sess.persona === coordinatorPersona && fleetRoster !== "")) {
     const storeLostLine = ctx.startStoreProblem();
-    if (storeLostLine !== null) {
+    if (storeLostLine !== null && !ctx.promptsHeld()) {
       ctx.setStartStoreProblem(null);
       const storeLostOutcome = await ctx.submitStoreLost(storeLostLine);
       if (!storeLostOutcome.ok) {
@@ -1336,6 +1396,12 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         // session memory and stands whatever the file does, so what a
         // refused write costs is the audit line alone.
         try { await ctx.persist(); } catch { /* the store refused; the line above waits for one that parses */ }
+      } else if (ctx.promptsHeld()) {
+        // Where the plugin holds its prompts, the reading goes back as it
+        // does for an open turn, with no line written, so the first tick
+        // past the hold composes these same lines again.
+        sess.fleetHealth = previousMap;
+        sess.fleetFirstReadingDone = previousFirstReadingDone;
       } else {
         // The line saying the change was reported, pushed before the write
         // that carries it and taken back out with the reading wherever the
@@ -1529,6 +1595,9 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         // to run, and the stamp this branch leaves alone is unaffected by
         // what the file does.
         try { await ctx.persist(); } catch { /* the store refused; the line above waits for one that parses */ }
+      } else if (ctx.promptsHeld()) {
+        // Where the plugin holds its prompts the stamp stands, with no
+        // line written, so the first tick past the hold asks for the pass.
       } else {
         sess.state.lastReconcileAt = reconcileNow;
         // The line naming the submission, taken back out with the stamp
@@ -1681,7 +1750,9 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       sess.state.updatedAt = trunkGateNow;
       try { await ctx.persist(); } catch { /* the store refused; the stamp stands in memory */ }
     }
-    if (gate.act === "fire") {
+    // Where the plugin holds its prompts the day stays unspent, so the
+    // first tick past the hold gates it.
+    if (gate.act === "fire" && !ctx.promptsHeld()) {
       const gateState = sess.state;
       const trunkGateDate = sess.state.trunkGateDate;
       sess.state.trunkGateDate = gate.date;
@@ -1765,7 +1836,8 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       try { await ctx.persist(); } catch { /* the store refused; the stamps stand in memory */ }
     }
     const dueRoutine = sess.state.routines.find((routine) => routineDue(routineNow, routine) === "fire");
-    if (dueRoutine !== undefined && !turnIsOpen()) {
+    // Where the plugin holds its prompts the routine stays due.
+    if (dueRoutine !== undefined && !turnIsOpen() && !ctx.promptsHeld()) {
       const routineState = sess.state;
       const lastFiredAt = dueRoutine.lastFiredAt;
       dueRoutine.lastFiredAt = routineNow;
@@ -1987,8 +2059,9 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // id, so the two could take one sequence number and one would overwrite
   // the other's record. Skipping leaves the settle step, the routing and
   // the review to the next quiet tick, which costs one tick and loses
-  // nothing.
-  if (sess.state.monitor.selfReview && !turnIsOpen()) {
+  // nothing. Where the plugin holds its prompts the review waits the same
+  // way, since its findings end in a [KAIZEN] submit.
+  if (sess.state.monitor.selfReview && !turnIsOpen() && !ctx.promptsHeld()) {
     const sr = sess.state.monitor.selfReview;
     const now = Date.now();
 
@@ -2418,8 +2491,10 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // the next quiet tick. A turn open by the time a resend would write
   // stops the step: what it settled so far is still saved and announced,
   // and the tick then ends, as step 4a ends on a turn it finds open.
+  // Where the plugin holds its prompts the step waits as it does for an open
+  // turn, since what it settles ends in a [KAIZEN] submit.
   if (sess.persona !== coordinatorPersona && sess.persona !== "default"
-    && sess.state.monitor.planRecords.length > 0 && !turnIsOpen()) {
+    && sess.state.monitor.planRecords.length > 0 && !turnIsOpen() && !ctx.promptsHeld()) {
     const ledger = sess.state.monitor.planRecords;
     const planRecordNow = Date.now();
     const unroutableLines: string[] = [];
@@ -2467,8 +2542,9 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           continue;
         }
         // Taken once more, since a turn can have opened under the record
-        // read and the reach check.
-        if (turnIsOpen()) {
+        // read and the reach check. A hold that rose there stops the step
+        // the same way.
+        if (turnIsOpen() || ctx.promptsHeld()) {
           turnOpenedUnderStep = true;
           break;
         }
@@ -2871,6 +2947,9 @@ export async function idleTick(ctx: TickContext): Promise<void> {
 
   // 4. No active leaf: activate pending work if any exists (H1), else return.
   if (!activeNode || activeNode.status !== "active") {
+    // tickOpenAsk stamps a due re-raise and then submits it, so where the
+    // plugin holds its prompts the tick ends here and the re-raise stays due.
+    if (ctx.promptsHeld()) return;
     const askResult = await ctx.tickOpenAsk(sess.state, sess.persona, cfg, null, expectedTurns);
     if (askResult !== "none") return;
     const nextId = activateNext(sess.state);
@@ -2898,7 +2977,9 @@ export async function idleTick(ctx: TickContext): Promise<void> {
     // agentic_say in it and a resend below each read the highest sequence
     // and then write under this session's id, so the two could take one
     // sequence number. The settle and the ask wait for the next quiet tick.
+    // Where the plugin holds its prompts they wait for the hold's end.
     if (turnIsOpen()) return;
+    if (ctx.promptsHeld()) return;
     const proposal = sess.state.monitor.proposal;
     const proposalNow = Date.now();
     let proposalChanged = false;
@@ -2942,8 +3023,10 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             // have opened under the record read and the reach check. A
             // turn that opens after this line and writes before the resend
             // does is the race docs/backlog.md files under two writers
-            // taking one inbox sequence number.
+            // taking one inbox sequence number. A hold that rose under the
+            // same awaits leaves the entry for the hold's end.
             if (turnIsOpen()) return;
+            if (ctx.promptsHeld()) return;
             const again = await sendPluginRecord(ctx.commonsStore(), coordinatorPersona, sess.mySessionId, sentProposal.text);
             sentProposal.writer = again.writer;
             sentProposal.seq = again.seq;
@@ -2984,8 +3067,9 @@ export async function idleTick(ctx: TickContext): Promise<void> {
     // the submit as well, so a relaunch while the submit waits does not
     // ask again. The open-turn reading is taken again here rather than
     // trusted from the top of the tick, since a turn can have opened
-    // under the awaits above.
-    if (sess.state.longTermGoals.length > 0 && !hasStartableWork(sess.state) && !turnIsOpen()
+    // under the awaits above. Where the plugin holds its prompts the
+    // interval stays unspent.
+    if (sess.state.longTermGoals.length > 0 && !hasStartableWork(sess.state) && !turnIsOpen() && !ctx.promptsHeld()
       && proposalNow - proposal.askedAt >= PROPOSAL_EVERY_MS) {
       proposal.askedAt = Date.now();
       const unsettled = proposal.sent;
@@ -3064,6 +3148,8 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // hold once the ask is gone.
   let hold = holdOf(sess.state, now);
   if (hold === "ask") {
+    // As at the no-active-leaf call: the re-raise stays due under a hold.
+    if (ctx.promptsHeld()) return;
     const askResult = await ctx.tickOpenAsk(sess.state, sess.persona, cfg, g.id, expectedTurns);
     if (askResult !== "none") {
       clearAgentHold();
@@ -3697,6 +3783,9 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             action: "nudge_skipped_turn_in_flight",
             detail: `${g.id}: idle ${idleDisplay}, turn in flight`,
           });
+        } else if (ctx.promptsHeld()) {
+          // Where the plugin holds its prompts no nudge goes out and the
+          // floor stays unspent.
         } else if (now - sess.lastNudgeAt >= nudgeFloorMs) {
           // Nudge floor.
           // AK2: Guard only (silent). The nudge-cap check before classify already handles the cap.
@@ -3753,6 +3842,10 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         }
       } else if (finalDecision === "complete" && g.status === "active" && skipForOpenTurn()) {
         // Nothing is completed or activated under an open turn.
+      } else if (finalDecision === "complete" && g.status === "active" && ctx.promptsHeld()) {
+        // Nor where the plugin holds its prompts, since a completion here
+        // queues its [MEMORY CHECK] turn; the entry stays active for the
+        // next session or the hold's end.
       } else if (finalDecision === "complete" && g.status === "active") {
         // R3: use completeLeaf + activateNext.
         const completedId = g.id;
@@ -3964,10 +4057,78 @@ async function hourLineTick(ctx: TickContext): Promise<void> {
   }
 }
 
-// The tick: the hour line's check, the always part, then, where this
-// session owns the persona and no turn is open, the idle part.
+// The acts of the first tick or turn end at or past CHECKPOINT_HOLD_MS after
+// a saved restart request that no supervisor acted on, after which the
+// session runs as it did before the request. They run once: the latch
+// checkpointRestartUntaken sets is spent at this call whatever follows. Where
+// the session still holds the persona that wrote the request, they push the
+// one restart_untaken decision and take this session's restart_requested
+// decision back out of the ring (withdrawCheckpointRequest), both for the
+// caller's next save, so a supervisor that reads the store later finds no
+// request to act on. A withdrawal that finds no decision while a request was
+// held is logged. They then write the hand-over file again with
+// restartRequested false, through the writer the saving turn end marks it
+// with, since the session works on past this point and the note would be a
+// false account of it. A note that is absent, unreadable, another persona's
+// or another session's is left as it is and logged, and so is a write that
+// fails. Where the session has switched to another persona since the save,
+// they write nothing, since the state in hand is that persona's record, and
+// log that the first persona's request stays in its store. Returns the
+// state object they edited, so the caller saves it, or null where they
+// edited none. The caller logs a save that returns false or throws, and one
+// after which the session holds another state object, since the save then
+// wrote that state and not the edited one; none is tried again.
+export async function checkpointRestartUntakenActs(deps: Pick<TickContext, "checkpoint" | "sess" | "readHandoverNote" | "writeHandoverNote" | "log">, now: number): Promise<SessionState["state"] | null> {
+  const untaken = checkpointRestartUntaken(deps.checkpoint, now);
+  if (untaken === null) return null;
+  const requestPersona = deps.checkpoint.requestPersona;
+  if (requestPersona !== null && requestPersona !== deps.sess.persona) {
+    deps.checkpoint.request = null;
+    try { deps.log(`Agentic: checkpoint restart untaken; this session now holds ${deps.sess.persona}, so nothing was written and ${requestPersona}'s restart request stays in its store`); } catch { /* non-fatal */ }
+    return null;
+  }
+  const state = deps.sess.state;
+  const request = deps.checkpoint.request;
+  state.decisions.push(untaken);
+  if (!withdrawCheckpointRequest(deps.checkpoint, state.decisions) && request !== null) {
+    try { deps.log("Agentic: checkpoint restart untaken; no restart_requested decision in the session's state matched the saved request, so none was withdrawn"); } catch { /* non-fatal */ }
+  }
+  try {
+    const clear = handoverRestartClearOf(await deps.readHandoverNote(), deps.sess.persona, deps.sess.mySessionId);
+    if ("reason" in clear) {
+      try { deps.log(`Agentic: checkpoint restart untaken; the hand-over note was left as it is: ${clear.reason}`); } catch { /* non-fatal */ }
+    } else {
+      await deps.writeHandoverNote(clear.note);
+    }
+  } catch (err) {
+    try { deps.log(`Agentic: checkpoint restart untaken; clearing the hand-over note's mark failed: ${headPoints(safeErrorText(err), 150)}`); } catch { /* non-fatal */ }
+  }
+  return state;
+}
+
+// The tick: the bound's acts where the hold's bound has passed, the hour
+// line's check, the always part, then, where this session owns the persona,
+// no turn is open and the plugin holds no prompts, the idle part.
 export async function controllerTick(ctx: TickContext): Promise<void> {
   const { cfg, expectedTurns, turnIsOpen } = ctx;
+  // The first tick past CHECKPOINT_HOLD_MS after a saved restart request
+  // that no supervisor acted on makes the bound's acts
+  // (checkpointRestartUntakenActs) and saves them. The hold has lifted by
+  // then, so this tick and every later one submit as they would with no
+  // request. The save is attempted once rather than depended on, as the
+  // always part's are: where it returns false or throws, or the session
+  // holds another state object once it settles, the log says the save was
+  // not confirmed and the request may stay in the store.
+  const untakenState = ctx.sess.isOwner ? await checkpointRestartUntakenActs(ctx, Date.now()) : null;
+  if (untakenState !== null) {
+    let fault = "the store write returned false";
+    let saved = false;
+    try { saved = await ctx.persist(); } catch (err) { fault = `the store write failed: ${headPoints(safeErrorText(err), 150)}`; }
+    if (saved && ctx.sess.state !== untakenState) { saved = false; fault = "the session's state was replaced before the save settled"; }
+    if (!saved) {
+      try { ctx.log(`Agentic: checkpoint restart untaken; ${fault}, so the save of restart_untaken and the request's withdrawal is not confirmed and the request may stay in the store`); } catch { /* non-fatal */ }
+    }
+  }
   await hourLineTick(ctx);
   if (!(await alwaysTick(ctx))) return;
   // 2. In-flight check: the idle part runs with no turn open.
@@ -3985,5 +4146,17 @@ export async function controllerTick(ctx: TickContext): Promise<void> {
   // check runs again after its fork.
   await ctx.drainAskBriefOwed(cfg, expectedTurns);
   if (turnIsOpen()) return;
+  // Every path in the idle part that submits a prompt claims or marks what
+  // it submits first, so where the plugin holds its prompts the idle part
+  // does not run: each record, routine, nudge and notice waits in the store
+  // for the next session, or for the first tick past the hold's bound. The
+  // hold can also rise during the idle part's own awaits, while a turn end
+  // saves a restart request, so each path checks it again beside its own
+  // open-turn check, before its claim. The idle part's bookkeeping pauses
+  // with it: the inbox drain's idle-tick count and overrun clear, the tick
+  // count and its cost_summary line, the expired-record sweep and the
+  // channel window roll, and the claims reads' collection of stale commons
+  // entries.
+  if (ctx.promptsHeld()) return;
   await idleTick(ctx);
 }

@@ -142,6 +142,12 @@
       "title": "Jev shadow mode",
       "description": "off or shadow, and shadow is the default. shadow has the decision seam ask Jev its questions and write each answer to the decision journal. A question jevLive names, the two memory questions, and the compaction question under a live compactionPass act on the answer, and every other question acts on nothing it gets back. off makes no such call and writes no journal line. The supervisor refuses any other value rather than writing it, so a typo stops that launch instead of quietly disabling the seam."
     },
+    "checkpointRestart": {
+      "type": "string",
+      "default": "off",
+      "title": "Checkpoint restart",
+      "description": "off, shadow or live, and off is the default. live lets a persona end its session at a quiet turn end and start fresh from its own hand-over note, in place of a compaction: the rule decides at a durable turn end at or past a set context fill with the operator quiet and no ask open, and at a restart verdict the plugin asks the supervisor for one restart. shadow records each verdict in the decision journal, with the token counts of a session's first turn and of the first turn after each compaction. Its verdict leaves out the switch and the hand-over note. It stops after its first restart verdict and restarts nothing. off calls no rule, though a session's priming turn still reads the hand-over file. The supervisor refuses any other value rather than writing it, and the plugin reads any other value as off."
+    },
     "compactionPass": {
       "type": "string",
       "default": "shadow",
@@ -170,7 +176,7 @@
       "type": "string",
       "default": "auto",
       "title": "Automatic restart recap",
-      "description": "auto or skill, and auto is the default. auto runs bin/restart-recap.mjs at the supervisor's priming turn and injects its digest as a [RESTART RECAP] block, only where the previous session's last record is under 24 hours old and either the persona has an active goal or the operator wrote within 6 hours. skill runs nothing at launch, leaving the recap to the restart-recap skill. Any other value reads as auto at the plugin's own read. A supervisor launch given RESTART_RECAP outside that pair stops rather than writing it."
+      "description": "auto or skill, and auto is the default. auto runs bin/restart-recap.mjs at the supervisor's priming turn and injects its digest as a [RESTART RECAP] block, only where the previous session's last record is under 24 hours old and either the persona has an active goal or the operator wrote within 6 hours, and never on a turn that delivers a hand-over note. skill runs nothing at launch, leaving the recap to the restart-recap skill. Any other value reads as auto at the plugin's own read. A supervisor launch given RESTART_RECAP outside that pair stops rather than writing it."
     },
     "reconcileEveryMs": {
       "type": "number",

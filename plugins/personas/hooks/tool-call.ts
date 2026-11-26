@@ -26,10 +26,11 @@
 // harness evaluates it once per process while it loads a fresh
 // hooks/index.ts per case.
 
-import { ASKS_OPEN_MAX, ASK_TITLE_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, ROUTINES_MAX, ROUTINE_HOURS_MAX, ROUTINE_TEXT_MAX_POINTS, activateNext, askIdsIn, askLinkOf, askWaitersOf, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isActivationEligible, isAutonomyLevel, isPlanningDue, isRootFinished, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, releaserOf, resumeGoalNode, returnPausedToPending, rootBudgetBlocked, stallPartsText, type AgentState, type AskRelease, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
+import { ASKS_OPEN_MAX, ASK_TITLE_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, ROUTINES_MAX, ROUTINE_HOURS_MAX, ROUTINE_TEXT_MAX_POINTS, activateNext, askIdsIn, askLinkOf, askWaitersOf, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isActivationEligible, isAutonomyLevel, isPlanningDue, isRootFinished, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openAsksOnLiveEntries, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, releaserOf, resumeGoalNode, returnPausedToPending, rootBudgetBlocked, stallPartsText, type AgentState, type AskRelease, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
 import type { openWorkerAsk as openWorkerAskFromModule } from "./ask-layer";
 import { ASKED_BY_MAX_CHARS, TASK_ID_MAX_CHARS, TASK_TEXT_MAX_CHARS, targetPersonaOf, type ExpectedTurn } from "./channel-text";
 import { claimResource, commonsWinner, readAllClaims, readAllEntries, readHolderMeta, releaseResource, type CommonsStore } from "./commons";
+import { CHECKPOINT_FLOOR_PERCENT, decideCheckpointRestart, type CheckpointMemory } from "./checkpoint-restart";
 import { COMPACT_REMINDER_INTERVAL_MS, COMPACT_VALVE_PERCENT, checkpointCommandClause, toolCallInputOf } from "./compaction";
 import { compactionRerunAtCall, type CompactionPassDeps } from "./compaction-pass";
 import type { SharedHandlerState } from "./controller-tick";
@@ -37,6 +38,7 @@ import type { drainPairDraftOwed as drainPairDraftOwedFromModule, noteMemoryWrit
 import { AUTONOMY_REFUSED_TEXT, AWAITING_YES_DONE_REFUSED_TEXT, AWAITING_YES_DROP_REFUSED_TEXT, AWAITING_YES_REPEND_REFUSED_TEXT, AWAITING_YES_RESUME_REFUSED_TEXT, CLOSING_LEAF_DROP_REFUSED_TEXT, EFFORT_REFUSED_TEXT, PAUSE_RELEASER_REFUSED_TEXT, PLAN_DROP_REFUSED_TEXT, REPEND_NOT_PAUSED_REFUSED_TEXT, REPEND_TURN_BUDGET_REFUSED_TEXT } from "./effort-texts";
 import { FLEET_RESTART_MIN_INTERVAL_MS, FLEET_RESTART_REASON_MAX, fleetLineText, liveClaimsOf, readFleetRows, readFleetStalls, readRosterFile, rosterRunDir, type FleetStoreReads, type RosterEntry } from "./fleet";
 import type { PluginHost } from "./host";
+import { handoverFileText, handoverWriteRefusal, runningIsNone } from "./handover";
 import type { HookBudget } from "./jev-live";
 import type { boundaryBankCompactionBoundary, boundaryKitInstallPathOf } from "./memq-boundary";
 import { memqVerbArgsOf } from "./memq-command";
@@ -47,13 +49,13 @@ import { isPlanEntry, planLeftOpenText, planStatusText, reactivateAskedEntry } f
 import type { recognitionAsk as recognitionAskFromModule, settleRecognitionOutcomes as settleRecognitionOutcomesFromModule } from "./recall";
 import { memqGetsOf, memqTouchesOf } from "./recall-text";
 import { shellCommandOf } from "./recognition";
-import { vaultReading } from "./redactor";
+import { BLOCK_WITHHELD, scrubText, vaultReading } from "./redactor";
 import { ROUTINE_WEEKDAYS, localTimeText, newRoutineId, routineListText, routineNextDueAt, sameSchedule, scheduleWords, type Routine, type RoutineSchedule } from "./routines";
 import { runLineRefusalOf } from "./run-lines";
 import { asciiLower, rosterNameTaken, rosterPathWithin, rosterRepoTaken, validateRosterEntry, writeRoster } from "./roster";
 import type { addGoalEntry as addGoalEntryFromModule, clearChildBlockedAncestors as clearChildBlockedAncestorsFromModule, promoteOpenRecord as promoteOpenRecordFromModule } from "./records";
 import { skillPickTool } from "./skill-pick";
-import { GOAL_HISTORY_FILENAME, readPersonaStore, stateNotLoadedText } from "./store-files";
+import { GOAL_HISTORY_FILENAME, HANDOVER_FILENAME, readPersonaStore, stateNotLoadedText } from "./store-files";
 import { ROSTER_SOURCE, TURN_BUDGET_PAUSED_REASON, TURN_BUDGET_REASON, turnBudgetResumeRefusedText } from "./goal-persona";
 import { markStretchApplied, noteStretchShown, stretchShownOfGet } from "./stretch-distillation";
 import { FREE_TEXT_MAX, boundedText, safeErrorText, stripBom } from "./text";
@@ -170,6 +172,14 @@ export interface ToolCallContext extends SharedHandlerState {
   setProposalLedgeredTurnId: (value: string | null) => void;
   compactionReminderAt: () => number;
   setCompactionReminderAt: (value: number) => void;
+  // The checkpoint restart rule's session facts, which handover_write sets
+  // the note fact on; the newest fill the rule has read at a turn end, or
+  // null; and the checkpoint note reminder's own timer.
+  checkpoint: CheckpointMemory;
+  checkpointPercentRead: () => number | null;
+  checkpointNoteReminderAt: () => number;
+  setCheckpointNoteReminderAt: (value: number) => void;
+  CHECKPOINT_NOTE_REMINDER_TEXT: string;
   lastBreakInCheckAt: () => number;
   setLastBreakInCheckAt: (value: number) => void;
   // The binding of the routine's turn now running or continued, or null in
@@ -380,7 +390,7 @@ export function noteRoutineWithheld(sess: Pick<ToolCallContext["sess"], "persona
 // with before the served answer's scrub, from the off-arming path to the
 // break-in scan.
 export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Promise<ToolCallResult> {
-  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, opensWithSeatLead, opensWithQueueLead, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsWorkersRecordToArchitect, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, SUPERVISOR_STOP_NOTICE_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, noteModelReplyCall, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
+  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, opensWithSeatLead, opensWithQueueLead, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsWorkersRecordToArchitect, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, SUPERVISOR_STOP_NOTICE_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, noteModelReplyCall, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, checkpoint, checkpointPercentRead, checkpointNoteReminderAt, setCheckpointNoteReminderAt, CHECKPOINT_NOTE_REMINDER_TEXT, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
   // An "off" session runs the guard and after-hook region around next(e)
   // and the compaction pass's rerun watch, and nothing else: no call
   // counting, no persona tool, no constraint. The watch counts a call
@@ -2385,6 +2395,74 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
   }
 
+  // Serve handover_write: the note this session leaves for the next session
+  // of its persona (hooks/handover.ts). The file beside the store is replaced
+  // whole, and the persona's stored state is not touched. The note and the
+  // running statement pass the transcript redactor's scrub before the write,
+  // as a memory record does before memq put. handoverWriteRefusal's state
+  // checks run first, so a call the session's state refuses scans nothing.
+  // Its content checks then read the scrubbed text, so the length refused is
+  // the length written and the delivery's length test reads the same text,
+  // and a scrub whose scan failed, giving the redactor's withheld line in
+  // place of the text, is refused rather than written as the note. A write
+  // that lands sets the note
+  // fact the checkpoint restart rule's no-note condition reads, true only
+  // where running is the one word none, so a session whose own process still
+  // runs is never stopped on its note; a refused or failed call leaves the
+  // fact as it was. A subagent's call is refused first, as ask_open refuses
+  // one, since the note fact is the main loop's and a subagent's call would
+  // set it for a turn the main loop never settled. The rest are
+  // handoverWriteRefusal's, a checkpoint restart request first under live
+  // (hooks/turn-complete.ts marks the note for it), read off restartWritten
+  // or restartPending. restartWritten keeps the refusal past the prompt
+  // hold's bound. restartPending covers the call a newer turn makes while the
+  // turn end is still deciding and saving its request, which would otherwise
+  // write a note the mark then sets on. A request whose save fails refuses a
+  // note only while it is being saved.
+  if (e.tool === "mcp__personas__handover_write") {
+    if (inSubagent) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `handover_write: refused, only the main loop leaves a note; a subagent's call writes nothing.` };
+    }
+    const rawNote = (e as any).note;
+    const rawRunning = (e as any).running;
+    const state = { mode: checkpoint.mode, restartRequested: checkpoint.restartWritten || checkpoint.restartPending, isOwner: sess.isOwner };
+    const stateRefusal = handoverWriteRefusal(state);
+    if (stateRefusal !== null) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: stateRefusal };
+    }
+    const scrubbed = scrubText(typeof rawNote === "string" ? rawNote : "").text;
+    const running = scrubText(typeof rawRunning === "string" ? rawRunning : "").text;
+    const withheld = scrubbed === BLOCK_WITHHELD || running === BLOCK_WITHHELD;
+    const refusal = handoverWriteRefusal({ ...state, content: { note: scrubbed, running, withheld } });
+    if (refusal !== null) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: refusal };
+    }
+    try {
+      await fsWrite(workdirPathOf(HANDOVER_FILENAME), handoverFileText({
+        persona: sess.persona,
+        session: sess.mySessionId,
+        at: Date.now(),
+        percent: checkpointPercentRead(),
+        note: scrubbed,
+        running,
+        restartRequested: false,
+        deliveredTo: null,
+      }));
+    } catch (err) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `handover_write: the note could not be written: ${headPoints(safeErrorText(err), 150)}` };
+    }
+    checkpoint.noteWritten = runningIsNone(running);
+    return {
+      result: checkpoint.noteWritten
+        ? "Hand-over note written. Nothing is named as running, so at this turn's end the persona module decides whether this session restarts."
+        : "Hand-over note written. A process is named as running, so this session does not restart while it runs; call handover_write again once nothing is running.",
+    };
+  }
+
   // Serve goal_status (read-only, passive-reader OK).
   if (e.tool === "mcp__personas__goal_status") {
     // A session that never loaded its state holds no tree to show, and
@@ -3706,6 +3784,61 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       .replace("{command}", () => bracketSafeText(oneLine(command)));
     const prior = Array.isArray(r.context) ? r.context : [];
     r = { ...r, context: [...prior, line] } as typeof r;
+  }
+
+  // The checkpoint note reminder, on a main-loop call the model made that a
+  // hook beneath did not deny, for the reasons the hold reminder above gives,
+  // and only under live in an owner session on a turn no operator-class
+  // message opened. The rule is asked as it would be at a turn end, with the
+  // newest fill the session has read and every other fact as it stands now,
+  // and the line goes only where the rule fails on the note and on nothing
+  // but the turn's durability beside it, the two things the line asks the
+  // session to settle. So an open ask, a recent operator message or a fill
+  // that has gained too little since the first turn asks for no note, and
+  // neither does a turn whose note is already written. A session whose
+  // checkpoint restart request is saved, or is still being decided and saved
+  // at a turn end, has made its one request, so it gets no line again
+  // (hooks/turn-complete.ts), as handover_write refuses its note. The two background
+  // counts come from the Stop event at a turn's close and are cleared at
+  // each turn start, so on a call inside a turn they read null and a running
+  // process withholds no line; the line has the session name what runs
+  // instead. A session that has read no fill gets no line. It keeps its
+  // own timer, once in COMPACT_REMINDER_INTERVAL_MS, apart from the hold
+  // reminder's. The fill is a function replacement, as above.
+  // The test of operatorOpenedTurn in the condition is an early-out that
+  // changes no output, since the rule's operator-turn condition reads the
+  // same fact. So are the tests of the fill against the floor and of a
+  // waiting operator message, ahead of the rule's input and the ask scan:
+  // the rule's below-floor and operator-recent conditions fail on exactly
+  // those, and the fill read is a finite number or null.
+  if (modelMadeCall && !inSubagent && typeof r.deny !== "string" && checkpoint.mode === "live" && sess.isOwner && !checkpoint.restartWritten && !checkpoint.restartPending && !checkpoint.operatorOpenedTurn && Date.now() - checkpointNoteReminderAt() >= COMPACT_REMINDER_INTERVAL_MS) {
+    const percent = checkpointPercentRead();
+    if (percent !== null && percent >= CHECKPOINT_FLOOR_PERCENT && !sess.repromptLineOwed) {
+      const now = Date.now();
+      const decision = decideCheckpointRestart({
+        mode: checkpoint.mode,
+        durable: false,
+        percent,
+        operatorOpenedTurn: checkpoint.operatorOpenedTurn,
+        operatorQuietMs: now - (checkpoint.operatorAt ?? checkpoint.startedAt),
+        operatorWaiting: sess.repromptLineOwed,
+        openAsks: openAsksOnLiveEntries(sess.state).length,
+        firstTurnPercent: checkpoint.firstTurnPercent,
+        backgroundTasks: checkpoint.backgroundTasks,
+        sessionCrons: checkpoint.sessionCrons,
+        noteWritten: checkpoint.noteWritten,
+        // No turn end is in hand on a tool call, so nothing it sends is
+        // known; the turn end's own rule reads turn-pending.
+        turnPending: false,
+        shadow: false,
+      });
+      if (decision.failed.includes("no-note") && decision.failed.every((name) => name === "not-durable" || name === "no-note")) {
+        setCheckpointNoteReminderAt(now);
+        const line = CHECKPOINT_NOTE_REMINDER_TEXT.replace("{percent}", () => String(Math.round(percent)));
+        const prior = Array.isArray(r.context) ? r.context : [];
+        r = { ...r, context: [...prior, line] } as typeof r;
+      }
+    }
   }
 
   // The close-out pair drafts, on a main-loop call the model made that a

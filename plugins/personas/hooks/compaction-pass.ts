@@ -512,17 +512,30 @@ export function compactionPassReading(pass: CompactionPassState, raw: unknown, p
 
 // The summarizer's usage as the compaction_pass line carries it: its whole
 // input, the uncached, cache-read and cache-written input counts summed over
-// those that are finite numbers, and its output. Both are null where the
-// engine reported no usage object, as where a hook answered in its place or
-// it reused a summary already computed.
-export function compactionSummaryUsageDetail(usage: unknown): { summaryInputTokens: number | null; summaryOutputTokens: number | null } {
-  if (typeof usage !== "object" || usage === null) return { summaryInputTokens: null, summaryOutputTokens: null };
+// those that are finite numbers; its output; and the cache-read and
+// cache-written input each as its own field, so a reader prices each kind at
+// its own rate and reads the uncached input as the sum less those two. Each
+// field is the engine's count where it is a finite number and null
+// otherwise, and all four are null where the engine reported no usage
+// object, as where a hook answered in its place or it reused a summary
+// already computed.
+export function compactionSummaryUsageDetail(usage: unknown): {
+  summaryInputTokens: number | null;
+  summaryOutputTokens: number | null;
+  summaryCacheReadTokens: number | null;
+  summaryCacheCreationTokens: number | null;
+} {
+  if (typeof usage !== "object" || usage === null) {
+    return { summaryInputTokens: null, summaryOutputTokens: null, summaryCacheReadTokens: null, summaryCacheCreationTokens: null };
+  }
   const read = usage as Record<string, unknown>;
   const finite = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
   const inputs = [read.input_tokens, read.cache_read_input_tokens, read.cache_creation_input_tokens].map(finite).filter((n): n is number => n !== null);
   return {
     summaryInputTokens: inputs.length === 0 ? null : inputs.reduce((a, b) => a + b, 0),
     summaryOutputTokens: finite(read.output_tokens),
+    summaryCacheReadTokens: finite(read.cache_read_input_tokens),
+    summaryCacheCreationTokens: finite(read.cache_creation_input_tokens),
   };
 }
 

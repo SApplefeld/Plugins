@@ -6,24 +6,26 @@
 // engine calls, the two model calls with their scrub, the reply backstop's
 // submit and the register-scope values behind closures, so this module
 // never receives the engine object and holds no state of its own.
-import { ASKS_OPEN_MAX, ASK_TITLE_TURN_BUDGET, activateNext, applyTurnToErrors, headPoints, openAsksOnLiveEntries, openBlockingAsks, planHolderOf, reapTurnRecords, stampAskBriefTurnEnd, type GoalNode, type TurnRecordStamp } from "./agent-state";
+import { ASKS_OPEN_MAX, ASK_TITLE_TURN_BUDGET, activateNext, applyTurnToErrors, headPoints, openAsksOnLiveEntries, openBlockingAsks, planHolderOf, reapTurnRecords, stampAskBriefTurnEnd, type AgentState, type GoalNode, type TurnRecordStamp } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, openWorkerAsk as openWorkerAskFromModule, shadowAsk as shadowAskFromModule, shadowAskPlanHealth as shadowAskPlanHealthFromModule, shadowOutcome as shadowOutcomeFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { meterSessionKnown } from "./beat";
 import type { ChannelSender, ExpectedTurn, SubmitOutcome } from "./channel-text";
+import { CHECKPOINT_FLOOR_PERCENT, CHECKPOINT_REQUEST_DETAIL_PREFIX, checkpointPromptsHeld, decideCheckpointRestart, type CheckpointMemory } from "./checkpoint-restart";
 import type { CommonsStore } from "./commons";
 import type { CompactionPassState } from "./compaction-pass";
 import { deliveredRecordText } from "./context-assembly";
 import { TURN_BUDGET_PAUSED_REASON, TURN_BUDGET_REASON, turnBudgetAskText } from "./goal-persona";
-import type { SharedHandlerState } from "./controller-tick";
-import type { MeterTurnInput } from "./cost-ledger";
-import { ASK_MARKER_VALUE, splitOf } from "./decision-journal";
+import { checkpointRestartUntakenActs, type SharedHandlerState } from "./controller-tick";
+import { meterTurnLine, type MeterTurnInput } from "./cost-ledger";
+import { ASK_MARKER_VALUE, splitOf, type EventDetailValue } from "./decision-journal";
 import type { HoldTimeout } from "./decision-seam";
+import { handoverRestartMarkOf, type HandoverNote } from "./handover";
 import type { noteMemoryOwedDropped as noteMemoryOwedDroppedFromModule, notePairDraftsDropped as notePairDraftsDroppedFromModule } from "./drains";
 import type { PluginHost } from "./host";
 import { answeredOrThrow, type HookBudget, type LiveAskResult } from "./jev-live";
 import { sectionClosedDetailOf, type KitEventKind } from "./kit-events";
 import { MEMORY_OWED_MAX, pushMemoryOwed } from "./memory-writer";
-import { chainReprompt, openRepromptWindow } from "./mid-turn-reprompt";
+import { chainReprompt, openRepromptWindow, repromptIsOwed } from "./mid-turn-reprompt";
 import { listInboxRecords, writeReplyRecord } from "./operator";
 import type { PlanRecordReading } from "./plan-record";
 import { PLAN_HEALTH_RECENT_MAX, PLAN_HEALTH_TEXT_MAX, isPlanEntry } from "./plan-route";
@@ -72,11 +74,16 @@ export interface TurnCompleteContext extends SharedHandlerState {
   // hooks/mid-turn-reprompt.ts.
   queueMidTurnReprompt: (turnStartedAt: number, turnEndedAt: number) => Promise<void>;
   openWorkerAsk: (...args: AfterDeps<typeof openWorkerAskFromModule>) => ReturnType<typeof openWorkerAskFromModule>;
-  persist: () => Promise<boolean>;
+  // The store write, handed an optional rollback for a value the caller
+  // advanced for this write; hooks/index.ts's persist states when it runs.
+  persist: (rollBackOnYield?: () => void) => Promise<boolean>;
   activate: (nextId: string | null, reason: string) => void;
   runHealth: (forNodeId: string | null) => Promise<void>;
   completeLeafReturningClosed: (id: string, note: string) => Promise<string[]>;
   queueMemoryCheck: (expectedTurns: ExpectedTurn[], goalId: string, title: string, goalIds: string[]) => void;
+  // Whether queueMemoryCheck, called now for these goals, would submit a
+  // check: this session owns the persona and records are shown under them.
+  memoryCheckWouldAsk: (goalIds: string[]) => boolean;
   // Submits the [BLOCKED WITH NO QUESTION] turn for the entry the lead step
   // turned back; hooks/index.ts holds its text and its submit.
   queueBlockedTurnBack: (expectedTurns: ExpectedTurn[], entryId: string) => void;
@@ -172,18 +179,53 @@ export interface TurnCompleteContext extends SharedHandlerState {
   setPendingCompactionBank: (value: { turnKind: string } | null) => void;
   memoryGateDiscardPercent: () => number;
   drainInboxNow: () => (() => Promise<boolean>) | null;
+  // Whether that drain, started now, would submit a prompt (inboxDeliverable
+  // in hooks/controller-tick.ts), null where drainInboxNow is.
+  inboxDeliverableNow: () => (() => Promise<boolean>) | null;
   openLedgerAsk: (...args: AfterDeps<typeof openLedgerAskFromModule>) => ReturnType<typeof openLedgerAskFromModule>;
   withdrawLiftedAskBy: (...args: AfterDeps<typeof withdrawLiftedAskByFromModule>) => ReturnType<typeof withdrawLiftedAskByFromModule>;
   // One kit event on the session's chain (hooks/kit-events.ts), awaited to
   // the stream's bound and never rejecting.
   emitKitEvent: (kind: KitEventKind, plan: string, detail?: string) => Promise<void>;
+  // The checkpoint restart rule's session memory (hooks/checkpoint-restart.ts),
+  // the context fill as the engine reports it now, null where the call fails
+  // or answers none, and one decision-journal event of the rule's three, a
+  // failed write noted as every journal write's is.
+  checkpoint: CheckpointMemory;
+  readContextPercent: () => Promise<number | null>;
+  writeCheckpointEvent: (event: CheckpointEventName, detail: Readonly<Record<string, EventDetailValue>>) => Promise<void>;
+  // The hand-over file beside the store (hooks/handover.ts): its text parsed,
+  // or null where it is absent or could not be read, and a note written whole
+  // by the path handover_write writes it by, a failed write thrown.
+  readHandoverNote: () => Promise<HandoverNote | { problem: string } | null>;
+  writeHandoverNote: (note: HandoverNote) => Promise<void>;
+}
+
+// The three decision-journal events the checkpoint restart rule writes.
+export type CheckpointEventName = "checkpoint_restart" | "session_first_turn" | "compaction_first_turn";
+
+// The entries of sess.memoryChecksOwed that already carry their
+// memory_check_held decision, so no turn end writes a second one for an
+// entry. Held by identity in this module's memory, never in the store; an
+// entry leaves it when the owed list hands the entry over and drops it.
+const memoryChecksHeldNoted = new WeakSet<object>();
+
+// The decision recording that the [MEMORY CHECK] goal `goalId`'s close owes
+// is held for a checkpoint restart.
+function memoryCheckHeldDecision(goalId: string): AgentState["decisions"][number] {
+  return {
+    timestamp: Date.now(),
+    loop: "memory",
+    action: "memory_check_held",
+    detail: `${goalId}: the [MEMORY CHECK] this close owes is held for a checkpoint restart, on the owed list in session memory; a restart that lands loses it`,
+  };
 }
 
 // The turn-end body: what the handler's try block in hooks/index.ts runs
 // before its `next(e)`, from the delete of the turn's open entry to the
 // completion drain it fires after itself.
 export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnCompleteInput): Promise<void> {
-  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, queueBlockedTurnBack, readPlanDocument, readPlanCheckout, readPlanPullRequestDraft, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyAnsweredThisTurn, replyLineThisTurn, replyCallsThisTurn, lastReplyCallAt, hourLineInFlight, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns } = ctx;
+  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, memoryCheckWouldAsk, queueBlockedTurnBack, readPlanDocument, readPlanCheckout, readPlanPullRequestDraft, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyAnsweredThisTurn, replyLineThisTurn, replyCallsThisTurn, lastReplyCallAt, hourLineInFlight, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, inboxDeliverableNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, checkpoint, readContextPercent, writeCheckpointEvent, readHandoverNote, writeHandoverNote, dropDecision, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns } = ctx;
   // The answer with its secrets hidden, scanned once here and read by
   // these copies this handler sends or stores: the reply backstop's
   // direct reply and its fallback re-prompt, the memory queue's answer head
@@ -364,6 +406,59 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
     // for the cold_cache line.
     compactionPass.lastMainTurnEndedAt = meterEndedAt;
     compactionPass.coldCacheJournaled = false;
+  }
+  // The checkpoint restart rule's per-turn facts, read here for the same
+  // reason: the engine's two counts from the Stop event that came before
+  // this end, and whether the operator opened the turn. Every main-loop
+  // turn end clears all three here, whether or not it calls the rule below,
+  // so a count never outlives the turn it was read for and a turn end that
+  // no Stop event came before reads null for both. A subagent's completion
+  // ends no turn of the main loop's and clears nothing. The note fact is
+  // read here too and left for the next turn.start to clear: the next turn
+  // can start and write its own note during this handler's awaits, and the
+  // rule below must read this turn's.
+  const checkpointCountsAtDelete = { backgroundTasks: checkpoint.backgroundTasks, sessionCrons: checkpoint.sessionCrons };
+  const operatorOpenedTurnAtDelete = checkpoint.operatorOpenedTurn;
+  const noteWrittenAtDelete = checkpoint.noteWritten;
+  // Two parts of the rule's turn-pending fact are read here for the same
+  // reason: the [MEMORY CHECK] turns goal_done's closes owe this end, and
+  // whether this end owes a re-prompt. The next turn can start during this
+  // handler's awaits, and its goal_done, a tool refusal, a queued line or an
+  // ask_open would set either for that turn's end.
+  const memoryCheckOwedAtDelete = sess.memoryChecksOwed.length > 0;
+  const repromptOwedAtDelete = repromptIsOwed(sess);
+  // The [MEMORY CHECK] turn a close inside this handler queues, through the
+  // scorer's complete label or a plan document reading complete. Where the
+  // plugin holds its prompts (checkpointPromptsHeld) the check goes onto the
+  // owed list instead, which the tail below leaves in place while the hold
+  // stands, so it goes out at the first turn end past the hold if no restart
+  // came. The list is session memory, so a restart that lands loses it, and
+  // one memory_check_held decision per held check that would ask anything
+  // names the closed goal so the loss leaves a record. An entry that got its
+  // decision goes into memoryChecksHeldNoted, so the tail writes no second
+  // one for it. Otherwise a
+  // check queueMemoryCheck entered in the expected-turn list, which it does
+  // before its submit and without an await, is one this end has sent, a
+  // part of the rule's turn-pending fact.
+  let memoryCheckSentHere = false;
+  const queueMemoryCheckAtClose = (goalId: string, title: string, goalIds: string[]): void => {
+    if (checkpointPromptsHeld(checkpoint, Date.now())) {
+      const owed = { goalId, title, goalIds };
+      sess.memoryChecksOwed.push(owed);
+      if (memoryCheckWouldAsk(goalIds)) {
+        sess.state.decisions.push(memoryCheckHeldDecision(goalId));
+        memoryChecksHeldNoted.add(owed);
+      }
+      return;
+    }
+    const queuedBefore = expectedTurns.length;
+    queueMemoryCheck(expectedTurns, goalId, title, goalIds);
+    if (expectedTurns.length > queuedBefore) memoryCheckSentHere = true;
+  };
+  if (!completesSubagentLoop) {
+    checkpoint.backgroundTasks = null;
+    checkpoint.sessionCrons = null;
+    checkpoint.operatorOpenedTurn = false;
   }
   // A [MEMORY CHECK] turn names records shown under a closed goal and does
   // no work, so it leaves the owed bank as it found it. That turn runs at
@@ -584,6 +679,9 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // thread. The run lines below count that as a reply of the turn's own. A
   // call that threw, or returned a deny or a tool error, leaves this false.
   let replyBackstopSent = false;
+  // Whether the backstop's fallback re-prompt was accepted, a turn this end
+  // has sent, a part of the checkpoint restart rule's turn-pending fact.
+  let replyBackstopReprompted = false;
   if (!skipped && sess.isOwner && completesGateTurn && (currentTurnIsChannelOrigin() || currentTurnIsReprompt()) && !(currentTurnIsReprompt() && answerScrubbed.trim() === "") && !replyAnsweredAtDelete && !isPrimingTurn() && !wasNudged && !completesNudgedTurn) {
     try {
       const backstopResult = await toolCall({ tool: "mcp__plugin_relay_channel-relay__reply", message: answerScrubbed });
@@ -601,9 +699,19 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
       // a refused one costs the waiting record one tick, while a delivery
       // queued beside an accepted one would pile into a prompt the turn
       // matcher cannot read as a delivery.
+      // The fallback is not held for a checkpoint restart
+      // (checkpointPromptsHeld), whose hold covers only a prompt whose
+      // source waits in the store for the next session and sends every
+      // prompt that carries an operator's words held nowhere else. The
+      // fallback is the second kind: it answers a channel message that came
+      // in, which the plugin cannot hold, and no store record waits for the
+      // next session. At the turn end that would save a restart request, an
+      // accepted fallback is a turn this end has sent, so the rule's
+      // turn-pending condition fails and no request is saved.
       submittedReplyBackstop = true;
       const backstopOutcome = await submitReplyBackstop(answerScrubbed);
       if (backstopOutcome.ok) {
+        replyBackstopReprompted = true;
         sess.state.decisions.push({
           timestamp: Date.now(),
           loop: "monitor",
@@ -805,7 +913,13 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // one carry no mark, so the blocked close after either is turned back
   // again. The mark and the decision ride the same write as the lead. Where
   // that write is refused they stand in memory with it, no turn is sent, and
-  // the stretch stays marked.
+  // the stretch stays marked. Where the plugin holds its prompts
+  // (checkpointPromptsHeld) the tail sends no turn-back, so the lead is set
+  // with no mark and no decision, and the first blocked close past the hold
+  // is turned back. The checkpoint restart rule's turn-pending fact reads
+  // the turned-back entry's id, and that rule runs only where no request is
+  // saved; a close this step reads as blocked also ended on a lead, so the
+  // rule's not-durable condition fails at it whatever that id reads.
   const heldKitEvents: Array<[KitEventKind, string, string]> = [];
   let turnedBackEntryId: string | null = null;
   let turnedBackStatus: string | null = null;
@@ -821,7 +935,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
       if (leadLine.state === "blocked") {
         if (previous?.state === "blocked" && previous.turnedBack === true) {
           turnLeaf.lead.turnedBack = true;
-        } else if (openAsksOnLiveEntries(sess.state).length === 0) {
+        } else if (openAsksOnLiveEntries(sess.state).length === 0 && !checkpointPromptsHeld(checkpoint, Date.now())) {
           turnLeaf.lead.turnedBack = true;
           turnedBackEntryId = turnLeaf.id;
           turnedBackStatus = turnLeaf.status;
@@ -1101,7 +1215,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
               action: "complete",
               detail: `${completedId}: Goal completed in ${g.completedRounds} rounds`,
             });
-            queueMemoryCheck(expectedTurns, completedId, g.title, closedIds);
+            queueMemoryCheckAtClose(completedId, g.title, closedIds);
             const nextId = activateNext(sess.state, completedId);
             activate(nextId, `${completedId} complete`);
             // L11: plan completion is a log line, not a speech.
@@ -1366,7 +1480,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
       action: "complete",
       detail: `${completedId}: ${cause}`,
     });
-    queueMemoryCheck(expectedTurns, completedId, holder.title, closedHere);
+    queueMemoryCheckAtClose(completedId, holder.title, closedHere);
     // Each open ask on an entry this completion closed is settled as
     // goal_done settles one: a worker's stays open with its hold lifted,
     // and one the controller opened closes as stood.
@@ -2162,6 +2276,9 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   const liveAgent = completesGateTurn && !turnOpenAfterDelete && sess.isOwner && !skipped && !endedOnLead && !askHolds
     ? await readLiveAgent()
     : false;
+  // The durable value, where this end computed one, for the checkpoint
+  // restart rule below.
+  let durableAtEnd: boolean | null = null;
   if (completesGateTurn && !completesMemoryCheckTurn) {
     if (turnStartSeq() !== turnStartSeqAtDelete) {
       setPendingCompactionBank(null);
@@ -2176,7 +2293,220 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         && !(holderDoneByGoalDone && !workAfterHolderDoneAtDelete);
       const midSection = (planHolder !== undefined && !planChapterAdvanced && !planCompletedByDocument && !holderDoneByGoalDone) || endHolderOpen;
       const durable = !turnOpenAfterDelete && sess.isOwner && !skipped && !endedOnLead && !askHolds && !midSection && !liveAgent;
-      setPendingCompactionBank(durable ? { turnKind: turnKindAtStart } : null);
+      // While the plugin holds its prompts (checkpointPromptsHeld) the
+      // session is about to be stopped for a checkpoint restart, and must
+      // not pay for a summary of a conversation it is leaving, so a durable
+      // end sets no bank. Past the hold's bound the bank returns.
+      setPendingCompactionBank(durable && !checkpointPromptsHeld(checkpoint, Date.now()) ? { turnKind: turnKindAtStart } : null);
+      durableAtEnd = durable;
+    }
+  }
+
+  // The checkpoint restart rule (hooks/checkpoint-restart.ts), on the owning
+  // session's own main-loop turn end where the switch does not read off. It
+  // reads the fill and writes up to three decision-journal events, and each
+  // write's failure is noted as every journal write's is. Under live, a
+  // restart verdict also requests the restart, as the last paragraph below
+  // states.
+  //
+  // The session's first such end reads the fill the rule's no-gain condition
+  // compares, durable or not, and writes session_first_turn, the fresh
+  // start's cost the checkpoint reading prices. The first such end after a
+  // compaction of the main conversation ran writes compaction_first_turn,
+  // the turn whose cache writes rebuild what the compaction cut, and clears
+  // the flag the compaction set. A first turn whose end follows a
+  // compaction writes compaction_first_turn alone, since its cache writes
+  // rebuild the compacted conversation and the reading prices each turn
+  // once. Both carry the model and the four token counts as the turn's
+  // meter line carries them, and the fill read here.
+  //
+  // An end that computed its durable value calls the rule and writes one
+  // checkpoint_restart event with its verdict, every failing condition
+  // joined by commas, since an event's detail holds no lists, the fill, the
+  // floor, the engine's two counts as the rule read them, and the operator's
+  // quiet time. Under live it also carries requested, true only where this
+  // end saved a restart request, so a restart verdict that requested nothing
+  // reads apart from one that did. A message waiting to be brought back as a
+  // turn of its own is read off the bring-back's queued-line flag before its
+  // link takes it, which happens off this chain after this handler, and any
+  // such message counts as the operator's, since the flag carries no
+  // sender's class.
+  // The bring-back's other flag is set by a tool refusal whether or not a
+  // message waits, so it is not read here.
+  // Under shadow a session stops calling the rule after its first restart
+  // verdict, since a live session would have ended there. A throw anywhere
+  // in this block is logged and stops here, so the save, the follow-ups and
+  // the bring-back below still run.
+  //
+  // Under live, a restart verdict pushes one restart_requested decision, the
+  // one supervisor_restart pushes, which the supervisor reads as a restart
+  // to take once this turn has ended, and saves it. The detail names the
+  // fill, rounded as the checkpoint note reminder rounds it. The turn's
+  // facts were read at the delete and the rule ran after awaits, so where a
+  // newer turn has started since, no restart is taken and the bank is left
+  // as the durable step above left it. That check runs once, before the
+  // save, so a turn that starts while the save is in flight is not seen
+  // here, and a request that saves then stands. Otherwise the bank that step
+  // set is cleared before the save, so no tool call during the save can
+  // take it, and a session that restarts does not also compact. The save is
+  // handed a rollback that drops the request, which the store write runs on
+  // a refused path before it writes anything, so the store a yield to a
+  // rival session writes does not carry the request. A save that fails or
+  // throws takes the request back out of memory, so no later save carries
+  // it, is logged, and sets the bank again where no newer turn has started
+  // during it and no other end's saved request holds the prompts, as the
+  // durable step does. A request that is saved is the session's one
+  // request: the rule is not called again, the note reminder in
+  // hooks/tool-call.ts attaches no line, and handover_write there refuses,
+  // so the note marked below is not replaced. The saved decision is kept in
+  // the checkpoint memory, so the bound's acts can withdraw it. One that is
+  // not saved requested nothing, so the rule runs again at a later turn
+  // end. Once the
+  // request is saved, the hand-over note this session wrote this turn is
+  // written again with restartRequested true, which is what lets the next
+  // session take delivery of it. A note that is absent, unreadable, another
+  // persona's or another session's is left as it is and logged, and so is a
+  // write that fails. The restart stands either way, and the next session
+  // takes the recap's path.
+  if (completesGateTurn && sess.isOwner && checkpoint.mode !== "off") {
+    try {
+      const firstTurn = !checkpoint.firstTurnEnded;
+      const afterCompaction = checkpoint.compactionRan;
+      const callsRule = durableAtEnd !== null && !checkpoint.restartWritten;
+      if (firstTurn || afterCompaction || callsRule) {
+        const percent = await readContextPercent();
+        if (firstTurn || afterCompaction) {
+          const meterLine = JSON.parse(meterTurnLine(meterFacts)) as Record<string, EventDetailValue>;
+          const turnDetail = {
+            model: meterLine.model,
+            inputTokens: meterLine.inputTokens,
+            outputTokens: meterLine.outputTokens,
+            cacheReadTokens: meterLine.cacheReadTokens,
+            cacheCreationTokens: meterLine.cacheCreationTokens,
+            percent,
+          };
+          if (firstTurn) {
+            checkpoint.firstTurnEnded = true;
+            checkpoint.firstTurnPercent = percent;
+            if (!afterCompaction) await writeCheckpointEvent("session_first_turn", turnDetail);
+          }
+          if (afterCompaction) {
+            checkpoint.compactionRan = false;
+            await writeCheckpointEvent("compaction_first_turn", turnDetail);
+          }
+        }
+        if (callsRule) {
+          const operatorQuietMs = Date.now() - (checkpoint.operatorAt ?? checkpoint.startedAt);
+          // The turn-pending fact: a turn this end has sent (the backstop's
+          // re-prompt, a [MEMORY CHECK] from a close above) or will send (the
+          // held turn-back, an owed [MEMORY CHECK], an owed re-prompt, or a
+          // record the completion drain would deliver). The owed check and
+          // re-prompt were read at the delete; the two sent parts and the
+          // turn-back are this handler's own. The inbox is read here, last
+          // and only where nothing else is pending, since the store read
+          // awaits and the delete point reads before the first await; the
+          // completion drain below reads it later still, so a record that
+          // arrived since the delete is one this end would deliver. A store
+          // that will not read delivers nothing.
+          //
+          // Under live, where the verdict with the inbox part read as false
+          // is restart, restartPending is raised in the same synchronous step
+          // as that verdict, before the inbox read's first await, so a tick
+          // that runs during the read or the save holds its prompts
+          // (checkpointPromptsHeld). It is cleared once the save settles,
+          // whatever its outcome: after restartWritten and the save's time
+          // on a save that lands, and by the finally on a hold verdict, a
+          // newer turn, or a save that fails, throws or yields.
+          const turnPendingSent = replyBackstopReprompted || memoryCheckSentHere || turnedBackEntryId !== null || memoryCheckOwedAtDelete || repromptOwedAtDelete;
+          const decide = (turnPending: boolean) => decideCheckpointRestart({
+            mode: checkpoint.mode,
+            durable: durableAtEnd === true,
+            percent,
+            operatorOpenedTurn: operatorOpenedTurnAtDelete,
+            operatorQuietMs,
+            operatorWaiting: sess.repromptLineOwed,
+            openAsks: openAsksOnLiveEntries(sess.state).length,
+            firstTurnPercent: checkpoint.firstTurnPercent,
+            backgroundTasks: checkpointCountsAtDelete.backgroundTasks,
+            sessionCrons: checkpointCountsAtDelete.sessionCrons,
+            noteWritten: noteWrittenAtDelete,
+            turnPending,
+            shadow: checkpoint.mode === "shadow",
+          });
+          let decision = decide(turnPendingSent);
+          let requested = false;
+          try {
+            if (checkpoint.mode === "live" && decision.verdict === "restart" && percent !== null && turnStartSeq() === turnStartSeqAtDelete) {
+              checkpoint.restartPending = true;
+            }
+            if (!turnPendingSent) {
+              let deliverable = false;
+              const readInbox = inboxDeliverableNow();
+              try { deliverable = readInbox !== null && await readInbox(); } catch { /* an unreadable store delivers nothing */ }
+              decision = decide(deliverable);
+            }
+            if (decision.verdict === "restart" && checkpoint.mode === "shadow") {
+              checkpoint.restartWritten = true;
+            } else if (decision.verdict === "restart" && percent !== null && turnStartSeq() === turnStartSeqAtDelete) {
+              setPendingCompactionBank(null);
+              const request: AgentState["decisions"][number] = {
+                timestamp: Date.now(),
+                loop: "monitor",
+                action: "restart_requested",
+                detail: `${CHECKPOINT_REQUEST_DETAIL_PREFIX} ${Math.round(percent)} percent`,
+              };
+              sess.state.decisions.push(request);
+              let saved = false;
+              let fault = "the store write was not saved";
+              try {
+                saved = await persist(() => dropDecision(request));
+              } catch (err) {
+                fault = headPoints(safeErrorText(err), 150);
+              }
+              if (saved) {
+                requested = true;
+                checkpoint.restartWritten = true;
+                checkpoint.restartSavedAt = Date.now();
+                checkpoint.request = request;
+                checkpoint.requestPersona = sess.persona;
+                checkpoint.restartPending = false;
+                try {
+                  const mark = handoverRestartMarkOf(await readHandoverNote(), sess.persona, sess.mySessionId);
+                  if ("reason" in mark) {
+                    try { log(`Agentic: checkpoint restart requested; the hand-over note was left as it is: ${mark.reason}`); } catch { /* non-fatal */ }
+                  } else {
+                    await writeHandoverNote(mark.note);
+                  }
+                } catch (err) {
+                  try { log(`Agentic: checkpoint restart requested; marking the hand-over note failed: ${headPoints(safeErrorText(err), 150)}`); } catch { /* non-fatal */ }
+                }
+              } else {
+                dropDecision(request);
+                try { log(`Agentic: checkpoint restart not requested: ${fault}`); } catch { /* non-fatal */ }
+                // This end's own pending flag is down first, so the hold read
+                // below is one another end's saved request raised.
+                checkpoint.restartPending = false;
+                if (turnStartSeq() === turnStartSeqAtDelete && !checkpointPromptsHeld(checkpoint, Date.now())) setPendingCompactionBank({ turnKind: turnKindAtStart });
+              }
+            }
+          } finally {
+            checkpoint.restartPending = false;
+          }
+          await writeCheckpointEvent("checkpoint_restart", {
+            mode: checkpoint.mode,
+            verdict: decision.verdict,
+            failed: decision.failed.join(","),
+            percent,
+            floor: CHECKPOINT_FLOOR_PERCENT,
+            backgroundTasks: checkpointCountsAtDelete.backgroundTasks,
+            sessionCrons: checkpointCountsAtDelete.sessionCrons,
+            operatorQuietMs,
+            ...(checkpoint.mode === "live" ? { requested } : {}),
+          });
+        }
+      }
+    } catch (err) {
+      try { log(`Agentic: checkpoint restart reading failed: ${headPoints(safeErrorText(err), 150)}`); } catch { /* non-fatal */ }
     }
   }
 
@@ -2219,17 +2549,87 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // step, its lead is still the marked blocked lead, and the ledger still
   // holds no open ask on a live entry, as the lead step reads it. The
   // decision and the mark stay as written.
+  //
+  // Where the plugin holds its prompts (checkpointPromptsHeld: under live,
+  // for CHECKPOINT_HOLD_MS after this session's restart request is saved, at
+  // this end or an earlier one), the tail holds every prompt whose source
+  // waits in the store for the next session: no turn-back, no [MEMORY
+  // CHECK] and no completion drain. It still sends the mid-turn re-prompt,
+  // which carries an operator's words held nowhere else, as the block at its
+  // end states. Each inbox record stays pending in the store for the next
+  // session. The owed checks stay
+  // on their list, which is session memory, so a restart that lands loses
+  // them and the first turn end past the hold sends them. Each owed check
+  // that would ask anything gets one memory_check_held decision naming its
+  // goal before the save below, so the loss a restart brings leaves a
+  // record. An entry that got its decision goes into memoryChecksHeldNoted
+  // and gets none at a later held end; one that would ask nothing stays out
+  // of it, so a later held end asks again.
+  //
+  // The first turn end past the hold's bound with no restart taken makes the
+  // bound's acts (checkpointRestartUntakenActs in hooks/controller-tick.ts)
+  // before the save below, which carries the restart_untaken decision and
+  // the request's withdrawal as it carries this end's other decisions; the
+  // tick makes them instead where a tick comes first. They run once: a save
+  // that returns false or throws, or after which the session holds another
+  // state object than the one they edited, is logged as not confirmed, so
+  // the request may stay in the store, and nothing makes them again. Where the session has
+  // switched persona since the request was saved they write nothing and log
+  // that the first persona's request stays in its store. Past the bound this
+  // end and every later one send as they would with no request, and
+  // restartWritten keeps the rule from running again. Where the acts were
+  // made here, the durable step read this end as durable and no new turn has
+  // started, the bank is set here: it repeats the bank the durable step set
+  // where the hold had lifted before that step, and supplies the one it
+  // withheld where the bound passed between that step and this point.
+  const untakenState = sess.isOwner && !completesSubagentLoop ? await checkpointRestartUntakenActs(ctx, Date.now()) : null;
+  const untakenHere = untakenState !== null;
+  if (untakenHere && durableAtEnd === true && turnStartSeq() === turnStartSeqAtDelete) setPendingCompactionBank({ turnKind: turnKindAtStart });
+  const promptsHeld = checkpointPromptsHeld(checkpoint, Date.now());
+  if (removedOwnEntry && !completesSubagentLoop && promptsHeld) {
+    for (const owed of sess.memoryChecksOwed) {
+      if (memoryChecksHeldNoted.has(owed)) continue;
+      if (memoryCheckWouldAsk(owed.goalIds)) {
+        sess.state.decisions.push(memoryCheckHeldDecision(owed.goalId));
+        memoryChecksHeldNoted.add(owed);
+      }
+    }
+  }
+  let closingSaved: boolean | null = null;
+  // Set only where persist itself threw, so a throw from the fold before it
+  // or from a step after it never reads as a store failure.
+  let persistFault: string | null = null;
+  // Whether the session held the state the bound's acts edited when the
+  // save settled; read there, so a replacement after a landed save is not
+  // taken for a lost one.
+  let untakenStateSaved = false;
   try {
     if (sess.isOwner && !completesSubagentLoop && !turnIsOpen() && turnStartSeq() === turnStartSeqAtDelete) await foldSettledPlans();
-    if (await persist()) {
+    try {
+      closingSaved = await persist();
+      untakenStateSaved = sess.state === untakenState;
+    } catch (err) {
+      persistFault = `the store write failed: ${headPoints(safeErrorText(err), 150)}`;
+      throw err;
+    }
+    if (closingSaved) {
       for (const [kind, plan, detail] of heldKitEvents) await emitKitEvent(kind, plan, detail);
       const turnedBack = turnedBackEntryId === null ? undefined : sess.state.goals.find((g) => g.id === turnedBackEntryId);
       const turnedBackStands = turnedBack !== undefined && turnedBack.status === turnedBackStatus;
-      if (turnedBackStands && turnedBack.lead?.state === "blocked" && turnedBack.lead.turnedBack === true && openAsksOnLiveEntries(sess.state).length === 0) {
+      if (!promptsHeld && turnedBackStands && turnedBack.lead?.state === "blocked" && turnedBack.lead.turnedBack === true && openAsksOnLiveEntries(sess.state).length === 0) {
         queueBlockedTurnBack(expectedTurns, turnedBack.id);
       }
     }
-  } catch { /* persist could not read or write the store; this turn's record waits in memory */ }
+  } catch {
+    // The fold or persist threw, or a step after the save did; this turn's
+    // record waits in memory.
+  }
+  if (untakenHere && (closingSaved !== true || !untakenStateSaved)) {
+    const fault = persistFault ?? (closingSaved === false ? "the store write returned false"
+      : closingSaved === null ? "the closing save did not run"
+      : "the session's state was replaced before the save settled");
+    try { log(`Agentic: checkpoint restart untaken; ${fault}, so the save of restart_untaken and the request's withdrawal is not confirmed and the request may stay in the store`); } catch { /* non-fatal */ }
+  }
 
   // The completion drain: a turn this session saw start has closed and no
   // other is open, so the next waiting record is delivered now rather than
@@ -2270,7 +2670,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // one decision here and stops neither the entries behind it nor the block
   // below. A subagent's completion sends nothing and leaves the list as it
   // is.
-  if (removedOwnEntry && !completesSubagent && sess.memoryChecksOwed.length > 0) {
+  if (removedOwnEntry && !completesSubagent && !promptsHeld && sess.memoryChecksOwed.length > 0) {
     for (let owed = sess.memoryChecksOwed.shift(); owed !== undefined; owed = sess.memoryChecksOwed.shift()) {
       try {
         queueMemoryCheck(expectedTurns, owed.goalId, owed.title, owed.goalIds);
@@ -2284,6 +2684,12 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
       }
     }
   }
+  // Where the plugin holds its prompts, it holds every prompt whose source
+  // waits in the store for the next session and sends every prompt that
+  // carries an operator's words held nowhere else. So the drain below is
+  // skipped, its record staying pending in the store, while the re-prompt
+  // still goes out: it reads the operator's mid-turn lines from this
+  // session's transcript, which the next session does not read.
   if (removedOwnEntry && !completesSubagent && sess.isOwner && !turnOpenAfterDelete && !submittedReplyBackstop && drain !== null) {
     void Promise.resolve().then(async () => {
       // The ring is read by identity as well as length, since a save
@@ -2312,7 +2718,10 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         });
       }
       try {
-        if (!(await drain()) && (sess.state.decisions !== ring || sess.state.decisions.length !== logged)) await persist();
+        const ringMoved = (): boolean => sess.state.decisions !== ring || sess.state.decisions.length !== logged;
+        if (promptsHeld) {
+          if (ringMoved()) await persist();
+        } else if (!(await drain()) && ringMoved()) await persist();
       } catch (err) {
         sess.state.decisions.push({
           timestamp: Date.now(),

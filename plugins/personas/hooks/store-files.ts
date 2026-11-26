@@ -290,6 +290,15 @@ export const PERSONA_STORE_FILENAME = ".agentic-personas.json";
 
 export const YIELD_LOG_FILENAME = ".agentic-yields.log";
 
+// handover_write replaces this file whole with the note a session leaves for
+// the next session of its persona, beside the store, and the next session's
+// priming turn reads it (hooks/handover.ts). It holds session ids and the
+// session's own words, so this repository's .gitignore ignores it and
+// build.ps1 keeps it out of the package. A worker repository the persona runs
+// in holds it as an untracked file unless that repository's own ignore file
+// lists it.
+export const HANDOVER_FILENAME = ".agentic-handover.json";
+
 // goal_create appends each tree it replaces here, one JSON line per tree,
 // beside the store, and the fold appends each node a completed plan sheds, one
 // JSON line per node (foldSettledPlans). It is a recovery copy opened by hand.

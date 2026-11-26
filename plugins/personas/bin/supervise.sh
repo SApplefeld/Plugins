@@ -572,6 +572,14 @@ else
     echo "ERROR: could not complete $SETTINGS_FILE; see $LOG" | tee -a "$LOG" >&2
     exit 1
   fi
+  # Same reasoning for the checkpoint restart switch, with one difference:
+  # an unset CHECKPOINT_RESTART writes off here rather than leaving the file
+  # alone, so a roster that drops the field turns the persona off at its next
+  # start.
+  if ! ensure_settings_checkpoint_restart "$SETTINGS_FILE" 2>>"$LOG"; then
+    echo "ERROR: could not complete $SETTINGS_FILE; see $LOG" | tee -a "$LOG" >&2
+    exit 1
+  fi
   # Same reasoning again, for the three cadences the roster carries:
   # controllerTickMs, nudgeFloorMs and nudgeIdleMs. A roster edit to any of
   # them would otherwise reach no persona that already has a run directory.
