@@ -149,12 +149,17 @@ const SQLITE_BUSY = 5;
 // primary code's rather than one code's.
 const SQLITE_CODE_MASK = 0xff;
 
-// Where the fleet installs the SQL client tools, tried ahead of PATH for the
-// reason the host probe states: resolving by name alone hands the login's
-// password to whatever sqlcmd sits earliest in the list, and a user-writable
-// directory ahead of the real one is the ordinary way that becomes someone
-// else's process.
-const PINNED_SQLCMD = path.join('Microsoft SQL Server', 'Client SDK', 'ODBC', '170', 'Tools', 'Binn', 'SQLCMD.EXE');
+// The two places the SQL client tools install to, relative to the one base
+// sqlcmdPath joins them to, in the order it tries them: the older build's
+// folder (ODBC 170), then the newer build's (ODBC 180). The older is first so
+// a machine holding both runs the program it ran before. Both are literals
+// under one base that only administrators can write where Windows is
+// installed on C:, as on every fleet machine, and nothing searches PATH: a
+// name resolved through PATH hands the login's password to whatever sqlcmd
+// sits earliest in that list. The installer and the host probe hold the same
+// two in the same order, which a test pins.
+const PINNED_SQLCMD_PATHS = Object.freeze(['170', '180'].map((odbc) =>
+    path.win32.join('Microsoft SQL Server', 'Client SDK', 'ODBC', odbc, 'Tools', 'Binn', 'SQLCMD.EXE')));
 
 // The budget one boundary call may spend, and the range a configured
 // timeoutMs is accepted in. Outside that range the configured value is ignored
@@ -1321,7 +1326,9 @@ function modelIdentity(config) {
 
 // Where sqlcmd is, or null where the pinned client tools are not installed.
 //
-// One candidate, spelled here as a literal, and no fallback of any kind.
+// Two candidates, PINNED_SQLCMD_PATHS under this one literal base, tried in
+// order: the older build's first, so a machine holding both runs the program
+// it ran before, then the newer build's. No other fallback of any kind.
 // Resolving by name searches PATH, which hands the login's password to whatever
 // sqlcmd sits earliest in that list. Resolving through the environment's own
 // ProgramFiles is the same hazard one step removed: a repository-committed
@@ -1330,12 +1337,18 @@ function modelIdentity(config) {
 // receives the password in the child. So the only base is the one every sandbox
 // installs to. A machine that holds its program files elsewhere publishes
 // nothing and says so, which is the same answer it gives for an absent config.
+// Where Windows sits on another drive, C:\ itself is writable by any local
+// account, so that answer holds only until someone plants one of these paths.
 const SQLCMD_BASE = 'C:\\Program Files';
+function pinnedSqlcmdCandidates() {
+    return PINNED_SQLCMD_PATHS.map((relative) => path.win32.join(SQLCMD_BASE, relative));
+}
 function sqlcmdPath() {
-    const pinned = path.join(SQLCMD_BASE, PINNED_SQLCMD);
-    try {
-        if (fs.statSync(pinned).isFile()) return pinned;
-    } catch { /* not installed: this client resolves nothing else */ }
+    for (const pinned of pinnedSqlcmdCandidates()) {
+        try {
+            if (fs.statSync(pinned).isFile()) return pinned;
+        } catch { /* not installed here: try the next literal, and nothing else */ }
+    }
     return null;
 }
 
@@ -1647,7 +1660,7 @@ function runBatch(config, batch, options) {
             ok: false,
             cause: 'outage',
             detail: 'the SQL client tools are not installed at '
-                + path.join(SQLCMD_BASE, PINNED_SQLCMD)
+                + pinnedSqlcmdCandidates().join(' or ')
                 + ', and this client resolves no other path for them'
         };
     }
@@ -6186,6 +6199,7 @@ module.exports = {
     redirectedRootText,
     loadConfig,
     modelIdentity,
+    PINNED_SQLCMD_PATHS,
     sqlcmdPath,
     childEnvironment,
     clockSeconds,

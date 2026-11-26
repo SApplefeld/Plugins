@@ -123,11 +123,16 @@ $script:LatencySamples = 10
 # decision point on the model choice.
 $script:LatencyDecisionMs = 2000
 
-# Where the fleet installs the SQL client tools. Tried before PATH, because
-# resolving by name alone hands the login's password to whatever sqlcmd sits
-# earliest in the list, and a user-writable directory ahead of the real one is
-# the ordinary way that becomes someone else's process.
-$script:PinnedSqlcmdRelativePath = "Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\SQLCMD.EXE"
+# The two places the SQL client tools install to, in the memory client's order:
+# the older build's (ODBC 170) first, so a machine holding both probes the
+# program it ran before, then the newer build's (ODBC 180). Tried before PATH,
+# because resolving by name alone hands the login's password to whatever sqlcmd
+# sits earliest in the list, and a user-writable directory ahead of the real one
+# is the ordinary way that becomes someone else's process.
+$script:PinnedSqlcmdRelativePaths = @(
+    "Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\SQLCMD.EXE",
+    "Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE"
+)
 
 # A database name this script will interpolate into a batch. Conservative on
 # purpose: the value is the operator's own, but it crosses into T-SQL text, and
@@ -313,13 +318,15 @@ function Read-ClientConfig {
 # The sqlcmd boundary.
 # ---------------------------------------------------------------------------
 
-# The sqlcmd this run spawns: the fleet's installed location first, then
-# whatever PATH resolves. The resolved path is printed at check 6, so which one
-# answered is never a guess.
+# The sqlcmd this run spawns: the two pinned client tools paths, the older
+# build's first, then whatever PATH resolves. The resolved path is printed at
+# check 6, so which one answered is never a guess.
 function Resolve-Sqlcmd {
     if ($env:ProgramFiles) {
-        $pinned = Join-Path $env:ProgramFiles $script:PinnedSqlcmdRelativePath
-        if (Test-Path -LiteralPath $pinned) { return $pinned }
+        foreach ($relative in $script:PinnedSqlcmdRelativePaths) {
+            $pinned = Join-Path $env:ProgramFiles $relative
+            if (Test-Path -LiteralPath $pinned) { return $pinned }
+        }
     }
     $found = Get-Command sqlcmd -ErrorAction SilentlyContinue
     if ($null -ne $found) { return [string]$found.Source }
@@ -618,7 +625,7 @@ $sqlcmdPath = Resolve-Sqlcmd
 $connectionState = "failed"
 $budget = Get-RemainingMs
 if ($sqlcmdPath -eq "") {
-    Write-Check "FAIL" 1 "Connection" "sqlcmd resolved neither at the installed client path nor on PATH, so no connection was attempted"
+    Write-Check "FAIL" 1 "Connection" "sqlcmd resolved at neither installed client path nor on PATH, so no connection was attempted"
 }
 elseif ($budget -le 0) {
     $connectionState = "starved"

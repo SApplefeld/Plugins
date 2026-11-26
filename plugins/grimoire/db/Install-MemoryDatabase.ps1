@@ -96,8 +96,8 @@ param(
     # parameter set, so -Login beside it reaches the body and is refused there
     # with a FAIL line rather than as a binding error.
     [string]$LocalAccount,
-    # Where sqlcmd is. Resolved from the pinned client tools path and then
-    # from PATH when absent.
+    # Where sqlcmd is. Resolved from the two pinned client tools paths, the
+    # older build's first, and then from PATH when both are absent.
     [string]$SqlcmdPath
 )
 
@@ -300,8 +300,10 @@ function Stop-Install {
     exit 1
 }
 
-# The pinned client tools path first, then PATH, so a machine with the ODBC
-# tools installed uses them even when its PATH does not say so.
+# The -SqlcmdPath parameter first, then the two pinned client tools paths in
+# the memory client's order, the older build's (ODBC 170) before the newer
+# build's (ODBC 180), then PATH, so a machine with the ODBC tools installed
+# uses them even when its PATH does not say so.
 function Resolve-Sqlcmd {
     param([string]$Requested)
     if ($Requested) {
@@ -310,12 +312,18 @@ function Resolve-Sqlcmd {
     }
     $programFiles = $env:ProgramFiles
     if ($programFiles) {
-        $pinned = Join-Path $programFiles "Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\SQLCMD.EXE"
-        if (Test-Path -LiteralPath $pinned -PathType Leaf) { return $pinned }
+        $pinnedRelativePaths = @(
+            "Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\SQLCMD.EXE",
+            "Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE"
+        )
+        foreach ($relative in $pinnedRelativePaths) {
+            $pinned = Join-Path $programFiles $relative
+            if (Test-Path -LiteralPath $pinned -PathType Leaf) { return $pinned }
+        }
     }
     $onPath = Get-Command sqlcmd -ErrorAction SilentlyContinue
     if ($null -ne $onPath) { return $onPath.Source }
-    Stop-Install "sqlcmd was not found at the pinned client tools path nor on PATH; install the SQL Server command line tools or pass -SqlcmdPath."
+    Stop-Install "sqlcmd was not found at the pinned client tools paths nor on PATH; install the SQL Server command line tools or pass -SqlcmdPath."
 }
 
 # One sqlcmd batch against one database, from a file. Returns the exit code
