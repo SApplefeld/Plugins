@@ -43,8 +43,13 @@ export const LOGIN_DUE_WITHIN_MS = 7 * 86_400_000;
 /** How long a map stands without a good run before it reads as empty. */
 export const LOGIN_STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
-/** How long one run may take before it is ended and counted as failed. */
-const RUN_TIMEOUT_MS = 30_000;
+/**
+ * How long one run may take before it is ended and counted as failed. claude-swap's own lock waits
+ * and network limits allow one account about 36 seconds, and a run ended between a token renewal
+ * and its save can cost the account its login, so the bound leaves room past that. Runs are 30
+ * minutes apart, so a slow run delays nothing.
+ */
+const RUN_TIMEOUT_MS = 120_000;
 
 /**
  * The most output one run may print. The list prints one object of a few hundred bytes per account,
@@ -141,7 +146,7 @@ function runFailure(error: unknown): LoginFailure {
 }
 
 /**
- * Runs `file` with `args` and no shell, hidden, under `cswapChildEnv(env)`, bounded at 30 seconds
+ * Runs `file` with `args` and no shell, hidden, under `cswapChildEnv(env)`, bounded at 120 seconds
  * and 256 KiB of output on either stream. Resolves to stdout where the child exits 0, and rejects
  * otherwise with an error whose message is the failure's kind alone. Stderr is buffered by
  * `execFile` against the same cap and discarded unread.
