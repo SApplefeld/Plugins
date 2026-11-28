@@ -50,6 +50,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | The Jev promise check before review, its re-read line and its Chapter line | `executing-work` (step 2) |
 | The compaction boundary a section close declares | `executing-work` (step 8) |
 | Consult triggers and mechanics | `consult` |
+| The outside read by Gemini: its availability, its switch and what may be sent | `consult-gemini` |
 | Weighing a review finding or operator correction before acting | `responding-to-review` |
 | Root-causing a failure | `systematic-debugging` |
 | Whether a change earns a test, which tests retire, test shape and cost at authoring, a test run's hang limit and a probe's restore | `testing-discipline` |

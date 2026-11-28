@@ -315,9 +315,11 @@ const ROOTS = [
 
 // Tracked files under a root that are not measured content. Every entry is a
 // hole in the coverage control, so the list holds exactly the files that exist
-// and carries no speculative entry: the budget and the lane map are data
-// about the corpus rather than members of it.
-const EXCLUSIONS = ['test/size-budget.json', 'test/gate-lanes.json'];
+// and carries no speculative entry. The budget and the lane map are data
+// about the corpus, and the consult-gemini skill's script and gate are code
+// the skill runs: none is prose a session loads, so none is a member of it.
+const EXCLUSIONS = ['test/size-budget.json', 'test/gate-lanes.json',
+    'plugins/grimoire/skills/consult-gemini/consult.sh', 'plugins/grimoire/skills/consult-gemini/gate.js'];
 
 // Where the caps live, relative to the repository root. The budget sits beside
 // the test that reads it rather than beside this script, because it is the
